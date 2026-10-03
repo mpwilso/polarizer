@@ -62,7 +62,7 @@ grep -n 'notifications/cancelled\|stopped after cancel' /tmp/polarizer-probe.log
 tail -n 2 ~/.local/share/polarizer/ledger.jsonl
 ```
 
-Expect a `notifications/cancelled` line within about 2 seconds of the Esc, then `call <id> stopped after cancel`, and a last ledger entry `call.returned` with `"outcome":"cancelled"`. This is still unverified: Claude Code may send no cancel for Esc. Paste both outputs whatever they show, and roughly when you pressed Esc.
+Expect a `notifications/cancelled` line, then `call <id> stopped after cancel` with the same timestamp, and a ledger entry `call.returned` with `"outcome":"cancelled"`. The owner observed exactly this on Oct 3, 2026, with Claude Code 2.1.288 (docs/verified-facts.md, Interactive). Closing the session without pressing Esc during a call is still unverified. Paste both outputs if they differ, and roughly when you pressed Esc.
 
 ## 6. A hung upstream (optional)
 

@@ -437,12 +437,65 @@ Run with `POLARIZER_REFERENCE=1 uv run --locked pytest tests/test_reference.py`,
 - **Cost:** 0.0239 USD, from Claude Code's own `total_cost_usd`.
 - **Bookkeeping:** `~/.claude.json` went from 91,166 bytes (mtime 03:25:28Z, Oct 3 UTC) to 88,917 bytes (03:41:57Z) during the run. The run's working directory was a new temp directory.
 
+## Interactive (Oct 3, 2026)
+
+### Esc during a long call (interactive, Claude Code 2.1.288)
+
+Verified by the owner in an interactive session, following docs/MANUAL-CHECK.md step 5. Claude Code 2.1.288 negotiated 2026-07-28 with Polarizer; the probe was the upstream, at 2025-11-25. Claude called `probe__wait` with 30 s, and the owner pressed Esc during the call. No wiretap was in place, so nothing recorded what Claude Code itself sent to Polarizer.
+
+Probe log (`/tmp/polarizer-probe.log`), Unix seconds:
+
+    1791036268.181 {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"wait","arguments":{"seconds":30},...}}
+    1791036274.792 {"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":5,"reason":"caller cancelled"}}
+    1791036274.792 call 5 stopped after cancel
+
+Ledger (`~/.local/share/polarizer/ledger.jsonl`), abridged:
+
+    seq 21 call.sent      ts 2026-10-03T14:04:28.180Z  tool probe__wait
+    seq 22 call.returned  ts 2026-10-03T14:04:34.791Z  call_seq 21, outcome cancelled, latency_ms 7730,
+                                                       error "the client cancelled the call", result_bytes 0
+
+Claude Code's own log for the server (`~/.cache/claude-cli-nodejs/-home-matt-code-polarizer/mcp-logs-polarizer/2026-10-03T14-03-26-955Z.jsonl`), abridged:
+
+    14:04:28.160Z  Calling MCP tool: probe__wait
+    14:04:34.791Z  Sending SIGINT to MCP server process
+    14:04:34.793Z  subscriptions/listen stream dropped (remote); attempting to re-listen
+    14:04:34.891Z  SIGINT failed, sending SIGTERM to MCP server process
+    14:04:34.903Z  Tool 'probe__wait' failed after 6s: Connection closed
+    14:04:34.942Z  MCP server process exited cleanly
+
+- **Esc stopped the call:** Polarizer sent its own `notifications/cancelled` upstream, the probe stopped, and the ledger recorded `call.returned` with outcome `cancelled`. The cancel reached the probe 6.611 s after the call did, by the probe's wall clock. `latency_ms` is 7730, 1.1 s more than the gap between the two `ts` values; that difference is not explained here.
+- **How Claude Code stopped it is not settled.** Claude Code logged a SIGINT to the Polarizer process in the same millisecond as `call.returned`. Polarizer's source has no signal handler. Whether Claude Code also sent `notifications/cancelled` to Polarizer is not visible in these logs, because no wiretap was running. The text `caller cancelled` is what Polarizer's own upstream client sends, whatever the reason for the cancellation.
+
+### After the Esc: Polarizer restarted (unresolved)
+
+In order, from the three logs, between the cancel and the next ledger entry (seq 23):
+
+| Time (UTC) | Log | Line |
+|---|---|---|
+| 14:04:34.791 | ledger | seq 22 `call.returned`, outcome `cancelled` |
+| 14:04:34.791 | Claude Code | SIGINT to the Polarizer process |
+| 14:04:34.792 | probe | `notifications/cancelled`, then `call 5 stopped after cancel` |
+| 14:04:34.891 | Claude Code | SIGINT failed, sending SIGTERM |
+| 14:04:34.894 | probe | end of input |
+| 14:04:34.903 | Claude Code | the tool failed after 6 s: Connection closed |
+| 14:04:34.942 | Claude Code | the server process exited cleanly |
+| 14:04:46.954 | Claude Code | new log file: starting a connection |
+| 14:04:47.380 | ledger | seq 23 `session.started` (a new Polarizer session) |
+| 14:04:47.393 | probe | a new probe process starts |
+
+- **The ledger** has no entry between seq 22 and seq 23. Polarizer writes no session-end entry, so none was expected.
+- **Polarizer's stderr:** Claude Code's log records stderr only once, at connect (14:03:27.865Z: the probe and Filesystem startup lines). Nothing from Polarizer's stderr was logged after the signals.
+- **This session's transcript** shows the call as interrupted: "the session ended before this call's result was recorded".
+- **Unresolved:** whether Esc itself makes Claude Code signal the server process, or the session was ended by hand, and what started the new connection 12 s later. The owner will say whether they quit `claude`.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
 
-- **Interactive sessions:** every Claude Code fact above is headless. Not tested interactively:
-  - Esc to cancel (does it send `notifications/cancelled`?);
+- **Interactive sessions:** apart from Esc to cancel (see Interactive), every Claude Code fact above is headless. Not tested interactively:
+  - closing a session without pressing Esc while a call is in flight (does Claude Code send `notifications/cancelled`, or only close stdin?);
+  - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap);
   - `/mcp` display of prefixed names and any shortening of long names;
   - whether interactive sessions open `subscriptions/listen` the same way;
   - elicitation forms.

@@ -79,7 +79,7 @@ The stage 2 proxy tests (guess 2), 20 times in a row on an idle machine, then 20
 ## Not run
 
 - **CI,** and therefore Windows and macOS, for everything stage 3 added or changed. Only Linux (WSL2, Python 3.12.3) ran it.
-- **An interactive Claude Code session.** docs/MANUAL-CHECK.md is for the owner. Esc to cancel, `/mcp` names and the hung upstream under Claude Code are still unverified.
+- **An interactive Claude Code session.** docs/MANUAL-CHECK.md is for the owner. `/mcp` names, the hung upstream under Claude Code, and closing a session without pressing Esc during a call are still unverified. Esc to cancel was verified by the owner afterwards, on Oct 3, 2026 (verified-facts.md, Interactive).
 - **live-check.sh more than once,** and on any platform but Linux. It runs only where bash and `.venv/bin/python` exist.
 - **The reference tests on Windows or macOS,** and in CI, by design.
 
@@ -112,5 +112,6 @@ While dry-running the live-check plumbing, one command began with `rm -rf "$S/dr
 | live-check's decision, on made-up logs, and its config files | `pytest tests/test_live_check.py` | yes |
 | End to end with Claude Code: Claude Code's timeout cancel reaches the upstream within 2 s, and the ledger records `cancelled` | `scripts/live-check.sh` | yes, once: passed, 1 ms, 0.0239 USD (verified-facts.md, Stage 3) |
 | The example configs parse with Polarizer's own config reader | `polarizer verify --config <the example with /home/<you> replaced>` | yes: `no ledger at ...`, exit 2, no config error |
-| Esc, `/mcp` names and a hung upstream in an interactive session | docs/MANUAL-CHECK.md | no; for the owner |
+| Esc during a call in an interactive session: the call stops, the probe gets a cancel, and the ledger records `cancelled` | docs/MANUAL-CHECK.md, step 5 | yes, once, by the owner, Oct 3, 2026: Claude Code 2.1.288 (verified-facts.md, Interactive) |
+| `/mcp` names, a hung upstream, and closing a session during a call, in an interactive session | docs/MANUAL-CHECK.md | no; for the owner |
 | All of the above on Windows and macOS | CI | no |

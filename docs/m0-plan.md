@@ -171,7 +171,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3, head <64 hex> at seq 30
    ```
 3. **Names.** In `/mcp`, the tools appear with prefixes. Note whether any long name is shortened.
-4. **Cancel.** Press Esc during a 30 s `wait` call, and check whether the probe log shows `notifications/cancelled`. This is interactive and still unverified.
+4. **Cancel.** Press Esc during a 30 s `wait` call, and check whether the probe log shows `notifications/cancelled`. Verified interactively on Oct 3, 2026, with Claude Code 2.1.288: the cancel reached the probe and the ledger recorded `cancelled` (verified-facts.md, Interactive). Closing a session without pressing Esc during a call is still unverified.
 5. **A hung upstream.** Set an upstream's command to something that never answers. Claude Code should still start Polarizer, with the other upstream's tools, within about 10 s.
 6. **Optional:** run the benchmark once on native Windows Python.
 7. **Guard.** Run `scripts/guard.sh check`. Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file whenever it runs.
