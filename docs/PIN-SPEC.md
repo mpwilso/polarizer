@@ -52,6 +52,8 @@ The same step also drops a null at the top level of `inputSchema` or `outputSche
 
 **What this does to what the model sees.** Nothing changes for a 2026-07-28 client, which never got `execution`. An older-era client no longer gets `execution` through Polarizer, because the stored copy has none (section 5). Polarizer doesn't proxy tasks in any era, so `execution` advertised a capability Polarizer can't honor. PROXY-SPEC.md, Results item 4, is updated to say so.
 
+**"Only the names change" no longer holds literally.** M0 promised that a tool reaches the client as the upstream defined it, apart from the prefix on its name and the SDK changes listed in PROXY-SPEC.md, Results. From M1a, no client in any era is served `execution`, and none is served a tool's `_meta` (section 5). Polarizer's own code makes this change, not the SDK. It is a stated limit of M1a, listed with the others in PROXY-SPEC.md, Results. Under `--no-pins`, definitions are served as M0 serves them.
+
 ### Edge cases, pinned by tests
 
 - **Unknown fields** at the `Tool` level, and inside `annotations`, `icons` and `execution`, are dropped by the SDK's parse (`extra="ignore"` in the per-era models, the pydantic default in `Tool`), so they are in neither the hash nor the stored copy. Inside `inputSchema` and `outputSchema`, which are free-form JSON Schema, every key is kept, served and hashed. An unknown keyword there changes the hash.
@@ -140,6 +142,19 @@ Pin state is a fold over the verified chain, in seq order, keyed by (upstream, t
 
 **Changed is sticky.** Once a drift follows an approval, the tool stays hidden even if the upstream returns to the approved definition. It comes back only after a new decision: approving the new hash, or approving H again. A definition that changes and changes back is itself what a rug pull looks like, and the stickiness also stops a server that flips its definitions from making Polarizer flip its list (section 6). Open question 5.
 
+**What stickiness costs.** A change followed by a revert makes the person approve again a definition they have already approved, byte for byte.
+- Until they do, the tool is hidden, and the agent's calls to it fail with `its definition changed after approval`.
+- A changed definition can't be group-approved (section 7). After a server upgrade that is rolled back, each affected tool is approved one at a time.
+- Approving text already read, again and again, is the habit that wears down attention, which is what Polarizer exists to measure.
+- In M1a the only sign of a revert is that `pending` prints the same hash twice: `changed <prefix>__<tool> H, approved H`.
+
+**What M3's card must show** when it asks for a decision on a changed definition:
+- whether the live definition is identical to one approved before (the same hash), and if so, the seq and time of that approval;
+- every `tool.drift` since that approval, with its hashes and time, so that A, then B, then A again reads as a revert, with the number of changes, not as new text;
+- what differs from the approved copy, which is nothing for a revert.
+
+The card never approves a revert by itself. An undone rug pull looks exactly like a revert, so the decision stays the person's.
+
 **The latest decision wins.** A rejection of any hash for a tool replaces an earlier approval. So rejecting a changed definition B also removes the pin on the earlier A, and if the upstream goes back to A, A is pending again. Open question 6.
 
 ### Startup fails closed
@@ -195,13 +210,23 @@ A tool the upstream no longer lists becomes "not listed". Then the exposed list 
 
 A failure is a timeout, an error, a listing limit, a list the SDK can't parse (including snake_case `input_schema`), or a lost connection. It is never read as "unchanged". Every tool of that upstream is hidden (state "list unknown"), `upstream.refresh_failed` is recorded on the first failure of a run, and the M0 stderr line is written. The next successful refresh restores each tool to whatever its state then is, which may be changed. M0 kept the last good list (STAGE2-NOTES.md, guess 2); M1a doesn't, for pins.
 
+**Coming back needs no new approval.** A failed refresh is not a decision and records no `tool.drift`, so it never makes a tool changed. When a later refresh succeeds, a tool whose live hash is still its approved hash is exposed again at once, with no new approval. A tool whose hash now differs is changed, with `tool.drift` recorded, as after any refresh.
+
+**If no refresh succeeds:**
+- The upstream's tools stay hidden for the rest of the process, and every call to one is refused with `its server's tool list could not be checked`.
+- Only the first failure of the run is recorded. Each later failure writes only its stderr line.
+- M1a has no timer that retries. Another refresh happens only at the next client `tools/list` or upstream change notice. In the headless runs, Claude Code listed only at connect and after a change notice (verified-facts.md), so a recovered upstream can stay hidden until restart. Open question 14.
+- A lost connection can't succeed again within the process, because M0 never reconnects an upstream.
+
+In every case, the tools come back when a new Polarizer process starts and lists the upstream successfully. Reconnecting the server in `/mcp` does that (section 8).
+
 ### When a tool hides and comes back
 
 A tool hides as soon as a trigger puts it in any state but approved. It comes back:
 - **pending or rejected:** when a person approves the live hash;
 - **changed:** when a person approves the live hash, or approves the old hash again while it is live;
 - **unservable:** when its stored copy passes again;
-- **list unknown:** after the next successful refresh, if it is then approved.
+- **list unknown:** after the next successful refresh, with no new decision, if its live hash is then still the approved one.
 
 ### Telling the client
 
@@ -293,7 +318,11 @@ A group is bound to exactly the definitions `pending` printed. Any change betwee
 
 ### `serve --no-pins`
 
-The documented switch for running without pins, off by default. With it, `serve` exposes every listed tool with its live definition and refuses only what M0 refuses, exactly as M0 does. It still hashes, stores copies, and records `tool.seen`, `tool.drift`, `tool.unservable` and `upstream.refresh_failed`, so `pending` works afterwards. `session.started` records `pins: "off"`, and stderr gets `polarizer: warning: --no-pins: every listed tool is exposed without approval` at startup.
+The documented switch for running without pins, off by default. With it, `serve` exposes every listed tool with its live definition and refuses only what M0 refuses, exactly as M0 does. It still hashes, stores copies, and records `tool.seen`, `tool.drift`, `tool.unservable` and `upstream.refresh_failed`, so `pending` works afterwards.
+
+Every start under the flag is visible in two places:
+- **stderr:** each time `serve` starts with `--no-pins`, it writes `polarizer: warning: --no-pins: every listed tool is exposed without approval` before connecting any upstream. Every start, not only the first.
+- **the ledger:** every `serve` process writes its own `session.started`, and under the flag its `pins` is `"off"` (`"on"` otherwise). That is the field section 3 adds; no other field or kind is needed.
 
 It exists only as a command-line flag, never as a `polarizer.toml` key, so a config file can't turn pins off quietly. That follows the idea credited to mcpclerk for M3's approve-everything switch. Open question 4 asks whether to keep it at all.
 
@@ -352,7 +381,9 @@ When a decision changes the exposed list, the notice in section 6 goes out:
 | `send_tool_list_changed()` to an older-era session | Verified SDK to SDK only (`tests/test_eras.py::test_eras`). Never seen with Claude Code, which negotiates 2026-07-28 with Polarizer. |
 | Claude Code's `subscriptions/listen` stream after Polarizer restarts | After Esc, Claude Code logged `subscriptions/listen stream dropped (remote); attempting to re-listen` (verified-facts.md, Interactive). Whether a new process's notices reach it is not verified. |
 
-If Claude Code doesn't re-list, the decision still holds. The person sees the tools after reconnecting the server in `/mcp`, and a hidden tool is refused whatever Claude Code thinks it has.
+**Re-listing is unverified where approvals happen.** Claude Code re-listed after a change notice in headless runs. Whether it does in an interactive session, where a person approves, is not verified (open question 9). So the documented step after approving, if `/mcp` doesn't show the tool, is to restart the server by reconnecting it in `/mcp`. The new process rebuilds pin state from the ledger and exposes the approved tool from its first listing. Esc during a Polarizer call also ends the process (Shutdown and restart, below). In the one interactive check, Claude Code started a new process about 12 s later, but what started it is not known, so the documented fallback is the `/mcp` reconnect.
+
+If Claude Code doesn't re-list, the decision still holds, and a hidden tool is refused whatever Claude Code thinks it has.
 
 ### Shutdown and restart
 
@@ -536,6 +567,7 @@ M1a stays **medium**, as milestones.md says: about one to two weeks, split into 
 11. **`actor: "person"`.** Is a fixed value right, or should it record the operating-system user name?
 12. **SDK upgrades.** A form change means a new prefix and approving every tool again. Is a migration command (re-approve when the old and new forms of a stored copy agree on every served field) wanted before the first SDK upgrade, or is re-approval fine?
 13. **An agent approving itself.** An agent with a shell can run `polarizer approve`. A cheap speed bump: refuse `approve` when stdin isn't a terminal, with a flag for scripts. An agent can pass the flag too, so it only stops accidents. Worth adding in M1a, or leave it to M3's approval page?
+14. **Retrying a failed upstream.** After a failed refresh, M1a waits for the next client `tools/list` or upstream notice, which may never come, so a briefly slow upstream can stay hidden until the server restarts (section 6). A retry on a timer while the list is unknown, each bounded by `connect_timeout_seconds`, would bring it back without a restart. It can't help a lost connection, which M0 never reconnects. Add the timer in stage 5, or keep restart-only?
 
 ### Deviations from the existing documents, and guesses
 

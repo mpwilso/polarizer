@@ -29,10 +29,10 @@ The first branch pushed to an empty repository becomes its default, so `master` 
 ## 3. Check the Actions tab
 
 1. Open the repository, then **Actions**. A run of the workflow **ci** starts on the push.
-2. It has five jobs: `ubuntu-latest / Python 3.11`, `3.12` and `3.13`, `windows-latest / Python 3.12` and `macos-latest / Python 3.12`. Every job should end with a green check.
+2. It has five jobs: `ubuntu-24.04 / Python 3.11`, `ubuntu-24.04 / Python 3.12`, `ubuntu-24.04 / Python 3.13`, `windows-latest / Python 3.12` and `macos-latest / Python 3.12`. Every job should end with a green check.
 3. In each job, open these steps:
-   - **Test**: the last line should read `N passed, M skipped`. On Windows the `test_windows_replace_while_head_is_held_open` test runs; elsewhere it is skipped. The line starting `differential: seed` shows the fuzz seed and case count.
-   - **Append benchmark**: two lines, `write only` and `write + fsync`, with p50 and p95. These numbers go into docs/verified-facts.md, so paste them back even when everything passes.
+   - **Test (ruff and pytest, as scripts/test.sh runs them locally)**: the last line should read `N passed, M skipped`. On Windows the `test_windows_replace_while_head_is_held_open` test runs; elsewhere it is skipped. The line starting `differential: seed` shows the fuzz seed and case count.
+   - **Append benchmark (printed, never asserted)**: two lines, `write only` and `write + fsync`, with p50 and p95. These numbers go into docs/verified-facts.md, so paste them back even when everything passes.
 4. Private repositories spend Actions minutes, and Windows and macOS minutes count at a higher rate than Linux.
 
 ## 4. What to paste back
@@ -41,7 +41,7 @@ The first branch pushed to an empty repository becomes its default, so `master` 
 
 **If a job fails,** paste for each failing job:
 - the job name, for example `windows-latest / Python 3.12`;
-- the name of the failing step (`Install`, `Test` or `Append benchmark`);
+- the name of the failing step (`Install`, `Test (ruff and pytest, as scripts/test.sh runs them locally)` or `Append benchmark (printed, never asserted)`);
 - that step's log from the first error to the end. For pytest, that is each failure's traceback and the `short test summary info` block. Include the `differential: seed` line if `test_differential.py` failed;
 - for a failure in `Install`, the whole step log.
 

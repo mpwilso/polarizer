@@ -509,6 +509,30 @@ Checked for docs/PIN-SPEC.md on mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5, any
 - **Definition hashes** under PIN-SPEC.md's form (executed): the probe's `wait` definition hashes to `ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b`. With `"description": "How long."` added to its `seconds` property, it hashes to `3462be54bba570aacd2a87ea2bb68c6806a68abac4761e0d848d1b6deb8a11b5`. The `legacy` and `auto` listings above gave one hash. Adding `execution`, a null `title`, a null top-level schema key or an unknown top-level field, or reordering keys, left the hash unchanged.
 - **anyio and SIGINT** (`anyio/_backends/_asyncio.py`, around lines 114 to 228, read): on Python 3.11 and later, `anyio.run` uses `asyncio.Runner`, which installs a SIGINT handler that cancels the main task when SIGINT still has Python's default handler. SIGTERM keeps the operating system's default, which ends the process at once.
 
+## Definition hashes on real definitions (Oct 3, 2026)
+
+A throwaway script in the session scratch directory, outside the repo, implemented PIN-SPEC.md section 2 exactly: `model_dump(by_alias=True, mode="json", exclude_none=True)`, `mcp_types.methods.serialize_server_result("tools/list", "2026-07-28", ...)` with the three envelope values, `rfc8785.dumps`, and sha256 over `POLARIZER-TOOLDEF/1\n` plus the canonical bytes. It ran on `.venv` (mcp 2.2.0, mcp-types 2.2.0, rfc8785 0.1.4), with `POLARIZER_REFERENCE=1` set for that run only. No Claude Code, no model.
+
+**Servers:** Everything and Filesystem at 2026.8.31, run with the npx commands under Pinned fetches (Filesystem confined to a scratch directory), and the repo's probe (`tests/helpers/probe_server.py`). Nothing else was run.
+
+**Captures:** each server through an SDK `Client` with `cache_mode="refresh"`, following `next_cursor`, in four ways:
+
+| Capture | Negotiated | Parsed `Tool`s with `execution` |
+|---|---|---|
+| direct, `mode="auto"` | 2025-11-25 | Everything 13 of 13, Filesystem 14 of 14, probe 0 of 6 |
+| direct, `mode="legacy"` | 2025-11-25 | the same |
+| through `polarizer serve` (M0), `mode="auto"` | 2026-07-28 | none |
+| through `polarizer serve` (M0), `mode="legacy"` | 2025-11-25 | the same as direct |
+
+None of the three servers speaks 2026-07-28: in `auto` mode the SDK client fell back to 2025-11-25 with each. The only 2026-07-28 wire was therefore the client side of `polarizer serve`, whose ledger was a scratch directory. The prefix was removed from those names before hashing.
+
+**Results:**
+- **Definitions:** 33 tools (Everything 13, Filesystem 14, probe 6), captured 4 times each, 132 definitions.
+- **Hashed:** 132 of 132. None failed at step 3 (the 2026-07-28 model) or step 4 (RFC 8785). No large integer, non-finite float or lone surrogate appeared.
+- **Equal across eras:** all 33 tools gave one hash in all four captures, with and without `execution` on the parsed `Tool`.
+- **The probe's `wait`** hashed to `ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b` in every capture, the value in PIN-SPEC.md section 10.
+- **What the definitions hold:** the served forms use only `name`, `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. They have no `_meta`, no floats and no non-ASCII text. They hold 7 integers, the largest 10 (`trigger-long-running-operation`'s `duration` default and `get-resource-links`' `count` maximum). So open question 1 (large integers) affects none of these 27 reference tools.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -531,5 +555,6 @@ These are assumed or open. Nothing here has been observed.
 - **Older-era list changes toward a client:** `send_tool_list_changed` toward an older-era client, with Claude Code, which always negotiates 2026-07-28 with an SDK 2.2 server. Stage 2 ran it toward an SDK client only (`tests/test_eras.py::test_eras`).
 - **Append costs:** native Windows, macOS, and WSL on the Windows filesystem (the CI benchmark will measure the first two).
 - **Windows `ledger.head`:** the `os.replace` failure when the file is held open is expected from Windows semantics, not observed.
+- **A third-party upstream on 2026-07-28:** Everything, Filesystem and the probe all answer at 2025-11-25 (Definition hashes on real definitions). The definition hash of a tool from a 2026-07-28 upstream has been checked only with SDK servers written for the tests (M1a spec round), never with a real one.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.
 - **Windows and macOS behavior of the stage 1 code:** the lock, `os.replace` retry, binary-mode file access and the read-only verify test are written for both, but have only run on Linux. The Windows test that holds `ledger.head` open runs only on the Windows CI runner.

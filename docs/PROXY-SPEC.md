@@ -115,17 +115,17 @@ Everything below happens before the proxy answers Claude Code's first message. C
 
 **Exposed names.** Each upstream tool is exposed as `<prefix>__<tool>`. A tool whose exposed name would not match `^[A-Za-z0-9._-]{1,128}$` is left out, and its name is recorded in `upstream.connected` under `skipped_tools`.
 
-**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, without `_meta` (PIN-SPEC.md, sections 4 and 5). `serve --no-pins` lists the live definitions as M0 does.
+**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, without `_meta` (PIN-SPEC.md, sections 4 and 5). `serve --no-pins` lists the live definitions as M0 does. On every start under that flag, `serve` writes a warning line to stderr and records `pins: "off"` in its `session.started` (PIN-SPEC.md, section 7).
 
 **Paging.** `tools/list` follows `next_cursor` for up to 100 pages and 1,000 tools per upstream. Past either limit, that upstream is refused for the session, with the error `more than 100 pages` or `more than 1000 tools` recorded.
 
-**Freshness.** Every `tools/list` from Claude Code lists each connected upstream again with `cache_mode="refresh"`, so a missed change notice costs nothing. Polarizer sets no cache hints of its own. (M1a) A failed refresh hides that upstream's tools and records `upstream.refresh_failed`, instead of keeping its last list.
+**Freshness.** Every `tools/list` from Claude Code lists each connected upstream again with `cache_mode="refresh"`, so a missed change notice costs nothing. Polarizer sets no cache hints of its own. (M1a) A failed refresh hides that upstream's tools and records `upstream.refresh_failed`, instead of keeping its last list. When a later refresh succeeds, a tool whose hash is still the approved one comes back with no new approval. If none succeeds, the tools stay hidden until the server restarts (PIN-SPEC.md, section 6).
 
 **Change notices.**
 - **From 2026-07-28 upstreams:** Polarizer holds `client.listen(tools_list_changed=True)` open and republishes each event as `ToolsListChanged()` on its own `subscriptions/listen` bus.
 - **From older-era upstreams:** it receives `notifications/tools/list_changed` through the `Client`'s `message_handler` and republishes the same way. This path is unverified.
 - **To older-era clients:** the server is created with `NotificationOptions(tools_changed=True)`.
-- **(M1a)** An upstream's notice no longer passes straight through. It triggers a refresh of that upstream, and the client is told only when the list Polarizer exposes changes, at most once per second. A decision made by `polarizer approve` or `reject` in another process is noticed the same way (PIN-SPEC.md, sections 6 and 8).
+- **(M1a)** An upstream's notice no longer passes straight through. It triggers a refresh of that upstream, and the client is told only when the list Polarizer exposes changes, at most once per second. A decision made by `polarizer approve` or `reject` in another process is noticed the same way (PIN-SPEC.md, sections 6 and 8). Whether interactive Claude Code re-lists on that notice is unverified (it did headless), so after approving, the documented fallback is to reconnect the server in `/mcp` (PIN-SPEC.md, section 8).
 
 ## Calls
 
@@ -181,6 +181,8 @@ Polarizer hands the client the result object the SDK's upstream client parsed, u
 3. **`isError: false` is added** when an upstream leaves `isError` out. The protocol reads an absent `isError` as false.
 4. **No `execution` in 2026-07-28 tool definitions.** A tool's `execution` (task support) exists only in 2025-11-25, so a 2026-07-28 client never sees it. Polarizer doesn't proxy tasks in any era. (M1a) No client sees it: tools are served from stored copies in the 2026-07-28 form (PIN-SPEC.md, section 2).
 5. **A result the SDK can't parse becomes an error**, recorded as `transport-error` with a fixed line (Calls, Notes on the outcomes).
+
+**(M1a) "Only the names change" no longer holds literally for tool definitions.** Tools are served from stored copies in the 2026-07-28 form, so no client in any era gets `execution`, and none gets a tool's `_meta` (PIN-SPEC.md, sections 2 and 5). Polarizer's own code makes this change, not the SDK, and it is a stated limit of M1a, like the five above. Results are not affected. `serve --no-pins` serves definitions as M0 does.
 
 Everything else arrives as the upstream sent it, at every level: text, image, audio, embedded resources, resource links, annotations, `_meta`, `structuredContent` (floats included) and `isError`.
 
