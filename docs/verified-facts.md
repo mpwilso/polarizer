@@ -464,7 +464,7 @@ Claude Code's own log for the server (`~/.cache/claude-cli-nodejs/-home-matt-cod
     14:04:34.903Z  Tool 'probe__wait' failed after 6s: Connection closed
     14:04:34.942Z  MCP server process exited cleanly
 
-- **Esc stopped the call:** Polarizer sent its own `notifications/cancelled` upstream, the probe stopped, and the ledger recorded `call.returned` with outcome `cancelled`. The cancel reached the probe 6.611 s after the call did, by the probe's wall clock. `latency_ms` is 7730, 1.1 s more than the gap between the two `ts` values; that difference is not explained here.
+- **Esc stopped the call:** Polarizer sent its own `notifications/cancelled` upstream, the probe stopped, and the ledger recorded `call.returned` with outcome `cancelled`. The cancel reached the probe 6.611 s after the call did, by the probe's wall clock. `latency_ms` 7730 is on the monotonic clock; see "Wall clock and monotonic clock on WSL2" below for the 1.1 s difference.
 - **How Claude Code stopped it is not settled.** Claude Code logged a SIGINT to the Polarizer process in the same millisecond as `call.returned`. Polarizer's source has no signal handler. Whether Claude Code also sent `notifications/cancelled` to Polarizer is not visible in these logs, because no wiretap was running. The text `caller cancelled` is what Polarizer's own upstream client sends, whatever the reason for the cancellation.
 
 ### After the Esc: Polarizer restarted (unresolved)
@@ -488,6 +488,14 @@ In order, from the three logs, between the cancel and the next ledger entry (seq
 - **Polarizer's stderr:** Claude Code's log records stderr only once, at connect (14:03:27.865Z: the probe and Filesystem startup lines). Nothing from Polarizer's stderr was logged after the signals.
 - **This session's transcript** shows the call as interrupted: "the session ended before this call's result was recorded".
 - **Unresolved:** whether Esc itself makes Claude Code signal the server process, or the session was ended by hand, and what started the new connection 12 s later. The owner will say whether they quit `claude`.
+
+### Wall clock and monotonic clock on WSL2
+
+A throwaway script sampled `time.time()` and `time.monotonic()` once a second for 30 s, three times in a row, on this machine (WSL2, kernel 6.18.33.2). Each run saw exactly one backward step of the wall clock against the monotonic clock: 1112, 1103 and 1108 ms. Between steps, the two agreed to within 0.01 ms.
+
+- **The ledger's own calls** (`~/.local/share/polarizer/ledger.jsonl` against `/tmp/polarizer-probe.log`): `call.sent` `ts` was 1 to 6 ms before the probe received each call. For the four probe calls, `latency_ms` minus the gap between `call.returned` and `call.sent` `ts` was -1 ms (2 s call), +1063 ms (30 s), +1119 ms (30 s, cancelled) and +1125 ms (30 s). In the two completed 30 s calls, the probe's own monotonic span (30116 and 30168 ms) matched `latency_ms`, while its own wall clock showed 29047 and 29042 ms: the same gap in a separate process.
+- **Through the test rig** (in-memory SDK client, `polarizer` Gateway, the stdio probe; no model, no Claude Code), three 5 s calls with wall and monotonic times taken at the `call.sent` timestamp, the forward, the upstream's return and the `call.returned` timestamp: no step happened, the two clocks agreed throughout, and the `ts` gaps (5041, 5060, 5017 ms) matched `latency_ms` (5040, 5059, 5017).
+- **So:** `ts` is the wall clock and `latency_ms` is monotonic. On this machine they can disagree by about 1.1 s whenever a step falls inside a call; the code measures each one as specified.
 
 ## Unverified
 

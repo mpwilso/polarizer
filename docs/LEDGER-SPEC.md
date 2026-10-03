@@ -22,6 +22,8 @@ Any other top-level key makes the entry invalid. The key `sig` is reserved for a
 
 Verify does not require `ts` to be in order, because clocks move. The chain does not prove when anything happened.
 
+`ts` is the wall clock when the entry is made. `latency_ms` on `call.returned` is measured on a monotonic clock (PROXY-SPEC.md). The two are not comparable: on WSL2 the wall clock was seen stepping back about 1.1 s during a 30 s run, so the gap between a call's two `ts` values can differ from its `latency_ms` by that much (verified-facts.md, Wall clock and monotonic clock on WSL2).
+
 ### Canonical bytes and the subset
 
 Canonical bytes are RFC 8785 (JSON Canonicalization Scheme). Every value in an entry must be inside this subset:
