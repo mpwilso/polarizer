@@ -1,0 +1,1 @@
+not canonical: line 5 (seq 4): stored bytes are not the canonical form

@@ -1,0 +1,346 @@
+{
+ "about": "Expected verify result for each fixture. line and seq are null where they don't apply (head problems have no line; v0 has no seq). check names the failing check. head says whether <name>.head exists. Written by tools/make_fixtures.py.",
+ "fixtures": {
+  "broken/bad_chain_id": {
+   "check": "structure",
+   "head": false,
+   "line": 1,
+   "seq": 0,
+   "status": "invalid"
+  },
+  "broken/bad_genesis_prev": {
+   "check": "prev",
+   "head": false,
+   "line": 1,
+   "seq": 0,
+   "status": "tampered"
+  },
+  "broken/bad_hash": {
+   "check": "hash",
+   "head": false,
+   "line": 3,
+   "seq": 2,
+   "status": "tampered"
+  },
+  "broken/bad_prev": {
+   "check": "prev",
+   "head": false,
+   "line": 9,
+   "seq": 8,
+   "status": "tampered"
+  },
+  "broken/bad_seq": {
+   "check": "seq",
+   "head": false,
+   "line": 6,
+   "seq": 15,
+   "status": "tampered"
+  },
+  "broken/bad_seq_and_bad_hash": {
+   "check": "seq",
+   "head": false,
+   "line": 7,
+   "seq": 16,
+   "status": "tampered"
+  },
+  "broken/bad_utf8": {
+   "check": "structure",
+   "head": false,
+   "line": 5,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/big_integer": {
+   "check": "structure",
+   "head": false,
+   "line": 7,
+   "seq": 6,
+   "status": "invalid"
+  },
+  "broken/delete_first_line": {
+   "check": "structure",
+   "head": false,
+   "line": 1,
+   "seq": 1,
+   "status": "invalid"
+  },
+  "broken/delete_middle_line": {
+   "check": "seq",
+   "head": false,
+   "line": 5,
+   "seq": 5,
+   "status": "tampered"
+  },
+  "broken/edit_v0_entry": {
+   "check": "hash",
+   "head": false,
+   "line": 2,
+   "seq": null,
+   "status": "tampered"
+  },
+  "broken/edit_value": {
+   "check": "hash",
+   "head": false,
+   "line": 7,
+   "seq": 6,
+   "status": "tampered"
+  },
+  "broken/extra_key_and_bad_hash": {
+   "check": "structure",
+   "head": false,
+   "line": 7,
+   "seq": 6,
+   "status": "invalid"
+  },
+  "broken/extra_top_level_key": {
+   "check": "structure",
+   "head": false,
+   "line": 3,
+   "seq": 2,
+   "status": "invalid"
+  },
+  "broken/garbage_line": {
+   "check": "structure",
+   "head": false,
+   "line": 5,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/head_extra_key": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/head_hash_mismatch": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 10,
+   "status": "tampered"
+  },
+  "broken/head_no_newline": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/head_not_canonical": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/head_wrong_chain": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 10,
+   "status": "invalid"
+  },
+  "broken/insert_float": {
+   "check": "structure",
+   "head": false,
+   "line": 7,
+   "seq": 6,
+   "status": "invalid"
+  },
+  "broken/lone_surrogate": {
+   "check": "structure",
+   "head": false,
+   "line": 10,
+   "seq": 9,
+   "status": "invalid"
+  },
+  "broken/missing_key": {
+   "check": "structure",
+   "head": false,
+   "line": 3,
+   "seq": 2,
+   "status": "invalid"
+  },
+  "broken/mix_v0_v1": {
+   "check": "structure",
+   "head": false,
+   "line": 4,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/non_ascii_key": {
+   "check": "structure",
+   "head": false,
+   "line": 10,
+   "seq": 9,
+   "status": "invalid"
+  },
+  "broken/not_object": {
+   "check": "structure",
+   "head": false,
+   "line": 5,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/oversize_line": {
+   "check": "structure",
+   "head": false,
+   "line": 4,
+   "seq": 3,
+   "status": "invalid"
+  },
+  "broken/reorder_keys": {
+   "check": "canonical",
+   "head": false,
+   "line": 5,
+   "seq": 4,
+   "status": "not canonical"
+  },
+  "broken/second_genesis": {
+   "check": "structure",
+   "head": false,
+   "line": 14,
+   "seq": 13,
+   "status": "invalid"
+  },
+  "broken/swap_lines": {
+   "check": "seq",
+   "head": false,
+   "line": 4,
+   "seq": 4,
+   "status": "tampered"
+  },
+  "broken/tampered_line_and_head_mismatch": {
+   "check": "hash",
+   "head": true,
+   "line": 7,
+   "seq": 6,
+   "status": "tampered"
+  },
+  "broken/tear_last_line": {
+   "check": null,
+   "head": true,
+   "line": 12,
+   "seq": 11,
+   "status": "torn tail"
+  },
+  "broken/torn_genesis": {
+   "check": null,
+   "head": false,
+   "line": 0,
+   "seq": null,
+   "status": "torn tail"
+  },
+  "broken/torn_genesis_with_head": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 0,
+   "status": "truncated"
+  },
+  "broken/torn_tail_and_truncated": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 10,
+   "status": "truncated"
+  },
+  "broken/truncated": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 10,
+   "status": "truncated"
+  },
+  "broken/v0_then_v1": {
+   "check": "structure",
+   "head": false,
+   "line": 5,
+   "seq": null,
+   "status": "invalid"
+  },
+  "broken/v0_torn": {
+   "check": null,
+   "head": false,
+   "line": 3,
+   "seq": null,
+   "status": "torn tail"
+  },
+  "broken/v0_unsorted_line": {
+   "check": "canonical",
+   "head": false,
+   "line": 3,
+   "seq": null,
+   "status": "not canonical"
+  },
+  "broken/v0_with_head": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 0,
+   "status": "invalid"
+  },
+  "broken/v_not_1": {
+   "check": "structure",
+   "head": false,
+   "line": 3,
+   "seq": 2,
+   "status": "invalid"
+  },
+  "broken/wrong_type": {
+   "check": "structure",
+   "head": false,
+   "line": 3,
+   "seq": 2,
+   "status": "invalid"
+  },
+  "valid/head_at_last": {
+   "check": null,
+   "head": true,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
+  "valid/minimal": {
+   "check": null,
+   "head": true,
+   "line": 1,
+   "seq": 0,
+   "status": "intact"
+  },
+  "valid/no_head": {
+   "check": null,
+   "head": false,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
+  "valid/session": {
+   "check": null,
+   "head": true,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
+  "valid/unicode": {
+   "check": null,
+   "head": true,
+   "line": 3,
+   "seq": 2,
+   "status": "intact"
+  },
+  "valid/v0-parallax": {
+   "check": null,
+   "head": false,
+   "line": 4,
+   "seq": null,
+   "status": "intact"
+  }
+ },
+ "v0_source": {
+  "commit": "22ef60083b56683ab5abda19bb224309d07fee88",
+  "file": "parallax/ledger.py",
+  "repo": "parallax"
+ }
+}

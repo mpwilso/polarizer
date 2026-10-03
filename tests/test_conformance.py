@@ -1,0 +1,60 @@
+"""Both verifiers agree with expected.json on status, line and seq for every fixture."""
+
+import pytest
+import reference_verify
+from conftest import expected, fixture_paths
+
+from polarizer import ledger
+
+NAMES = sorted(expected()["fixtures"])
+
+
+def want(name):
+    w = expected()["fixtures"][name]
+    return {k: w[k] for k in ("status", "line", "seq", "check")}
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_reference_verifier(name):
+    path, head = fixture_paths(name)
+    assert reference_verify.verify(path, head) == want(name)
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_polarizer_verifier(name):
+    path, head = fixture_paths(name)
+    result = ledger.verify_bytes(path.read_bytes(), head.read_bytes() if head else None)
+    got = {"status": result.status, "line": result.line, "seq": result.seq, "check": result.check}
+    assert got == want(name)
+
+
+def test_every_status_is_pinned():
+    statuses = {expected()["fixtures"][n]["status"] for n in NAMES}
+    assert statuses == {"intact", "tampered", "invalid", "not canonical", "torn tail", "truncated"}
+
+
+def test_order_fixtures_exist():
+    for name in [
+        "broken/extra_key_and_bad_hash",
+        "broken/bad_seq_and_bad_hash",
+        "broken/torn_tail_and_truncated",
+        "broken/tampered_line_and_head_mismatch",
+    ]:
+        assert name in NAMES
+
+
+def test_v0_fixture_source_is_recorded():
+    source = expected()["v0_source"]
+    assert source["file"] == "parallax/ledger.py"
+    assert len(source["commit"]) == 40
+
+
+def test_reference_verifier_is_small_and_standalone():
+    from conftest import CONFORMANCE
+
+    text = (CONFORMANCE / "reference_verify.py").read_text(encoding="utf-8")
+    assert len(text.splitlines()) < 80
+    imports = {
+        line.split()[1] for line in text.splitlines() if line.startswith(("import ", "from "))
+    }
+    assert imports == {"hashlib", "json", "re", "sys", "rfc8785"}

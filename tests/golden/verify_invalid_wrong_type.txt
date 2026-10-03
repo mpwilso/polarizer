@@ -1,0 +1,1 @@
+invalid: line 3 (seq 2): "kind" has the wrong type

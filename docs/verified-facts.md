@@ -136,6 +136,8 @@ Reading and parsing a 10,000-line file, as a whole-file re-read per append does,
 
 Not measured: native Windows (no Windows interop from this shell), macOS, and WSL on the Windows filesystem (`/mnt/c` was not mounted).
 
+**Through the writer** (`scripts/bench_append.py`, one run, 1,000 appends, WSL2, Python 3.12.3): write only p50 84.7 µs and p95 167.3 µs; write + fsync p50 3.6 ms and p95 7.7 ms. Each time covers `append(...).result()`: the hand-off to the writer thread, the lock, the size check, the write and, in the second row, the fsync. One run only; the CI job prints the same numbers per runner.
+
 ## Parallax v0 ledger (read from source, read-only)
 
 `~/code/parallax/parallax/ledger.py`:
@@ -148,6 +150,10 @@ Not measured: native Windows (no Windows interop from this shell), macOS, and WS
 - `verify` skips a final line with no newline.
 
 `parallax/accept.py:112`: the `Ledger-Head:` commit trailer is the full `hash` of the last entry at accept time.
+
+## The v0 fixture (run once, Oct 2, 2026)
+
+`tools/make_v0_fixture.py ~/code/parallax` checked that `22ef600` resolves to `22ef60083b56683ab5abda19bb224309d07fee88`, wrote `git show 22ef600:parallax/ledger.py` and a small driver into a temporary directory, and ran the driver there with `PYTHONDONTWRITEBYTECODE=1` and `python -B`. The extracted file imports only the standard library (`hashlib`, `json`, `sys`, `threading`, `uuid`, `contextlib`, `datetime`, `pathlib`, and `fcntl` or `msvcrt`). Four appends produced `conformance/valid/v0-parallax.jsonl`: floats (0.5, 2.25), non-ASCII text escaped as `\u` sequences, and seconds-precision `+00:00` timestamps. `git status --porcelain` in the Parallax clone was empty afterwards, and the guard reported no change. Parallax's own `verify` skips blank lines; Polarizer's v0 check reports a blank line as `invalid` (not valid JSON).
 
 ## Names (live, Oct 2)
 
@@ -231,6 +237,14 @@ Everything fetched for tests is pinned to an exact version. Commands, run from `
     npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio
 
 `mcp==2.2.0` pulls in `mcp-types==2.2.0` and, unpinned, pydantic (2.13.5 installed), anyio (4.15.1) and opentelemetry-api (1.45.0). M0's `uv.lock` pins those too. The round 1 scratch venv used `pip install mcp==2.2.0` and `pip install rfc8785==0.1.4`.
+
+**Stage 1 (Oct 2, 2026).** `pyproject.toml` declares `mcp>=2.2,<3`, `rfc8785==0.1.4`, and the dev group `pytest==9.1.1` and `ruff==0.16.10`; the build backend is `uv_build==0.12.19`, matching the local uv 0.12.19. Versions were read from PyPI's JSON API before pinning. Commands, run from `~/code/polarizer`:
+
+    uv lock
+    uv lock --upgrade-package mcp==2.2.0 --upgrade-package mcp-types==2.2.0
+    uv sync --locked
+
+The first `uv lock` resolved `mcp>=2.2,<3` to the newest release in range, 2.3.0 (with `mcp-types` 2.3.0), and `uv sync` installed it in `.venv` before this was noticed. Nothing ran against it; stage 1 never imports `mcp`. The second command re-locked both to 2.2.0, the version every SDK fact above was checked against. `uv.lock` now pins, among others: mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5, anyio 4.15.1, opentelemetry-api 1.45.0, rfc8785 0.1.4, pytest 9.1.1 (with pluggy 1.6.0, iniconfig 2.3.0, packaging 26.3, pygments 2.21.0, and colorama 0.4.6 on Windows) and ruff 0.16.10. CI installs with `uv sync --locked`, using uv 0.12.19 from `astral-sh/setup-uv`.
 
 ## Cancellation through the proxy, with timestamps (headless)
 
@@ -381,4 +395,4 @@ These are assumed or open. Nothing here has been observed.
 - **Append costs:** native Windows, macOS, and WSL on the Windows filesystem (the CI benchmark will measure the first two).
 - **Windows `ledger.head`:** the `os.replace` failure when the file is held open is expected from Windows semantics, not observed.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.
-- **The v0 fixture script:** not yet run. Parallax's `ledger.py` at `22ef600` imports only the standard library, read with `git show`.
+- **Windows and macOS behavior of the stage 1 code:** the lock, `os.replace` retry, binary-mode file access and the read-only verify test are written for both, but have only run on Linux. The Windows test that holds `ledger.head` open runs only on the Windows CI runner.

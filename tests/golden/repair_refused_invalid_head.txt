@@ -1,0 +1,1 @@
+refused: ledger is invalid at ledger.head; repair only fixes a torn tail

@@ -1,0 +1,38 @@
+[project]
+name = "polarizer"
+version = "0.1.0.dev0"
+description = "A local proxy between an AI agent and its MCP servers, with a verifiable ledger."
+readme = "CLAUDE.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.2,<3",
+    "rfc8785==0.1.4",
+]
+
+[project.scripts]
+polarizer = "polarizer.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.10",
+]
+
+[build-system]
+requires = ["uv_build==0.12.19"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests keep each exact expected message on one line.
+"tests/*" = ["E501"]

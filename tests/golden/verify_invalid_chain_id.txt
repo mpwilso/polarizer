@@ -1,0 +1,1 @@
+invalid: line 1 (seq 0): genesis chain_id is not 32 lowercase hex

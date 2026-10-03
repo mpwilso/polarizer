@@ -1,0 +1,1 @@
+invalid: line 10 (seq 9): non-ASCII key at /data/caf\u00e9

@@ -1,0 +1,92 @@
+"""Where the ledger may live (docs/LEDGER-SPEC.md, Location and permissions).
+
+serve and repair refuse a ledger_dir inside a protected path, and warn inside any other git
+working tree. Paths are compared as resolved real paths, component by component, never as
+string prefixes. The installed tool never reads .guard-paths; that is scripts/guard.sh's file.
+"""
+
+import os
+import subprocess
+from collections.abc import Iterable
+from pathlib import Path
+
+
+class ProtectedPath(Exception):
+    """ledger_dir is inside a protected path. The message is the one stderr line; exit 2."""
+
+
+def default_ledger_dir() -> Path:
+    return Path.home() / ".local" / "share" / "polarizer"
+
+
+def always_protected() -> list[Path]:
+    """Parallax's runtime and config directories. A config can add to these, never remove."""
+    home = Path.home()
+    return [home / ".local" / "share" / "parallax", home / ".config" / "parallax"]
+
+
+def _parts(path: Path) -> tuple[str, ...]:
+    return tuple(os.path.normcase(part) for part in Path(os.path.realpath(path)).parts)
+
+
+def _nearest_existing(path: Path) -> Path | None:
+    for candidate in [path, *path.parents]:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def is_inside(child: Path, parent: Path) -> bool:
+    """True if child is parent or below it, by resolved real path components. Where both
+    exist, the operating system's own idea of "same directory" also counts, which covers
+    case-insensitive file systems."""
+    child_parts, parent_parts = _parts(child), _parts(parent)
+    if child_parts[: len(parent_parts)] == parent_parts:
+        return True
+    if not parent.exists():
+        return False
+    real_child = Path(os.path.realpath(child))
+    for ancestor in [real_child, *real_child.parents]:
+        try:
+            if ancestor.exists() and os.path.samefile(ancestor, parent):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def check_location(ledger_dir: Path, protected: Iterable[Path]) -> str | None:
+    """Raise ProtectedPath if ledger_dir is inside any protected path. Otherwise return the
+    git-tree warning line, or None."""
+    for path in protected:
+        if is_inside(ledger_dir, path):
+            raise ProtectedPath(
+                f"polarizer: ledger_dir {ledger_dir} is inside {path}, "
+                "which Polarizer must not write to"
+            )
+    top = git_toplevel(ledger_dir)
+    if top:
+        return f"polarizer: warning: ledger_dir {ledger_dir} is inside the git working tree {top}"
+    return None
+
+
+def git_toplevel(path: Path) -> str | None:
+    """The git working tree that contains path (or its nearest existing parent), or None.
+    Only reads: `git rev-parse --show-toplevel`, with optional locks off."""
+    start = _nearest_existing(Path(os.path.realpath(path)))
+    if start is None or not start.is_dir():
+        start = start.parent if start is not None else None
+    if start is None:
+        return None
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    top = done.stdout.strip()
+    return top if done.returncode == 0 and top else None

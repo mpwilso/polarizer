@@ -68,8 +68,10 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - It uses only the standard library and `rfc8785`, imports nothing from Polarizer, and stays under 80 lines.
 3. **`src/polarizer/`**:
    - `canon.py`: the subset check and canonical bytes;
-   - `ledger.py`: verify, statuses, repair;
-   - `writer.py`: the writer thread, lock, fsync policy, first run and `ledger.head`;
+   - `ledger.py`: verify and statuses (read-only);
+   - `lock.py`: the ledger lock and its 2 s wait;
+   - `writer.py`: the writer thread, fsync policy, first run, `ledger.head` and repair;
+   - `sidefiles.py`: argument side files and `verify --args`;
    - `ledgerdir.py`: location, modes, the refusal inside protected paths, and the git-tree warning;
    - `config.py`: parse and validate polarizer.toml with tomllib, with no upstream connections (moved here from stage 2, because `verify --config` and `repair --config` need it);
    - `cli.py` with `verify [--args]` and `repair`, and `tests/golden/` for their output.
@@ -114,7 +116,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 
 ## Tests and claims
 
-| Claim | Command | Run? |
+| Claim | Command | Run? (CI has not run yet) |
 |---|---|---|
 | Claude Code 2.1.287 speaks 2026-07-28 to an SDK 2.2 server, opens `subscriptions/listen`, and re-lists after a change notice | spike, headless | yes |
 | Claude Code cancels on its own timeout in both eras, and the upstream behind the proxy gets its own cancel 1 ms later | spike, headless (timestamped logs in verified-facts.md) | yes |
@@ -124,7 +126,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | A 2025-11-25 upstream works through the proxy while Claude Code's side is 2026-07-28 | spike round 2; `pytest tests/test_eras.py::test_handshake_upstream` | spike yes, repo no |
 | Advertised capabilities are exactly tools in each era | `pytest tests/test_scope.py` | no |
 | An `InputRequiredResult` gives `unsupported` with the one-line error; older-era requests to the client are refused and recorded as `protocol-error` | `pytest tests/test_scope.py` | no |
-| Each config error gives its exact message and exit 2; `${NAME}` expansion; the upstream gets only the minimal environment plus its `env` | `pytest tests/test_config.py` | no |
+| Each config error gives its exact message and exit 2; `${NAME}` expansion; the upstream gets only the minimal environment plus its `env` | `pytest tests/test_config.py` | errors and `${NAME}`: yes, Linux; minimal environment: no (stage 2) |
 | Upstreams connect in parallel; a hung one times out at its `connect_timeout_seconds` while the others serve; no retry | `pytest tests/test_startup.py` | no |
 | Paging stops at 100 pages or 1,000 tools; names over 128 characters are skipped and recorded | `pytest tests/test_listing.py` | no |
 | Each outcome is recorded and returned as in PROXY-SPEC.md | `pytest tests/test_outcomes.py` | no |
@@ -133,17 +135,17 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | `session.client` is written exactly once per process, even when two requests arrive at once | `pytest tests/test_proxy.py::test_session_client_once` | no |
 | `serve` without `--config`, or with a relative path, exits 2 with one line on stderr | `pytest tests/test_config.py` | no |
 | stdout of `serve` carries only JSON-RPC | `pytest tests/test_stdout.py` | no |
-| Every `verify`, `verify --args` and `repair` case prints its exact stdout and exit code | `pytest tests/test_golden.py` | no |
-| The canonical subset holds; non-ASCII keys break it | throwaway differential; `pytest tests/test_canon.py` | throwaway yes, repo no |
-| Fixtures regenerate byte for byte, and both verifiers agree on every one | `pytest tests/test_fixtures.py tests/test_conformance.py` | no |
-| Bytes read per append don't grow with ledger size; two processes leave one chain; catch-up works | `pytest tests/test_writer.py` | no |
-| First run: the genesis entry is written once when two processes start together; a missing `ledger.head` is rebuilt and recorded | `pytest tests/test_first_run.py` | no |
-| `ledger.head` only moves forward; `truncated` is detected; the Windows replace retry works | `pytest tests/test_head.py` (Windows runner for the last) | no |
-| Startup verify, `verify` and `repair` wait up to 2 s for the lock, then refuse (exit 7); repair re-checks under the lock, refuses any status but `torn tail`, and handles a torn genesis | `pytest tests/test_repair.py` | no |
-| `verify` creates, deletes and modifies nothing, on a writable and on a read-only directory, and never creates the lock file | `pytest tests/test_verify_readonly.py` | no |
-| `verify` and `repair` need exactly one of `--config` or `--ledger-dir`, absolute, else one line and exit 2 | `pytest tests/test_golden.py` | no |
-| Side files: exclusive create, orphans reported, deletion still verifies, tampering exits 8 | `pytest tests/test_args.py` | no |
-| `ledger_dir` modes; refusal inside a `protected_paths` entry or Parallax's directories (always protected), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | no |
+| Every `verify`, `verify --args` and `repair` case prints its exact stdout and exit code | `pytest tests/test_golden.py` | yes, Linux |
+| The canonical subset holds; non-ASCII keys break it | throwaway differential; `pytest tests/test_canon.py` | throwaway yes, repo yes (Linux) |
+| Fixtures regenerate byte for byte, and both verifiers agree on every one | `pytest tests/test_fixtures.py tests/test_conformance.py` | yes, Linux |
+| Bytes read per append don't grow with ledger size; two processes leave one chain; catch-up works | `pytest tests/test_writer.py` | yes, Linux |
+| First run: the genesis entry is written once when two processes start together; a missing `ledger.head` is rebuilt and recorded | `pytest tests/test_first_run.py` | yes, Linux |
+| `ledger.head` only moves forward; `truncated` is detected; the Windows replace retry works | `pytest tests/test_head.py` (Windows runner for the last) | yes, Linux, with the replace failure simulated; the Windows test: no |
+| Startup verify, `verify` and `repair` wait up to 2 s for the lock, then refuse (exit 7); repair re-checks under the lock, refuses any status but `torn tail`, and handles a torn genesis | `pytest tests/test_repair.py` | yes, Linux |
+| `verify` creates, deletes and modifies nothing, on a writable and on a read-only directory, and never creates the lock file | `pytest tests/test_verify_readonly.py` | yes, Linux |
+| `verify` and `repair` need exactly one of `--config` or `--ledger-dir`, absolute, else one line and exit 2 | `pytest tests/test_golden.py` | yes, Linux |
+| Side files: exclusive create, orphans reported, deletion still verifies, tampering exits 8 | `pytest tests/test_args.py` | yes, Linux |
+| `ledger_dir` modes; refusal inside a `protected_paths` entry or Parallax's directories (always protected), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | yes, Linux |
 | End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | no |
 
 ## Manual checklist (M0 isn't done until you confirm)

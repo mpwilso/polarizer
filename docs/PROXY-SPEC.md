@@ -83,6 +83,7 @@ polarizer.toml: [upstream.notes] must be a table
 polarizer.toml: upstream prefix "my__srv" must be 1 to 32 characters of letters, digits, "-" and "_", with no "__" and no "_" at either end
 polarizer.toml: [upstream.notes] unknown key "timeout"
 polarizer.toml: [upstream.notes] is missing "command"
+polarizer.toml: [upstream.notes] "command" must be a string
 polarizer.toml: [upstream.notes] "args" must be a list of strings
 polarizer.toml: [upstream.notes] "env" must be a table of strings
 polarizer.toml: [upstream.notes] "connect_timeout_seconds" must be a number from 1 to 20
@@ -99,7 +100,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
    - **Refuse**, with exit 2, inside any `protected_paths` entry or inside `~/.local/share/parallax` or `~/.config/parallax`, comparing resolved real paths by components: `polarizer: ledger_dir /path is inside /protected/path, which Polarizer must not write to`.
    - **Warn**, and continue, inside any other git working tree: `polarizer: warning: ledger_dir /path is inside the git working tree /repo`.
 3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`.
-   - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: ledger is <status>: <verify's first line>; run polarizer verify`.
+   - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: <verify's first line>; run polarizer verify`. For a torn tail, whose line already ends `; run polarizer repair`, nothing is added.
    - A v0 ledger exits 3: `polarizer: ledger at <dir> is v0 (Parallax's format); Polarizer only writes v1`.
 4. **Append `session.started`** with Polarizer's version and the config hash. The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
 5. **Connect every upstream in parallel,** each within its own `connect_timeout_seconds`. Connecting means opening the SDK `Client` and listing the tools (see Listing).

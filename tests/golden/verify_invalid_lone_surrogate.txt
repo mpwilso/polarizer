@@ -1,0 +1,1 @@
+invalid: line 10 (seq 9): lone surrogate at /data/s

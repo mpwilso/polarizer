@@ -1,0 +1,1 @@
+refused: ledger is truncated (ledger.head records seq 10); repair only fixes a torn tail
