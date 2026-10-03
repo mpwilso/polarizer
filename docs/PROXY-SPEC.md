@@ -22,6 +22,10 @@ Draft README text for the limits:
 # Where the ledger, ledger.head and argument side files live. Optional; this is the default.
 ledger_dir = "~/.local/share/polarizer"
 
+# Directories the ledger must never be inside. Optional. These are added to Parallax's
+# runtime and config directories, which are always protected.
+protected_paths = ["~/code/parallax", "~/code/loupe", "~/code/isr"]
+
 [upstream.probe]
 command = "/home/<you>/code/polarizer/.venv/bin/python"
 args = ["/home/<you>/code/polarizer/tests/probe_server.py"]
@@ -38,7 +42,10 @@ env = { NOTES_TOKEN = "${NOTES_TOKEN}", NOTES_MODE = "read-only" }
 ```
 
 **Keys:**
-- **Top level:** `ledger_dir` (string, optional; `~` is expanded) and one or more `[upstream.<prefix>]` tables.
+- **Top level:**
+  - `ledger_dir`: string, optional; `~` is expanded, and the result must be absolute;
+  - `protected_paths`: list of strings, optional; `~` is expanded in each, and each result must be absolute. They are added to `~/.local/share/parallax` and `~/.config/parallax`, which are always protected (LEDGER-SPEC.md, Location and permissions);
+  - one or more `[upstream.<prefix>]` tables.
 - **Each upstream:**
   - `command`: string, required;
   - `args`: list of strings, default empty;
@@ -56,16 +63,23 @@ So a prefix matches `[A-Za-z0-9_-]`, is 1 to 32 characters, contains no `__`, an
 - **A value that is exactly `"${NAME}"`** copies that one variable from Polarizer's environment.
 - **Any other value** is literal, and a value that contains `${` anywhere else is an error, so nothing is expanded by surprise.
 
-**Errors.** Each goes to stderr as one line, and `serve` exits 2 without starting any upstream:
+**Who reads it.** `serve`, and `verify` and `repair` when given `--config`, read the file through the same parser (`config.py`) and apply every rule below. The one exception: `verify` and `repair` don't require `${NAME}` variables to be set, so they don't need upstream secrets in the shell. Parsing never starts an upstream.
+
+**Errors.** Each goes to stderr as one line, and the command exits 2 (`serve` without starting any upstream). The file's own name (normally `polarizer.toml`) starts each file error:
 
 ```
 polarizer: serve needs --config <absolute path to polarizer.toml>
 polarizer: --config must be an absolute path, got polarizer.toml
 polarizer.toml: not found at /path/polarizer.toml
+polarizer.toml: cannot read /path/polarizer.toml: <the operating system's message>
 polarizer.toml: line 7: <tomllib's message>
 polarizer.toml: unknown top-level key "ledger_path"
 polarizer.toml: no upstreams configured
 polarizer.toml: ledger_dir must be a string
+polarizer.toml: ledger_dir must be an absolute path, got data/ledger
+polarizer.toml: protected_paths must be a list of absolute paths
+polarizer.toml: "upstream" must be a table of [upstream.<prefix>] tables
+polarizer.toml: [upstream.notes] must be a table
 polarizer.toml: upstream prefix "my__srv" must be 1 to 32 characters of letters, digits, "-" and "_", with no "__" and no "_" at either end
 polarizer.toml: [upstream.notes] unknown key "timeout"
 polarizer.toml: [upstream.notes] is missing "command"
@@ -81,10 +95,12 @@ polarizer.toml: [upstream.notes] env NOTES_URL: only a whole "${NAME}" value is 
 Everything below happens before the proxy answers Claude Code's first message. Claude Code's server startup limit is `MCP_TIMEOUT`: 30 s by default, read from the binary, and observed firing headless when set lower.
 
 1. **Read the config.** Any error stops here, as above.
-2. **Check `ledger_dir`'s location.**
-   - **Refuse**, with exit 2, inside a path listed in `.guard-paths` or inside `~/.local/share/parallax` or `~/.config/parallax`: `polarizer: ledger_dir /path is inside /guarded/path, which Polarizer must not write to`.
+2. **Check `ledger_dir`'s location** (LEDGER-SPEC.md, Location and permissions). `repair` runs the same check, with the same messages.
+   - **Refuse**, with exit 2, inside any `protected_paths` entry or inside `~/.local/share/parallax` or `~/.config/parallax`, comparing resolved real paths by components: `polarizer: ledger_dir /path is inside /protected/path, which Polarizer must not write to`.
    - **Warn**, and continue, inside any other git working tree: `polarizer: warning: ledger_dir /path is inside the git working tree /repo`.
-3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`. Any status other than `intact` exits with that status's code and one line on stderr.
+3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`.
+   - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: ledger is <status>: <verify's first line>; run polarizer verify`.
+   - A v0 ledger exits 3: `polarizer: ledger at <dir> is v0 (Parallax's format); Polarizer only writes v1`.
 4. **Append `session.started`** with Polarizer's version and the config hash. The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
 5. **Connect every upstream in parallel,** each within its own `connect_timeout_seconds`. Connecting means opening the SDK `Client` and listing the tools (see Listing).
    - Each upstream gets an `upstream.connected` entry, with its protocol version and tool count, or its error (`timeout after 10 s`, the exception's one-line message, or a listing limit).
@@ -107,11 +123,15 @@ Everything below happens before the proxy answers Claude Code's first message. C
 
 ## Calls
 
-**Routing.** A call to `<prefix>__<tool>` is split at its first `__`. The left part is the prefix, and the rest, which may itself contain `__`, is the upstream's tool name. The call goes to that upstream's client. An unknown prefix, an upstream that didn't connect, or a tool it didn't list gets a `tools/call` result with `isError` and one line: `polarizer: no tool named <name>`.
+**Routing.** A call to `<prefix>__<tool>` is split at its first `__`. The left part is the prefix, and the rest, which may itself contain `__`, is the upstream's tool name. The call goes to that upstream's client.
+
+**Unknown tools.** A name with no `__`, an unknown prefix, an upstream that didn't connect, or a tool it didn't list is refused:
+- **The ledger** gets one `call.refused` entry with `session`, `tool` (the name as called) and `reason`, one of `not a prefixed name`, `no upstream with prefix "<p>"`, `upstream <p> did not connect` or `upstream <p> has no tool "<t>"`. There is no side file, `call.sent` or `call.returned`.
+- **The client** gets a `tools/call` result with `isError` and one line: `polarizer: no tool named <name>`. This is deliberate, not a JSON-RPC error: a result reaches the model, which can see the mistake and recover, for example by listing tools again.
 
 **Request `_meta`.**
 - **Forwarded:** `traceparent` and `tracestate`.
-- **Recorded:** `call.sent` records the names of all other dropped keys in `meta_dropped`, except `io.modelcontextprotocol/*`, which every 2026-07-28 request carries. It also records the value of `claudecode/toolUseId` as `client_call_id`.
+- **Recorded:** `call.sent` records the names of all other dropped keys in `meta_dropped`, except `io.modelcontextprotocol/*`, which every 2026-07-28 request carries. It records the value of `claudecode/toolUseId` as `client_call_id`, or `null` when the client didn't send one. Its `tool` is the full exposed name, `<prefix>__<tool>`.
 - `params.meta` is a plain dict, and over stdio the SDK presents the progress token there as `progress_token`. Polarizer never reads the token.
 
 **Progress** is relayed by passing a `progress_callback` to the upstream call that runs `ctx.session.report_progress(progress, total, message)`. That reports under the caller's own token on any transport, and does nothing if the caller asked for no progress.
@@ -133,7 +153,9 @@ Everything below happens before the proxy answers Claude Code's first message. C
 | `cancelled` | `CancelledError` in the handler, from Claude Code's `notifications/cancelled` or its timeout | nothing: the SDK has already abandoned the request. Polarizer records the entry in a shielded scope, then re-raises. The SDK's upstream client sends its own `notifications/cancelled` upstream. |
 | `unsupported` | an `InputRequiredResult` | a result with `isError` and one line: `polarizer: upstream <prefix> asked the client for <kinds>; Polarizer 0.1 does not forward these` |
 
-`call.returned` records the outcome, plus `error` (the one line) for every outcome except `ok`, and `code` for `protocol-error`.
+`call.returned` records the outcome, plus `error` (the one line) for every outcome except `ok`, and `code` for `protocol-error`. It also records:
+- **`latency_ms`:** always an integer: whole milliseconds on a monotonic clock, from just before the upstream call to just after it ends, rounded down.
+- **`result_bytes`:** the length of the compact UTF-8 JSON of the result as sent to the client, that is `len(json.dumps(result.model_dump(by_alias=True, mode="json", exclude_none=True), separators=(",", ":"), ensure_ascii=False).encode("utf-8"))`. It is 0 when nothing was returned: for `cancelled`, and for `protocol-error`, where the client gets a JSON-RPC error instead of a result.
 
 Notes on the outcomes:
 - **Timeouts.** M0 has no transport timeout, and "timeout" is not part of `transport-error`. Polarizer sets no per-call read timeout in M0, so the SDK's local -32001 can't occur. A call is bounded only by Claude Code's own limit, which arrives as `cancelled`.
@@ -143,29 +165,54 @@ Notes on the outcomes:
 ## Output streams
 
 - **`serve`:** its stdout carries only the protocol. Its logs and one-line errors go to stderr.
-- **Every other command** (`verify`, `repair`) prints its results to stdout. Usage errors from argument parsing go to stderr, with exit code 2.
+- **Every other command** (`verify`, `repair`) prints its results to stdout. Usage errors, config errors, unreadable files, protected-path refusals and the git-tree warning go to stderr, each as one line starting `polarizer: ` (or the config file's name), and every error among them exits 2.
 
 ## Command line
 
-`polarizer verify [--ledger-dir DIR] [--args]` and `polarizer repair [--ledger-dir DIR]`. Without `--ledger-dir`, the directory comes from `ledger_dir` in `./polarizer.toml` if that file exists, and otherwise defaults to `~/.local/share/polarizer`. The output below is exact; placeholders are in angle brackets.
+```
+polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--args]
+polarizer repair (--config <absolute path> | --ledger-dir <absolute path>)
+```
+
+Each command takes exactly one of `--config` (the directory is `ledger_dir` from that file, or the default `~/.local/share/polarizer`) or `--ledger-dir`. There is no current-directory default. These errors go to stderr as one line and exit 2:
+
+```
+polarizer: verify needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: repair needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: --config must be an absolute path, got <path>
+polarizer: --ledger-dir must be an absolute path, got <path>
+polarizer: cannot read <path>: <the operating system's message>
+polarizer: <argparse's message>
+```
+
+The last is for any other argument error, such as an unknown option. Config errors are under Configuration, and also exit 2.
+
+The output below is exact; placeholders are in angle brackets. Every exit code, and the order in which problems are reported, is in LEDGER-SPEC.md (Statuses).
 
 **`verify`**
 
 | Status | stdout | Exit |
 |---|---|---|
-| intact (v1) | `intact: <n> entries, <s> sessions, <c> calls` and then `chain <chain_id>, head <64 hex> at seq <seq>` | 0 |
-| intact (v0) | `intact (v0): <n> entries` and then `head <64 hex> at line <n>` | 0 |
-| tampered | `tampered: line <l> (seq <q>): <reason>`, where the reason is `hash does not match the entry`, `prev does not match line <l-1>` or `seq is <a>, expected <b>` | 1 |
-| invalid | `invalid: line <l> (seq <q>): <rule>`, where the rule is one of `not valid UTF-8`, `not valid JSON`, `not a JSON object`, `unknown key "<k>"`, `missing key "<k>"`, `float at <path>`, `integer out of range at <path>`, `non-ASCII key at <path>`, `line longer than 16 KiB`, `second genesis`, `first entry is not a genesis`, `v0 and v1 entries mixed`, `v is not 1` | 3 |
+| intact (v1) | `intact: <n> entries, <s> sessions, <c> calls`, then `chain <chain_id>, head <64 hex> at seq <seq>`, then `ledger.head: missing; serve will rebuild it` only when `ledger.head` is missing | 0 |
+| intact (v0) | `intact (v0): <n> entries`, then `head <64 hex> at line <n>` | 0 |
+| tampered (a line) | `tampered: line <l> (seq <q>): <reason>`, where the reason is `seq is <a>, expected <b>`, `prev is not 64 zeros` (line 1), `prev does not match line <l-1>` or `hash does not match the entry` | 1 |
+| tampered (the head) | `tampered: ledger.head: hash does not match seq <h>` | 1 |
+| invalid (a line) | `invalid: line <l> (seq <q>): <rule>`, with the rules below | 3 |
+| invalid (the head) | `invalid: ledger.head: not a valid head record` or `invalid: ledger.head: chain_id does not match the ledger` | 3 |
 | not canonical | `not canonical: line <l> (seq <q>): stored bytes are not the canonical form` | 4 |
 | torn tail | `torn tail: <b> bytes after line <l> (seq <q>); run polarizer repair` | 5 |
-| truncated | `truncated: ledger ends at seq <q> but ledger.head records seq <h>` | 6 |
+| truncated | `truncated: ledger ends at seq <q> but ledger.head records seq <h>`, or `truncated: ledger has no complete entries but ledger.head records seq <h>` | 6 |
 | locked | `locked: ledger is locked by another process (waited 2 s); try again or close other Polarizer sessions` | 7 |
-| no ledger | `no ledger at <dir>` | 2 |
+| no ledger | `no ledger at <dir>` (also when `ledger.jsonl` is empty) | 2 |
 
-For `(seq <q>)`, a line that doesn't parse prints `(seq ?)`. `<path>` is a JSON pointer such as `/data/latency_ms`. In the first `intact` line, sessions are counted as `session.started` entries and calls as `call.sent` entries. Within a line, checks run in the order given in LEDGER-SPEC.md (Statuses), and the first problem wins.
+**Details of the placeholders.**
+- **`(seq <q>)`:** the line's own `seq` when the line parsed into an object with an integer `seq`, otherwise `(seq ?)`. A torn tail with no complete line before it prints `after line 0 (seq ?)`.
+- **Invalid rules,** in the order they are checked within a line: `not valid UTF-8`, `not valid JSON`, `not a JSON object`, `v0 and v1 entries mixed`, `line longer than 16 KiB`, `unknown key "<k>"` (the first in the line's own order), `missing key "<k>"` (the first in the order of the keys table), `"<k>" has the wrong type`, `v is not 1`, then the subset rules `float at <path>`, `integer out of range at <path>`, `non-ASCII key at <path>` and `lone surrogate at <path>` (the first offending value in document order), then `first entry is not a genesis`, `second genesis` and `genesis chain_id is not 32 lowercase hex`.
+- **`<path>`** is a JSON pointer such as `/data/latency_ms`. In printed keys, `~` is `~0`, `/` is `~1`, and any character outside printable ASCII is printed as a `\uXXXX` escape, so the line stays ASCII.
+- **Counting:** in the first `intact` line, sessions are `session.started` entries and calls are `call.sent` entries.
+- **v0 ledgers:** messages drop the `(seq <q>)` part, since v0 has no seq. The not-canonical reason is `stored bytes are not the v0 line form`, and a torn tail prints `torn tail: <b> bytes after line <l>` with no repair hint, because repair refuses v0 ledgers. Only the first four invalid rules, `unknown key` and `missing key` apply to v0.
 
-**`verify --args`** prints the chain result first. If the chain is intact, it adds one summary line and then one line per side file that isn't matching: missing and tampered files in seq order, then orphans by name.
+**`verify --args`** prints the chain result first, including the `ledger.head: missing` line when there is one. If the chain is intact, it adds one summary line and then one line per side file that isn't matching: missing and tampered files in seq order, then orphans by name.
 
 ```
 args: <m> matching, <x> missing, <t> tampered, <o> orphaned
@@ -183,16 +230,20 @@ orphaned           args/<name>
 |---|---|---|
 | torn tail, repaired | `repaired: moved <b> bytes to ledger.jsonl.torn-<seq>-<sha12>; appended ledger.repaired at seq <q>` | 0 |
 | already intact | `nothing to repair: ledger is intact` | 0 |
-| any other status | `refused: ledger is <status> at line <l>; repair only fixes a torn tail` | that status's code |
+| a line problem | `refused: ledger is <status> at line <l>; repair only fixes a torn tail` | that status's code |
+| an invalid or tampered head | `refused: ledger is <status> at ledger.head; repair only fixes a torn tail` | 3 or 1 |
+| truncated | `refused: ledger is truncated (ledger.head records seq <h>); repair only fixes a torn tail` | 6 |
+| a v0 ledger | `refused: ledger is v0 (Parallax's format); Polarizer only writes v1` | 3 |
 | locked | the `locked:` line above | 7 |
 | no ledger | the `no ledger at` line above | 2 |
+| inside a protected path | nothing; the refusal line from Startup goes to stderr | 2 |
 
 Every row in these tables gets a golden-file test (`tests/golden/`), which runs the command on a fixture and compares stdout byte for byte, along with the exit code.
 
 ## Where the ledger lives
 
-Startup refuses a `ledger_dir` inside a guarded repo or Parallax's directories, and warns inside any other git working tree (startup step 2).
+`serve` and `repair` refuse a `ledger_dir` inside a protected path (every `protected_paths` entry, plus Parallax's two directories, always) and warn inside any other git working tree (startup step 2). `verify` only reads, never writes, and checks no locations.
 
-The guard (`scripts/guard.sh`) watches other tools' directories by metadata only, never opening contents:
+The guard (`scripts/guard.sh`) is a development script, not part of the installed tool. It reads `.guard-paths`, and it is the backstop if a `polarizer.toml` lacks a protected path. It watches other tools' directories by metadata only, never opening contents:
 - `~/.local/share/parallax` as a summary (file count, total size, newest mtime and one hash);
 - `~/.config/parallax` and `~/isr-notes` line by line. It also watches `~/.claude/settings.json` by metadata, and `~/.claude.json` through hashes of its MCP config. A search by name found no Loupe or ISR directories under `~/.local/share`, `~/.config` or `~/.cache`. Polarizer's own `ledger_dir` is not guarded; it's Polarizer's to write.

@@ -1,9 +1,17 @@
-# Polarizer M0 plan (revision 6, Oct 2, 2026)
+# Polarizer M0 plan (revision 7, Oct 2, 2026)
 
 Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PROXY-SPEC.md (proxy and command-line behavior), docs/milestones.md and docs/verified-facts.md. docs/PLAN.md is background only. Where it disagrees with these files, these win; the corrections are listed at the end.
 
 ## Changes from the last version
 
+- **Revision 7** (the implementation session's step 0, second round):
+  - `protected_paths` in polarizer.toml replaces `.guard-paths` in the tool. Parallax's two directories are always protected, and paths are compared by resolved real path components.
+  - `verify` and `repair` take exactly one of `--config` or `--ledger-dir`, both absolute.
+  - `ledger.head` holds `chain_id`, `hash` and `seq`. One status order for the whole file: lines, then the head, then a torn tail, with two new order fixtures.
+  - `verify` never writes, and reports a missing `ledger.head` on one extra line.
+  - v0 check order, messages without a seq, and a refusal of v0 ledgers in `serve` and `repair`.
+  - `call.refused` for unknown tools, `client_call_id` may be null, integer `latency_ms`, and `result_bytes` defined.
+  - `config.py` (parse and validate only) moves to stage 1.
 - **Revision 6** (the implementation session's step 0):
   - `serve` requires an absolute `--config`.
   - The per-line check order is fixed, with two-fault fixtures to pin it.
@@ -62,7 +70,8 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - `canon.py`: the subset check and canonical bytes;
    - `ledger.py`: verify, statuses, repair;
    - `writer.py`: the writer thread, lock, fsync policy, first run and `ledger.head`;
-   - `ledgerdir.py`: location, modes, the refusal inside guarded paths, and the git-tree warning;
+   - `ledgerdir.py`: location, modes, the refusal inside protected paths, and the git-tree warning;
+   - `config.py`: parse and validate polarizer.toml with tomllib, with no upstream connections (moved here from stage 2, because `verify --config` and `repair --config` need it);
    - `cli.py` with `verify [--args]` and `repair`, and `tests/golden/` for their output.
 
    Steps 1 to 4 are implementation stage 1.
@@ -70,7 +79,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - It runs `git -C <parallax> show <commit>:parallax/ledger.py` into a temp directory and runs that file there with `PYTHONDONTWRITEBYTECODE=1`.
    - It writes a few entries and copies the output to `conformance/valid/v0-parallax.jsonl`, with the commit hash in `expected.json`.
    - The file is stdlib-only at `22ef600`. The Parallax package is never imported.
-5. **The proxy**, as in PROXY-SPEC.md: `config.py` (tomllib), `upstream.py`, `proxy.py`, and `serve` added to `cli.py`. Steps 5 and 6 are implementation stage 2.
+5. **The proxy**, as in PROXY-SPEC.md: `upstream.py`, `proxy.py`, and `serve` added to `cli.py`. Steps 5 and 6 are implementation stage 2.
 6. **Test servers.**
    - `tests/probe_server.py`: a stdlib MCP server that reads stdin on its own thread and runs each call on a worker. It has one tool, `wait(seconds)`, sends progress every second when given a token, logs every inbound message with a timestamp, and can delay its handshake (`PROBE_DELAY`).
    - In-memory fake upstreams built on the SDK's low-level `Server`, covering:
@@ -93,8 +102,9 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 
 **Fixtures.** `tools/make_fixtures.py` writes every valid chain deterministically, with fixed salts, chain ids, session ids and timestamps.
 - **Hashing:** it uses `conformance/reference_verify.py`'s own canonicalization and hash functions, not `ledger.py`'s, so the fixtures don't check the code that wrote them.
-- **Broken fixtures:** each one comes from a valid chain through a named mutation function, such as `edit_value`, `delete_middle_line`, `swap_lines`, `tear_last_line`, `reorder_keys`, `insert_float`, `big_integer`, `non_ascii_key`, `extra_top_level_key`, `second_genesis`, `edit_v0_entry` or `mix_v0_v1`. Two fixtures pin the per-line check order with two faults on one line: `extra_key_and_bad_hash` (expected `invalid`) and `bad_seq_and_bad_hash` (expected `tampered`, reason `seq is ...`).
-- **`expected.json`:** maps each fixture to its status, line and seq.
+- **Broken fixtures:** each one comes from a valid chain through a named mutation function, such as `edit_value`, `delete_middle_line`, `swap_lines`, `tear_last_line`, `reorder_keys`, `insert_float`, `big_integer`, `non_ascii_key`, `extra_top_level_key`, `second_genesis`, `edit_v0_entry` or `mix_v0_v1`. Four fixtures pin the status order with two faults each: `extra_key_and_bad_hash` (expected `invalid`), `bad_seq_and_bad_hash` (expected `tampered`, reason `seq is ...`), `torn_tail_and_truncated` (expected `truncated`) and `tampered_line_and_head_mismatch` (expected `tampered` at the line).
+- **Head pairs:** a fixture that needs a `ledger.head` is a file pair, `<name>.jsonl` and `<name>.head`. The reference verifier takes the head path as an optional second argument.
+- **`expected.json`:** maps each fixture to its status, line and seq. The seq is `null` for v0.
 - **Regeneration:** `tests/test_fixtures.py` regenerates everything into a temp directory and diffs it byte for byte against the committed files.
 - **The v0 fixture** is the exception: it comes from Parallax's real code (build step 4) and isn't regenerated.
 
@@ -130,23 +140,26 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | First run: the genesis entry is written once when two processes start together; a missing `ledger.head` is rebuilt and recorded | `pytest tests/test_first_run.py` | no |
 | `ledger.head` only moves forward; `truncated` is detected; the Windows replace retry works | `pytest tests/test_head.py` (Windows runner for the last) | no |
 | Startup verify, `verify` and `repair` wait up to 2 s for the lock, then refuse (exit 7); repair re-checks under the lock, refuses any status but `torn tail`, and handles a torn genesis | `pytest tests/test_repair.py` | no |
+| `verify` creates, deletes and modifies nothing, on a writable and on a read-only directory, and never creates the lock file | `pytest tests/test_verify_readonly.py` | no |
+| `verify` and `repair` need exactly one of `--config` or `--ledger-dir`, absolute, else one line and exit 2 | `pytest tests/test_golden.py` | no |
 | Side files: exclusive create, orphans reported, deletion still verifies, tampering exits 8 | `pytest tests/test_args.py` | no |
-| `ledger_dir` modes; refusal inside a `.guard-paths` entry or Parallax's directories; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | no |
+| `ledger_dir` modes; refusal inside a `protected_paths` entry or Parallax's directories (always protected), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | no |
 | End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | no |
 
 ## Manual checklist (M0 isn't done until you confirm)
 
-1. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Everything server. Pre-warm the pinned Everything server once first. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify` and expect output in this form:
+1. **Protected paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `protected_paths`.
+2. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Everything server. Pre-warm the pinned Everything server once first. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
 
    ```
    intact: 31 entries, 2 sessions, 12 calls
    chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3, head <64 hex> at seq 30
    ```
-2. **Names.** In `/mcp`, the tools appear with prefixes. Note whether any long name is shortened.
-3. **Cancel.** Press Esc during a 30 s `wait` call, and check whether the probe log shows `notifications/cancelled`. This is interactive and still unverified.
-4. **A hung upstream.** Set an upstream's command to something that never answers. Claude Code should still start Polarizer, with the other upstream's tools, within about 10 s.
-5. **Optional:** run the benchmark once on native Windows Python.
-6. **Guard.** Run `scripts/guard.sh check`. Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file whenever it runs.
+3. **Names.** In `/mcp`, the tools appear with prefixes. Note whether any long name is shortened.
+4. **Cancel.** Press Esc during a 30 s `wait` call, and check whether the probe log shows `notifications/cancelled`. This is interactive and still unverified.
+5. **A hung upstream.** Set an upstream's command to something that never answers. Claude Code should still start Polarizer, with the other upstream's tools, within about 10 s.
+6. **Optional:** run the benchmark once on native Windows Python.
+7. **Guard.** Run `scripts/guard.sh check`. Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file whenever it runs.
 
 ## Credits
 
@@ -228,4 +241,4 @@ These stay until PLAN.md draft 5, which is deferred until after M0.
 11. M2a includes resolved-path rules. Without them, it can only hold whole tools.
 12. The rest of M2 is M2b, placed before the practice range.
 13. "Unchanged" means only the names gain a prefix, and M0 is tools only.
-14. The ledger lives in `ledger_dir`, by default `~/.local/share/polarizer/`. Startup refuses it inside guarded paths and Parallax's directories, and warns inside any other git working tree.
+14. The ledger lives in `ledger_dir`, by default `~/.local/share/polarizer/`. Startup and repair refuse it inside any `protected_paths` entry and Parallax's directories, and warn inside any other git working tree.

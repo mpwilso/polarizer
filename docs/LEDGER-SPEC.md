@@ -65,9 +65,9 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256` |
 | `session.client` | `session`, `client_name`, `client_version`, `protocol_version`: written once, on the first request that carries client information. In 2026-07-28 that's every request's `_meta`; in the older era it's `initialize`. |
 | `upstream.connected` | `prefix`, then either `protocol_version`, `tools` and `skipped_tools` (a list of names left out), or `error` |
-| `call.sent` | `session`, `tool`, `args_commit`, `meta_dropped`, `client_call_id` (all strings except `meta_dropped`, a list) |
+| `call.sent` | `session`, `tool` (the full exposed name, `<prefix>__<tool>`), `args_commit`, `meta_dropped` (a list of strings), `client_call_id` (a string, or `null` when the client sent none) |
 | `call.returned` | `call_seq`, `outcome` (`ok`, `tool-error`, `protocol-error`, `transport-error`, `cancelled`, `unsupported`; defined in PROXY-SPEC.md), `latency_ms`, `result_bytes`, plus `error` (one line) for every outcome but `ok`, and `code` for `protocol-error` |
-| `call.refused` | `tool`, `reason` (M1a: hidden or unknown tool called by name) |
+| `call.refused` | `session`, `tool` (the name as called), `reason`. M0: a name that matches no listed tool. M1a adds hidden tools called by name. |
 | `tool.approved` | `upstream`, `tool`, `def_hash`, `actor` (M1a) |
 | `tool.rejected` | `upstream`, `tool`, `def_hash`, `actor`, `reason` (M1a) |
 | `tool.drift` | `upstream`, `tool`, `approved_hash`, `live_hash` (M1a) |
@@ -78,25 +78,27 @@ New kinds can be added without changing the version, as long as their `data` sta
 
 ### Statuses
 
-`verify` reads the ledger and reports the first problem, with its line number and seq:
+`verify` reads the ledger and its `ledger.head` (Part 2) and reports exactly one status, with a line number and seq where they apply. Every exit code Polarizer's commands use is in this table; none is shared by two meanings except where a row says so.
 
-| Status | Exit code | Meaning |
+| Status | Exit code | What triggers it |
 |---|---|---|
 | `intact` | 0 | Every rule holds. |
-| `tampered` | 1 | A `hash`, `prev` or `seq` doesn't match. |
-| (usage error) | 2 | Bad arguments or an unreadable file. |
-| `invalid` | 3 | An entry breaks a v1 rule: an extra key, a float, an integer out of range, a non-ASCII key, an oversize line, a second genesis, or a mix of v0 and v1. |
-| `not canonical` | 4 | The entry parses and hashes correctly, but its stored bytes aren't its canonical bytes. |
+| `tampered` | 1 | A line's `seq`, `prev` or `hash` doesn't match, or `ledger.head`'s hash differs from the entry at its seq. |
+| (usage error) | 2 | Bad arguments, an unreadable file, a config error, or no ledger. `serve` and `repair` also exit 2 when they refuse a `ledger_dir` inside a protected path (Part 2). |
+| `invalid` | 3 | An entry breaks a structure rule (an extra or missing key, a float, an integer out of range, a non-ASCII key, a lone surrogate, an oversize line, a missing or second genesis, a mix of v0 and v1), or `ledger.head` isn't a valid head record or names another chain. `serve` and `repair` also exit 3 when `ledger_dir` holds a v0 ledger. |
+| `not canonical` | 4 | The entry parses and hashes correctly, but its stored bytes aren't its canonical bytes (v1) or its line form (v0). |
 | `torn tail` | 5 | There are bytes after the last newline. |
-| `truncated` | 6 | The chain is otherwise intact, but `ledger.head` records a later seq than the ledger holds (Part 2). |
+| `truncated` | 6 | `ledger.head` records a later seq than the ledger's last entry. |
 | (locked) | 7 | The ledger lock was still held after 2 seconds; nothing was checked (Part 2). |
+| (side file tampered) | 8 | `verify --args` only: a side file's bytes don't match its name (Part 3). |
 
-**Check order.** Lines are checked in file order, and the first problem found decides the status. Within one line, both verifiers check in this order:
-1. structure (`invalid`): the line is valid UTF-8 and JSON, has exactly the v1 keys, stays inside the subset, is at most 16 KiB, and isn't a second genesis or a mixed version;
-2. `seq`, then `prev`, then `hash` (`tampered`);
-3. canonical bytes (`not canonical`).
+**Precedence.** The first of these that applies decides the status. Both verifiers implement exactly this order.
+1. **Per-line problems**, in file order. Within one v1 line: structure (`invalid`), then `seq`, then `prev`, then `hash` (`tampered`), then canonical bytes (`not canonical`). Structure means the line is valid UTF-8 and JSON, is an object of the same version as the first line, is at most 16 KiB, has exactly the v1 keys with the right types, stays inside the subset, and is the one genesis at line 1. v0 lines have their own order (below).
+2. **`ledger.head` problems**, checked only when every complete line passes: an invalid head file (`invalid`), then a head hash that doesn't match the entry at the head's seq (`tampered`), then a head seq past the last entry (`truncated`). A head behind the last entry is normal, because the head moves only on security-state entries. A missing `ledger.head` is not a problem for `verify` (PROXY-SPEC.md shows the extra line it prints).
+3. **A torn tail** (`torn tail`).
+4. Otherwise `intact`.
 
-`torn tail` and `truncated` are checked only after every complete line passes. A line that isn't valid JSON is `invalid`, not a torn tail, unless it is the bytes after the last newline.
+A line that isn't valid JSON is `invalid`, not a torn tail, unless it is the bytes after the last newline. Four conformance fixtures pin the order with two faults each: `extra_key_and_bad_hash` (`invalid`), `bad_seq_and_bad_hash` (`tampered`, reason `seq is ...`), `torn_tail_and_truncated` (`truncated` wins) and `tampered_line_and_head_mismatch` (the line wins).
 
 ### v0 (Parallax's existing format)
 
@@ -106,12 +108,15 @@ A line with no `v` key is a v0 entry, the format Parallax's ledger writes today.
 - **Hash:** `hash = hex(sha256(json.dumps(body, sort_keys=True).encode()))`, where `body` is the entry without `hash`, with Python's default separators and `ensure_ascii=True`, and no prefix.
 - **Genesis:** the first `prev` is 64 zeros.
 - **Line form:** each line is `json.dumps(entry, sort_keys=True)`.
+- **Check order** for each v0 line: structure (valid UTF-8 and JSON, an object, no `v` key, exactly the v0 keys), then `prev`, then `hash`, then line form. A wrong line form is `not canonical`. v0 has no seq, so v0 messages name only the line, and `conformance/expected.json` records the seq as `null`.
+- **No v1 rules:** the subset and the 16 KiB limit don't apply. Floats and non-ASCII keys are legal in v0.
+- **No `ledger.head`:** a v0 ledger has no chain id, so any `ledger.head` beside one is an invalid head.
 
-v0 rules are frozen. Every verifier keeps them forever, so a Parallax `Ledger-Head:` commit trailer (the full `hash` of the last entry at accept time) can always be checked against its chain. v0 hashes depend on how Python formats floats, which is one reason v1 bans floats.
+v0 checks are frozen: they use Python's `json.dumps(entry, sort_keys=True)` as the line form and `json.dumps(body, sort_keys=True)` for the hash, exactly as Parallax's `ledger.py` does, and they never change. Every verifier keeps them forever, so a Parallax `Ledger-Head:` commit trailer (the full `hash` of the last entry at accept time) can always be checked against its chain. v0 hashes depend on how Python formats floats, which is one reason v1 bans floats.
 
 The v0 conformance fixture comes from running Parallax's own `ledger.py`, extracted at a fixed commit. That commit hash is recorded in `conformance/expected.json`, beside the fixture's expected status, not in the fixture file. Adding it to the chain file would change the very bytes the fixture exists to pin.
 
-A ledger is all v0 or all v1. A v1 verifier reports a mixed chain as `invalid`. Rules for moving a v0 chain to v1 belong to the stretch adoption work, which needs a separate, explicit go-ahead.
+A ledger is all v0 or all v1, decided by its first line. A v1 verifier reports a mixed chain as `invalid`. Polarizer only verifies v0: `serve` and `repair` refuse a `ledger_dir` that holds a v0 ledger, with exit 3, because anything they appended would mix versions. Rules for moving a v0 chain to v1 belong to the stretch adoption work, which needs a separate, explicit go-ahead.
 
 ## Part 2: writing, verifying and repairing (Polarizer)
 
@@ -119,7 +124,14 @@ A ledger is all v0 or all v1. A v1 verifier reports a mixed chain as `invalid`. 
 
 The ledger directory is `ledger_dir` from polarizer.toml, by default `~/.local/share/polarizer/`, created with mode 0700. Every file Polarizer creates in it gets mode 0600. On Windows the same path under the user's profile is used; POSIX modes don't apply there, and the profile's ACLs are what protect it.
 
-Startup refuses a `ledger_dir` inside any path listed in `.guard-paths`, or inside Parallax's runtime or config directories (`~/.local/share/parallax`, `~/.config/parallax`). It warns on stderr, and continues, if `ledger_dir` is inside any other git working tree (`git rev-parse --show-toplevel` succeeds there). The exact messages are in PROXY-SPEC.md, Startup.
+**Protected paths.** `serve` (at startup) and `repair` refuse a `ledger_dir` inside any protected path, with exit 2.
+- **The protected paths** are the entries of `protected_paths` in polarizer.toml plus Parallax's runtime and config directories (`~/.local/share/parallax`, `~/.config/parallax`). Those two are always protected; the file can add paths but can't remove them.
+- **The comparison** uses resolved real paths (symlinks followed) compared component by component, never as string prefixes, so `/a/parallax2` is not inside `/a/parallax`. Where a protected path and some ancestor of `ledger_dir` both exist, they also count as the same when the operating system says they are the same directory, which covers case-insensitive file systems.
+- **A git working tree** that isn't protected only gets a warning on stderr: `serve` and `repair` continue if `git rev-parse --show-toplevel` succeeds in `ledger_dir` (or its nearest existing parent).
+- **`verify`** only reads, so it checks no locations.
+- The installed tool never reads `.guard-paths`. That file belongs to the development guard, `scripts/guard.sh`.
+
+The exact messages are in PROXY-SPEC.md, Startup.
 
 | File | What it is |
 |---|---|
@@ -135,6 +147,8 @@ Startup refuses a `ledger_dir` inside any path listed in `.guard-paths`, or insi
 One exclusive lock, on `ledger.jsonl.lock`, serializes everything that reads the end of the file or changes it: appends, `ledger.head` updates, startup verification, the `verify` command and `repair`. It uses `fcntl.flock` on Unix and `msvcrt.locking` on byte 0 on Windows.
 
 Verify holds the lock only while it reads the file and `ledger.head`. It checks the bytes after releasing it. With the lock held, a line half-written by a live writer in another process can't look like a torn tail.
+
+**`verify` never writes.** It creates, deletes and modifies no file or directory. It opens the ledger, `ledger.head` and side files read-only. It takes the lock only if `ledger.jsonl.lock` already exists, opening it read-only, and never creates it. A missing lock file means no Polarizer writer has used the directory, because writers create it before their first write, so verify then reads without the lock. A test compares a listing of paths, sizes and mtimes before and after `verify`, on a writable directory and on a read-only one.
 
 **Waiting for the lock.**
 - **Writers** wait for it as long as it takes. Other holders keep it only for an append or a short read.
@@ -183,19 +197,21 @@ Measured on WSL2 ext4: a plain write took 0.3 µs at p50, and write plus fsync t
 
 ### ledger.head
 
-`ledger.head` holds one line: `{"seq": N, "hash": "..."}`. After each fsynced security-state entry, the writer updates it while still holding the ledger lock:
+`ledger.head` holds the canonical JSON (RFC 8785) of an object with exactly the keys `chain_id`, `hash` and `seq`, followed by one newline, for example `{"chain_id":"5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3","hash":"<64 hex>","seq":12}`. `chain_id` is 32 lowercase hex characters, `hash` is 64, and `seq` is an integer from 0 to 2^53-1. Any other content, or a `chain_id` that differs from the genesis entry's, makes it an invalid head (`invalid`, exit 3).
+
+After each fsynced security-state entry, the writer updates it while still holding the ledger lock:
 
 1. Write a temp file `ledger.head.tmp-<pid>` and fsync it.
 2. Replace `ledger.head` with it using `os.replace`.
 3. On Unix, fsync the directory.
 
-It only moves forward: the writer skips the update if the recorded seq is already at or past the new one.
+It only moves forward: the writer skips the update if the recorded head is valid, names the same chain, and its seq is already at or past the new one.
 
 **Windows.** `os.replace` fails with `PermissionError` while another process has `ledger.head` open without delete sharing, for example an antivirus scanner or a backup tool. Polarizer's own readers open it only under the lock, so they never cause this. The writer retries five times over about 250 ms. If every try fails, it leaves the temp file, writes one line to stderr, and carries on; the next security event tries again.
 
 That fails safe: a lagging `ledger.head` can only miss a truncation, never report a false one. The security entry itself is already durable in the ledger. A test on the Windows CI runner holds `ledger.head` open from a second handle, triggers an update, and checks that the writer doesn't crash, the ledger entry is intact, and `ledger.head` catches up once the handle closes.
 
-**Startup.** If `ledger.head` records a seq greater than the ledger's last seq, the status is `truncated`. A missing `ledger.head` is rebuilt (see First run). This catches whole lines lost from the end, for example a restored backup, which the chain alone can't see. It doesn't stop someone who can write both files; that needs anchoring.
+**Startup and verify.** If `ledger.head` records a seq greater than the ledger's last seq, the status is `truncated`. If its seq is at or before the last entry but its hash differs from that entry's hash, the status is `tampered`. The order of these checks is under Statuses. At startup a missing `ledger.head` is rebuilt (see First run); `verify` only reports it. This catches whole lines lost from the end, for example a restored backup, which the chain alone can't see. It doesn't stop someone who can write both files; that needs anchoring.
 
 ### Torn tail and repair
 
@@ -206,9 +222,10 @@ A line is committed when its newline is written. Any bytes after the last newlin
 
 `polarizer repair` handles a torn tail and nothing else:
 
+0. Refuse a `ledger_dir` inside a protected path (exit 2), and warn inside another git working tree (see Location and permissions).
 1. Take the lock, waiting up to 2 seconds (see The lock). If it's still held, refuse with the one-line message.
-2. Under the lock, verify again; a torn tail seen before taking the lock doesn't count. If the status isn't `torn tail`, refuse and show the status. Tampered, invalid, not-canonical and truncated ledgers need a person, not a tool.
-3. Copy the torn bytes to `ledger.jsonl.torn-<seq>-<first 12 hex of their sha256>`, created exclusively, and fsync it.
+2. Under the lock, verify again; a torn tail seen before taking the lock doesn't count. A v0 ledger is refused (exit 3). If the status isn't `torn tail`, refuse and show the status, with that status's exit code. Tampered, invalid, not-canonical and truncated ledgers need a person, not a tool. Because head problems take precedence over a torn tail, repair never runs on a ledger whose `ledger.head` shows lost lines.
+3. Copy the torn bytes to `ledger.jsonl.torn-<seq>-<first 12 hex of their sha256>`, created exclusively, and fsync it. `<seq>` is the seq the torn line would have had: one past the last complete entry, or 0 for a torn genesis.
 4. Truncate the ledger to its last newline. This is the only time Polarizer shortens the file, and it removes only bytes that were never committed.
 5. If the file is now empty (the torn line was the genesis), write a fresh `ledger.genesis` with a new chain id first.
 6. Append `ledger.repaired` with `data.bytes`, `data.sha256` and `data.file`, fsync it, update `ledger.head`, then release the lock.
