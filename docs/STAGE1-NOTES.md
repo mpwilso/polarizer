@@ -93,7 +93,7 @@ Nothing here has run on Windows. "Runs" means the test is expected to run there;
 - **stdout and stderr:** every command except serve now sets UTF-8, backslashreplace and `"\n"` newlines. `tests/test_cli_subprocess.py` runs `python -m polarizer verify` as a subprocess and compares raw stdout bytes with the golden files, including a non-ASCII directory name and a hostile `PYTHONIOENCODING`.
 - **Subprocess quoting:** the multi-line `python -c` is gone; the workers run `tests/helpers/append_worker.py` with a path argument. No other test used `-c`.
 - **Case:** a differently cased forbidden path is tested as refused on Windows, not refused on Linux, and following the file system on macOS (PROXY-SPEC.md, Startup step 2).
-- **Parallax on Windows:** Parallax's README says it needs bubblewrap and does not run on native Windows, so `always_forbidden()`'s Parallax defaults are moot there, but harmless. (The user reported this; this session did not read Parallax's README.)
+- **Parallax on Windows:** Parallax's README, read during the stage 1 review, says it needs bubblewrap and does not run on native Windows, so `always_forbidden()`'s Parallax defaults are moot there, but harmless.
 
 ## Differential fuzz (`tests/test_differential.py`)
 
