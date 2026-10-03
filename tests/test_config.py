@@ -3,12 +3,15 @@
 import json
 import sys
 import textwrap
+from pathlib import Path
 
 import anyio
 import pytest
 
 from polarizer import cli
 from polarizer.config import ConfigError, load
+
+REPO = Path(__file__).resolve().parent.parent
 
 GOOD = """
 ledger_dir = "~/ledgers/polarizer"
@@ -60,6 +63,15 @@ def test_defaults(tmp_path, fake_home):
         fake_home / ".local/share/parallax",
         fake_home / ".config/parallax",
     )
+
+
+def test_example_config_uses_the_manual_ledger(tmp_path, fake_home):
+    """polarizer.example.toml, filled in as docs/MANUAL-CHECK.md step 2 does, parses, and its
+    ledger is the manual check's own directory, not the default."""
+    example = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
+    cfg = load(write(tmp_path, example.replace("/home/<you>", fake_home.as_posix())))
+    assert cfg.ledger_dir == fake_home / ".local/share/polarizer-manual"
+    assert [u.prefix for u in cfg.upstreams] == ["probe", "fs"]
 
 
 def test_verify_and_repair_do_not_need_upstream_secrets(tmp_path, fake_home):

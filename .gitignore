@@ -8,4 +8,4 @@ __pycache__/
 /polarizer.toml
 .repro/
 .backup/
-/.mcp.json
+/manual/mcp.json

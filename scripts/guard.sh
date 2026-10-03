@@ -17,6 +17,9 @@
 # printed or stored, never contents.
 #
 # A snapshot is one line per item, "<section><TAB><fields...>", so check can diff it by section.
+# Both commands also warn, and exit 1, if this repo has a .mcp.json at its root: any claude session
+# started here would then spawn polarizer serve (CLAUDE.md rule 13).
+#
 # Snapshots are never deleted. check also reads the older format, where the summarized directory
 # was stored line by line, by summarizing those lines the same way.
 set -euo pipefail
@@ -34,6 +37,13 @@ shown=40
 repos() {
   [ -f "$paths_file" ] || { echo "no .guard-paths in $root" >&2; exit 2; }
   grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$paths_file"
+}
+
+root_mcp_json() {  # prints the warning and returns 1 if <root>/.mcp.json exists
+  if [ -e "$root/.mcp.json" ] || [ -L "$root/.mcp.json" ]; then
+    echo "warning: $root/.mcp.json exists; a claude session started here would spawn polarizer serve (CLAUDE.md rule 13)"
+    return 1
+  fi
 }
 
 mcp_hashes() {  # "<label><TAB><sha256|absent>" per MCP config location in ~/.claude.json
@@ -138,6 +148,7 @@ snapshot() {
   grep '^hash:' "$file" | while IFS=$'\t' read -r label hash; do echo "hash ${label#hash:}: ${hash:0:16}"; done
   echo "info $claude_json: $(grep '^info:' "$file" | cut -f2)"
   echo "snapshot $file"
+  root_mcp_json || exit 1
 }
 
 check() {
@@ -184,6 +195,7 @@ check() {
     echo "hash: MCP config in $claude_json unchanged ($(grep -c '^hash:' <<< "$now") locations)"
   fi
   echo "info $claude_json: was $(grep '^info:' "$file" | cut -f2); now $(info_of "$claude_json") (informational)"
+  root_mcp_json || changed=1
   exit "$changed"
 }
 

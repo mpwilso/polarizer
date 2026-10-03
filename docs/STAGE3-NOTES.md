@@ -36,7 +36,7 @@ Items 4 and 5 were found after the owner's decision on items 2 and 3. They have 
 8. **Reference tests compare twice:** with SDK clients, as asked, and with raw JSON-RPC, which shows what the SDK hides.
 9. **Two stage 1 and 2 bounds were loosened as well** as the two the prompt named: `test_repair`'s lock wait (now under 10 s) and `test_outcomes`' cancelled latency (now under 5,000 ms). See Time bounds.
 10. **MANUAL-CHECK.md** keeps the hung-upstream step from m0-plan.md's checklist, marked optional. The native Windows benchmark (checklist item 6) isn't in it, because it doesn't need a Claude Code session.
-11. **Server names.** `.mcp.json.example` names the server `polarizer`, so tools show as `mcp__polarizer__<prefix>__<tool>`. live-check uses `pz`, as the spikes did.
+11. **Server names.** The manual check's MCP config example (now `manual/mcp.json.example`) names the server `polarizer`, so tools show as `mcp__polarizer__<prefix>__<tool>`. live-check uses `pz`, as the spikes did.
 12. **A `reference` pytest marker** is registered in `pyproject.toml`.
 
 ## Guesses
@@ -113,5 +113,5 @@ While dry-running the live-check plumbing, one command began with `rm -rf "$S/dr
 | End to end with Claude Code: Claude Code's timeout cancel reaches the upstream within 2 s, and the ledger records `cancelled` | `scripts/live-check.sh` | yes, once: passed, 1 ms, 0.0239 USD (verified-facts.md, Stage 3) |
 | The example configs parse with Polarizer's own config reader | `polarizer verify --config <the example with /home/<you> replaced>` | yes: `no ledger at ...`, exit 2, no config error |
 | Esc during a call in an interactive session: the call stops, the probe gets a cancel, and the ledger records `cancelled` | docs/MANUAL-CHECK.md, step 5 | yes, once, by the owner, Oct 3, 2026: Claude Code 2.1.288 (verified-facts.md, Interactive) |
-| `/mcp` names, a hung upstream, and closing a session during a call, in an interactive session | docs/MANUAL-CHECK.md | no; for the owner |
+| `/mcp` names, a hung upstream, and closing a session during a call, in an interactive session | docs/MANUAL-CHECK.md | `/mcp` names: yes, by the owner, Oct 3, 2026: all 20 shown in full (verified-facts.md, Manual check follow-up). The hung upstream and closing a session: no; for the owner |
 | All of the above on Windows and macOS | CI | no |

@@ -2,8 +2,8 @@
 #   sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
 # docs/PROXY-SPEC.md describes every key.
 
-# Optional; this is the default.
-ledger_dir = "~/.local/share/polarizer"
+# Not the default ~/.local/share/polarizer: manual-check runs keep their own ledger.
+ledger_dir = "~/.local/share/polarizer-manual"
 
 # The ledger must never be inside these. Parallax's ~/.local/share/parallax and
 # ~/.config/parallax are always forbidden as well.

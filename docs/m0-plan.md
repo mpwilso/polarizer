@@ -48,7 +48,7 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## What M0 is and when it's done
 
-`polarizer serve` is a stdio MCP server that Claude Code starts from a project-scope `.mcp.json`. It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope). The few ways the MCP SDK itself changes results and tool definitions are stated limits (PROXY-SPEC.md, Results).
+`polarizer serve` is a stdio MCP server that Claude Code starts from an MCP config file (in this repository, only one passed with `--mcp-config`; CLAUDE.md rule 13). It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope). The few ways the MCP SDK itself changes results and tool definitions are stated limits (PROXY-SPEC.md, Results).
 
 M0 is done when all of these hold, and you've confirmed the manual checklist:
 
@@ -104,7 +104,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - **Otherwise** it exits 1 and names the failed check.
 
    It is manual only: it calls a model, so it's a script, never a CI test. It reports `~/.claude.json` bookkeeping. Steps 7 and 8 are implementation stage 3, with `docs/MANUAL-CHECK.md` (the checklist below) and the claims table.
-8. **Manual-check files:** `.mcp.json.example` (the real project-scope `.mcp.json` is gitignored) and `polarizer.example.toml`, with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
+8. **Manual-check files:** `manual/mcp.json.example` (the filled-in `manual/mcp.json` is gitignored and passed with `--mcp-config`; there is no `.mcp.json` at the repo root) and `polarizer.example.toml`, with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
 
 ## Test methods
 
@@ -164,7 +164,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 ## Manual checklist (M0 isn't done until you confirm)
 
 1. **Forbidden paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `ledger_forbidden_paths`.
-2. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Filesystem server. Pre-warm the pinned Filesystem server once first. docs/MANUAL-CHECK.md has the exact commands for this checklist. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
+2. **A real session.** Use `manual/mcp.json` in `~/code/polarizer`, passed with `--mcp-config`, never project or user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Filesystem server. Pre-warm the pinned Filesystem server once first. docs/MANUAL-CHECK.md has the exact commands for this checklist. From a terminal in `~/code/polarizer`, never from inside another Claude Code session, start `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config` and use both servers' tools. The ledger is `~/.local/share/polarizer-manual`, from `polarizer.example.toml`. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
 
    ```
    intact: 31 entries, 2 sessions, 12 calls

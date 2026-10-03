@@ -21,9 +21,9 @@ This installs Polarizer and its pinned dependencies into `.venv` inside the clon
 ## Configure
 
 1. Copy `polarizer.example.toml` to `polarizer.toml` and edit it. Each `[upstream.<prefix>]` table starts one MCP server. docs/PROXY-SPEC.md lists every key. List any directory the ledger must never be written to in `ledger_forbidden_paths`.
-2. Give Claude Code a project-scope `.mcp.json` (see `.mcp.json.example`) that runs `polarizer serve --config <absolute path to polarizer.toml>`. `--config` must be an absolute path.
+2. Give Claude Code an MCP config file (see `manual/mcp.json.example`) that runs `polarizer serve --config <absolute path to polarizer.toml>`. `--config` must be an absolute path. In your own project this can be a project-scope `.mcp.json`. Inside Polarizer's own repository, never: pass the file with `--mcp-config` instead, so development sessions there never start Polarizer.
 3. **Pre-warm every pinned `npx` server once** before first use: run its exact command by hand (for example `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 /some/dir < /dev/null`) and let it exit. The first fetch can take longer than Polarizer's connect timeout (10 seconds by default, 20 at most), and an upstream that misses it stays off until Claude Code restarts Polarizer.
-4. Start `claude` in the project directory and approve the `polarizer` server. `/mcp` lists the prefixed tools.
+4. Start Claude Code in the project directory, adding `--mcp-config <file> --strict-mcp-config` if the config is a separate file, and approve the `polarizer` server if asked. `/mcp` lists the prefixed tools.
 
 ## Check the ledger
 

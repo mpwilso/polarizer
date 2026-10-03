@@ -533,6 +533,42 @@ None of the three servers speaks 2026-07-28: in `auto` mode the SDK client fell 
 - **The probe's `wait`** hashed to `ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b` in every capture, the value in PIN-SPEC.md section 10.
 - **What the definitions hold:** the served forms use only `name`, `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. They have no `_meta`, no floats and no non-ASCII text. They hold 7 integers, the largest 10 (`trigger-long-running-operation`'s `duration` default and `get-resource-links`' `count` maximum). So open question 1 (large integers) affects none of these 27 reference tools.
 
+## Manual check follow-up (Oct 3, 2026)
+
+### Development sessions spawned the proxy (from the ledger, not interactive)
+
+The manual check had created a `.mcp.json` at the repo root, and `.claude/settings.local.json` (local, gitignored) enables project MCP servers. So every `claude` started in `~/code/polarizer` launched `polarizer serve` in front of the probe and Filesystem, and wrote to `~/.local/share/polarizer`. The owner deleted that `.mcp.json` and moved the ledger to `~/.local/share/polarizer-m0-check-20261003`. Read in this session, that ledger verifies `intact: 41 entries, 7 sessions, 6 calls`, head at seq 40. After the manual check's last call (seq 28), it holds three such starts, each a `session.started`, two `upstream.connected` (probe 6 tools, fs 14) and a `session.client` (`claude-code` 2.1.288, 2026-07-28), with no calls:
+
+| Seqs | `session.started` ts (UTC) |
+|---|---|
+| 29 to 32 | 2026-10-03T22:24:57.473Z |
+| 33 to 36 | 2026-10-03T22:55:52.131Z |
+| 37 to 40 | 2026-10-03T22:57:01.118Z |
+
+The last is the development session that wrote this section: its `scripts/guard.sh snapshot` ran at 22:57:06Z, and Polarizer's tools were listed in it, though it never called one. Which sessions made the first two starts is not known.
+
+### Esc restart timing (interactive, Claude Code 2.1.288)
+
+From Claude Code's MCP log for the server, as read by the owner, with the ledger read in this session:
+- **14:04:34.791Z:** SIGINT to the Polarizer process (log); `call.returned` `cancelled` at seq 22 (ledger).
+- **14:04:46.954Z:** a new connection, 12.16 s later (log); `session.started` at seq 23, 14:04:47.380Z (ledger).
+- **14:05:03.755Z:** the next tool call (log); `call.sent` at seq 27, 14:05:03.776Z (ledger).
+
+Whether Claude Code restarted the server by itself or when the owner typed the next prompt is unresolved.
+
+### `/mcp` names and labels (interactive, observed by the owner)
+
+From a screenshot of `/mcp` during the manual check: all 20 tool names were shown in full, including the longest, `fs__list_directory_with_sizes`, and none was shortened. Claude Code showed read-only and destructive labels taken from the upstream tools' annotations. Annotations are part of the definition hash (PIN-SPEC.md, section 2), so from M1a a changed label counts as drift.
+
+### `claude --help` (2.1.288, read in this session)
+
+    --mcp-config <configs...>             Load MCP servers from JSON files or
+                                          strings (space-separated)
+    --strict-mcp-config                   Only use MCP servers from --mcp-config,
+                                          ignoring all other MCP configurations
+
+Neither is marked "only works with --print", unlike other options in the same help, so both apply to interactive sessions. The help doesn't mention claude.ai connectors. Whether `--strict-mcp-config` turns them off is not verified.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -540,7 +576,6 @@ These are assumed or open. Nothing here has been observed.
 - **Interactive sessions:** apart from Esc to cancel (see Interactive), every Claude Code fact above is headless. Not tested interactively:
   - closing a session without pressing Esc while a call is in flight (does Claude Code send `notifications/cancelled`, or only close stdin?);
   - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap);
-  - `/mcp` display of prefixed names and any shortening of long names;
   - whether interactive sessions open `subscriptions/listen` the same way;
   - elicitation forms.
 - **Idle timeout:** it did not fire headless. Whether it applies interactively is unknown.
