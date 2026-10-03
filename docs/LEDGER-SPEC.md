@@ -111,6 +111,7 @@ A line with no `v` key is a v0 entry, the format Parallax's ledger writes today.
 - **Check order** for each v0 line: structure (valid UTF-8 and JSON, an object, no `v` key, exactly the v0 keys), then `prev`, then `hash`, then line form. A wrong line form is `not canonical`. v0 has no seq, so v0 messages name only the line, and `conformance/expected.json` records the seq as `null`.
 - **No v1 rules:** the subset and the 16 KiB limit don't apply. Floats and non-ASCII keys are legal in v0.
 - **No `ledger.head`:** a v0 ledger has no chain id, so any `ledger.head` beside one is an invalid head.
+- **Blank lines are `invalid`** (`not valid JSON`). This is a deliberate difference from Parallax's own `verify`, which skips blank lines. The frozen v0 check is byte for byte on line form: every line must be exactly `json.dumps(entry, sort_keys=True)`, and an empty line is the line form of no entry. Parallax's writer never writes one, so a blank line means the file was edited.
 
 v0 checks are frozen: they use Python's `json.dumps(entry, sort_keys=True)` as the line form and `json.dumps(body, sort_keys=True)` for the hash, exactly as Parallax's `ledger.py` does, and they never change. Every verifier keeps them forever, so a Parallax `Ledger-Head:` commit trailer (the full `hash` of the last entry at accept time) can always be checked against its chain. v0 hashes depend on how Python formats floats, which is one reason v1 bans floats.
 

@@ -3,7 +3,9 @@ line and seq for randomly mutated chains.
 
 From a fixed seed, build valid v1 chains (and sometimes the v0 fixture), apply random mutations
 (bit flips in lines, deleted, swapped and duplicated lines, a truncated last line, a reformatted
-line, a truncated file, edits to ledger.head), and run both verifiers on each result. Any disagreement writes a
+line, a truncated file, edits to ledger.head, and structure-level edits: reordered keys with the
+hash kept, whitespace between tokens, a character as its \\uXXXX escape, an integer as 1.0 or 1e0,
+a UTF-8 BOM at a line's start, and a CR before the newline), and run both verifiers on each result. Any disagreement writes a
 reproducer to .repro/ (gitignored) and fails, naming the seed and case.
 
     POLARIZER_FUZZ_SEED=<n> POLARIZER_FUZZ_CASES=<n> uv run pytest tests/test_differential.py -s
@@ -134,6 +136,142 @@ def reformat_line(rng, data, head):
     return join(lines, tail), head
 
 
+# Structure-level mutations: the same JSON values, or nearly, in other bytes. Each one edits a
+# random complete line, or now and then the ledger.head line.
+
+
+def spans(text):
+    """[(kind, start, end)] for each string literal (with its quotes) and number in JSON text."""
+    out, i = [], 0
+    while i < len(text):
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < len(text) and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(("string", i, min(j + 1, len(text))))
+            i = j + 1
+        elif c in "-0123456789":
+            j = i + 1
+            while j < len(text) and text[j] in "0123456789.eE+-":
+                j += 1
+            out.append(("number", i, j))
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def outside_strings(text):
+    inside = set()
+    for kind, a, b in spans(text):
+        if kind == "string":
+            inside.update(range(a, b))
+    return [i for i in range(len(text) + 1) if i not in inside]
+
+
+def on_text(edit):
+    """Lift a str -> str edit to (rng, data, head) on a random line or on the head line."""
+
+    def mutation(rng, data, head):
+        lines, tail = split(data)
+        target_head = head is not None and (not lines or rng.random() < 0.2)
+        raw = head[:-1] if target_head and head.endswith(b"\n") else head if target_head else None
+        if not target_head:
+            if not lines:
+                return data, head
+            i = rng.randrange(len(lines))
+            raw = lines[i]
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return data, head
+        new = edit(rng, text).encode("utf-8", "surrogatepass")
+        if target_head:
+            return data, new + (b"\n" if head.endswith(b"\n") else b"")
+        lines[i] = new
+        return join(lines, tail), head
+
+    mutation.__name__ = edit.__name__
+    return mutation
+
+
+def reorder_keys_keep_hash(rng, text):
+    """The same entry, hash field and all, with object keys in another order."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return text
+
+    def shuffle(x):
+        if isinstance(x, dict):
+            items = [(k, shuffle(v)) for k, v in x.items()]
+            rng.shuffle(items)
+            return dict(items)
+        if isinstance(x, list):
+            return [shuffle(v) for v in x]
+        return x
+
+    new = json.dumps(shuffle(value), separators=(",", ":"), ensure_ascii=False)
+    if new == text and isinstance(value, dict) and len(value) > 1:
+        new = json.dumps(
+            dict(reversed(list(value.items()))), separators=(",", ":"), ensure_ascii=False
+        )
+    return new
+
+
+def add_whitespace(rng, text):
+    """Spaces, tabs or a CR/LF-free run of whitespace between two tokens, or at either end."""
+    where = rng.choice(outside_strings(text))
+    return text[:where] + rng.choice([" ", "  ", "\t", " \t"]) + text[where:]
+
+
+def escape_char(rng, text):
+    """One character inside a string literal written as its \\uXXXX escape."""
+    candidates = []
+    for kind, a, b in spans(text):
+        if kind != "string":
+            continue
+        j = a + 1
+        while j < b - 1:
+            if text[j] == "\\":
+                j += 6 if text[j + 1 : j + 2] == "u" else 2
+                continue
+            candidates.append(j)
+            j += 1
+    if not candidates:
+        return text
+    j = rng.choice(candidates)
+    units = text[j].encode("utf-16-be", "surrogatepass")
+    digits = "".join(
+        f"\\u{int.from_bytes(units[k : k + 2], 'big'):04x}" for k in range(0, len(units), 2)
+    )
+    return (
+        text[:j]
+        + (digits.upper().replace("\\U", "\\u") if rng.random() < 0.3 else digits)
+        + text[j + 1 :]
+    )
+
+
+def integer_as_float(rng, text):
+    """One integer written as N.0 or as Ne0."""
+    numbers = [
+        (a, b) for kind, a, b in spans(text) if kind == "number" and text[a:b].lstrip("-").isdigit()
+    ]
+    if not numbers:
+        return text
+    a, b = rng.choice(numbers)
+    return text[:a] + text[a:b] + rng.choice([".0", "e0"]) + text[b:]
+
+
+def bom_at_line_start(rng, text):
+    return "\ufeff" + text
+
+
+def cr_before_newline(rng, text):
+    return text + "\r"
+
+
 def truncate_file(rng, data, head):
     return data[: rng.randrange(len(data) + 1)], head
 
@@ -175,6 +313,12 @@ MUTATIONS = [
     reformat_line,
     truncate_file,
     edit_head,
+    on_text(reorder_keys_keep_hash),
+    on_text(add_whitespace),
+    on_text(escape_char),
+    on_text(integer_as_float),
+    on_text(bom_at_line_start),
+    on_text(cr_before_newline),
 ]
 
 
@@ -198,7 +342,7 @@ def test_both_verifiers_agree_on_mutated_chains(tmp_path, capsys):
     rng = random.Random(SEED)
     v0 = (CONFORMANCE / "valid" / "v0-parallax.jsonl").read_bytes()
     start = time.monotonic()
-    disagreements, statuses = [], {}
+    disagreements, statuses, by_mutation = [], {}, {}
     for case in range(CASES):
         data, head = (v0, None) if rng.random() < 0.1 else chain(rng)
         applied = rng.sample(MUTATIONS, rng.choice([0, 1, 1, 1, 2, 2, 3]))
@@ -207,6 +351,9 @@ def test_both_verifiers_agree_on_mutated_chains(tmp_path, capsys):
         theirs = run_reference(tmp_path, data, head)
         ours = run_polarizer(data, head)
         statuses[ours[0]] = statuses.get(ours[0], 0) + 1
+        for m in applied:
+            row = by_mutation.setdefault(m.__name__, {})
+            row[ours[0]] = row.get(ours[0], 0) + 1
         if theirs != ours:
             REPRO.mkdir(exist_ok=True)
             stem = REPRO / f"seed{SEED}-case{case}"
@@ -220,10 +367,14 @@ def test_both_verifiers_agree_on_mutated_chains(tmp_path, capsys):
             )
     took = time.monotonic() - start
     with capsys.disabled():
-        print(f"\ndifferential: seed {SEED}, {CASES} cases, {took:.1f} s, statuses {statuses}")
+        print(f"\ndifferential: seed {SEED}, {CASES} cases, {took:.1f} s")
+        print("  cases per status: " + ", ".join(f"{k} {v}" for k, v in sorted(statuses.items())))
+        for name, row in sorted(by_mutation.items()):
+            print(f"  {name}: " + ", ".join(f"{k} {v}" for k, v in sorted(row.items())))
     assert not disagreements, f"seed {SEED}: {len(disagreements)} disagreements\n" + "\n".join(
         disagreements[:10]
     )
+    assert took < 60, f"the default run took {took:.1f} s, over the 60 s limit"
     assert set(statuses) == {
         "intact",
         "tampered",

@@ -58,3 +58,23 @@ def test_reference_verifier_is_small_and_standalone():
         line.split()[1] for line in text.splitlines() if line.startswith(("import ", "from "))
     }
     assert imports == {"hashlib", "json", "re", "sys", "rfc8785"}
+
+
+def test_blank_line_in_v0_is_invalid_in_both_verifiers(tmp_path):
+    """Deliberately unlike Parallax's own verify, which skips blank lines: the frozen v0 check
+    is byte for byte on line form (LEDGER-SPEC.md, v0)."""
+    from conftest import CONFORMANCE
+
+    lines = (CONFORMANCE / "valid" / "v0-parallax.jsonl").read_bytes().split(b"\n")
+    data = b"\n".join(lines[:2] + [b""] + lines[2:])
+    path = tmp_path / "blank.jsonl"
+    path.write_bytes(data)
+    assert reference_verify.verify(path) == {
+        "status": "invalid",
+        "line": 3,
+        "seq": None,
+        "check": "structure",
+    }
+    result = ledger.verify_bytes(data, None)
+    assert (result.status, result.line, result.seq) == ("invalid", 3, None)
+    assert result.message == "invalid: line 3: not valid JSON"
