@@ -1,6 +1,6 @@
 # Polarizer milestones
 
-These are in build order. The cut line is everything above "Stretch". Sizes are rough: small is days, medium is one to two weeks, large is more. Details for M0 and M1a are in docs/m0-plan.md, and the ledger format is in docs/LEDGER-SPEC.md.
+These are in build order. The cut line is everything above "Stretch". Sizes are rough: small is days, medium is one to two weeks, large is more. Details for M0 are in docs/m0-plan.md, for M1a in docs/PIN-SPEC.md, and the ledger format is in docs/LEDGER-SPEC.md.
 
 The order puts M2b before the practice range, because the range's exfiltration cases need taint. M1b comes after M2b because scanning has the most prior art.
 

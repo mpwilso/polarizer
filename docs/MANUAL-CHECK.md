@@ -1,5 +1,7 @@
 # Manual check (M0)
 
+**Which code this checks.** These steps describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run this check as written, check out commit 4eaa61a. The M1a steps (priming the ledger, approving, and the rug-pull check) are added in stage 5.
+
 Run this in a real, interactive Claude Code session. It covers what no headless run can: `/mcp`, Esc to cancel, and normal use of two upstreams through Polarizer. Each step gives the command, what to expect, and what to paste back if it differs. Run every command from `~/code/polarizer`, in a terminal. Never run the manual check from inside another Claude Code session: that session's tools and settings would be mixed into what you observe.
 
 ## 1. Prepare

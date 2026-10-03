@@ -1,6 +1,6 @@
 # Quickstart (draft)
 
-This is a draft for a future README. It describes Polarizer 0.1 as it is today, milestone M0. It is not published, and Polarizer is not on PyPI.
+This is a draft for a future README. It describes Polarizer 0.1 at milestone M0, the code at commit 4eaa61a. It is not published, and Polarizer is not on PyPI. From M1a, Polarizer exposes no tool until you approve it with `polarizer approve`, and no flag brings M0's behavior back; this draft gains the M1a first run in stage 5.
 
 ## What M0 is
 

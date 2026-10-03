@@ -62,7 +62,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 ## Build order
 
 1. **Project setup.**
-   - `pyproject.toml` with `mcp>=2.2,<3` and `rfc8785==0.1.4`, plus pytest and ruff for development, managed with uv in `.venv` with `uv.lock` committed.
+   - `pyproject.toml` with `mcp==2.2.0`, `mcp-types==2.2.0` and `rfc8785==0.1.4`, plus pytest and ruff for development, managed with uv in `.venv` with `uv.lock` committed.
    - `scripts/test.sh` runs ruff, then pytest.
    - CI with one trivial test: Linux on Python 3.11, 3.12 and 3.13; Windows and macOS on 3.12.
 2. **`conformance/`**: `reference_verify.py` first, then `tools/make_fixtures.py` (see Test methods), then the generated valid and broken chains and `expected.json`.
@@ -248,7 +248,7 @@ These stay until PLAN.md draft 5, which is deferred until after M0.
 
 1. The ledger fields are those in LEDGER-SPEC.md. OCSF names belong in a later export.
 2. Claude Code's default hard limit is about 27.8 hours, so Polarizer's own hold timeout governs, not a race. Claude Code sends `notifications/cancelled` when its limit fires.
-3. TOML, not YAML; `mcp>=2.2,<3`, not `>=2.1`.
+3. TOML, not YAML; `mcp==2.2.0` and `mcp-types==2.2.0`, pinned exactly, not `>=2.1`.
 4. Pinning is approve-and-pin, not trust on first use.
 5. Hash the whole served tool form, not a named list of fields.
 6. Drift notices: in 2026-07-28, list changes travel only over `subscriptions/listen`. Claude Code opens that stream at connect and re-lists when notified (headless). The SDK client caches lists only from 2026-07-28 upstreams with TTL hints, so use `refresh`.

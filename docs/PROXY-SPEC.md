@@ -103,23 +103,24 @@ Everything below happens before the proxy answers Claude Code's first message. C
 3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`.
    - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: <verify's first line>; run polarizer verify`. For a torn tail, whose line already ends `; run polarizer repair`, nothing is added.
    - A v0 ledger exits 3: `polarizer: ledger at <dir> is v0 (Parallax's format); Polarizer only writes v1`.
-4. **Append `session.started`** with Polarizer's version, the config hash and (M1a) `pins`. The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
+4. **Append `session.started`** with Polarizer's version and the config hash. The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
 5. **Connect every upstream in parallel,** each within its own `connect_timeout_seconds`. Connecting means opening the SDK `Client` and listing the tools (see Listing).
    - Each upstream gets an `upstream.connected` entry, with its protocol version and tool count, or its error (`timeout after 10 s`, the exception's one-line message, or a listing limit).
    - A failed or hung upstream is skipped for the session, and the others serve.
    - There is no retry in M0. A skipped upstream returns only when Claude Code restarts Polarizer.
    - (M1a) Each connected upstream's list is then hashed, stored and checked against the pins, and the results recorded (PIN-SPEC.md, section 6). Nothing is exposed that isn't approved.
+   - (M1a) End of input during startup doesn't cancel it. With stdin closed, `serve` finishes steps 3 to 5, fsyncs and exits 0, which is how a ledger is primed before the first session (PIN-SPEC.md, sections 7 and 8).
 6. **Serve.** With the default timeouts, steps 3 to 5 take at most about 12 s plus ledger verification, well under 30 s.
 
 ## Listing
 
 **Exposed names.** Each upstream tool is exposed as `<prefix>__<tool>`. A tool whose exposed name would not match `^[A-Za-z0-9._-]{1,128}$` is left out, and its name is recorded in `upstream.connected` under `skipped_tools`.
 
-**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, without `_meta` (PIN-SPEC.md, sections 4 and 5). `serve --no-pins` lists the live definitions as M0 does. On every start under that flag, `serve` writes a warning line to stderr and records `pins: "off"` in its `session.started` (PIN-SPEC.md, section 7).
+**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, which has no `_meta` (PIN-SPEC.md, sections 4 and 5). Nothing turns pins off; M0's behavior is the code at commit 4eaa61a (PIN-SPEC.md, section 7).
 
 **Paging.** `tools/list` follows `next_cursor` for up to 100 pages and 1,000 tools per upstream. Past either limit, that upstream is refused for the session, with the error `more than 100 pages` or `more than 1000 tools` recorded.
 
-**Freshness.** Every `tools/list` from Claude Code lists each connected upstream again with `cache_mode="refresh"`, so a missed change notice costs nothing. Polarizer sets no cache hints of its own. (M1a) A failed refresh hides that upstream's tools and records `upstream.refresh_failed`, instead of keeping its last list. When a later refresh succeeds, a tool whose hash is still the approved one comes back with no new approval. If none succeeds, the tools stay hidden until the server restarts (PIN-SPEC.md, section 6).
+**Freshness.** Every `tools/list` from Claude Code lists each connected upstream again with `cache_mode="refresh"`, so a missed change notice costs nothing. Polarizer sets no cache hints of its own. (M1a) A failed refresh hides that upstream's tools and records `upstream.refresh_failed`, instead of keeping its last list. When a later refresh succeeds, a tool whose hash is still the approved one comes back with no new approval. While the list is unknown because a refresh failed, `serve` retries on a timer from stage 5: after 30 s, doubling up to 5 minutes, each attempt bounded by `connect_timeout_seconds`, reset on success. A lost connection is not retried; its tools stay hidden until the server restarts (PIN-SPEC.md, section 6).
 
 **Change notices.**
 - **From 2026-07-28 upstreams:** Polarizer holds `client.listen(tools_list_changed=True)` open and republishes each event as `ToolsListChanged()` on its own `subscriptions/listen` bus.
@@ -166,7 +167,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 - **`result_bytes`:** the length of the compact UTF-8 JSON of the result as sent to the client, that is `len(json.dumps(result.model_dump(by_alias=True, mode="json", exclude_none=True), separators=(",", ":"), ensure_ascii=False).encode("utf-8"))`. It is 0 when nothing was returned: for `cancelled`, and for `protocol-error`, where the client gets a JSON-RPC error instead of a result.
 
 Notes on the outcomes:
-- **Shutdown (M1a).** SIGINT, SIGTERM and end of input start one shutdown: in-flight calls are recorded as `cancelled` with the error `polarizer shut down during the call`, upstream clients get at most 1 s to close, and the writer is closed. A second signal skips the wait (PIN-SPEC.md, section 8).
+- **Shutdown (M1a).** SIGINT, SIGTERM and end of input start one shutdown (end of input during startup lets startup finish first): in-flight calls are recorded as `cancelled` with the error `polarizer shut down during the call`, upstream clients get at most 1 s to close, and the writer is closed. A second signal skips the wait (PIN-SPEC.md, section 8).
 - **Timeouts.** M0 has no transport timeout, and "timeout" is not part of `transport-error`. Polarizer sets no per-call read timeout in M0, so the SDK's local -32001 can't occur. A call is bounded only by Claude Code's own limit, which arrives as `cancelled`.
 - **Unreadable results.** A result the SDK can't parse into its models (for example a content block of an unknown `type`) is a `transport-error`, with the fixed line `polarizer: upstream <prefix> failed: result did not match the MCP schema` for the client and the ledger. The SDK's own message quotes the result, so it is never passed on or recorded (Results).
 - **Dead upstreams.** The SDK reports them as `MCPError` -32000, with nothing marking the error as local. An upstream that sends -32000 itself is therefore recorded as a transport error. That's rare, and harmless apart from the label.
@@ -182,7 +183,7 @@ Polarizer hands the client the result object the SDK's upstream client parsed, u
 4. **No `execution` in 2026-07-28 tool definitions.** A tool's `execution` (task support) exists only in 2025-11-25, so a 2026-07-28 client never sees it. Polarizer doesn't proxy tasks in any era. (M1a) No client sees it: tools are served from stored copies in the 2026-07-28 form (PIN-SPEC.md, section 2).
 5. **A result the SDK can't parse becomes an error**, recorded as `transport-error` with a fixed line (Calls, Notes on the outcomes).
 
-**(M1a) "Only the names change" no longer holds literally for tool definitions.** Tools are served from stored copies in the 2026-07-28 form, so no client in any era gets `execution`, and none gets a tool's `_meta` (PIN-SPEC.md, sections 2 and 5). Polarizer's own code makes this change, not the SDK, and it is a stated limit of M1a, like the five above. Results are not affected. `serve --no-pins` serves definitions as M0 does.
+**(M1a) "Only the names change" no longer holds literally for tool definitions.** Tools are served from stored copies in the 2026-07-28 form, so no client in any era gets `execution`, and none gets a tool's `_meta` (PIN-SPEC.md, sections 2 and 5). Polarizer's own code makes this change, not the SDK, and it is a stated limit of M1a, like the five above. Results are not affected.
 
 Everything else arrives as the upstream sent it, at every level: text, image, audio, embedded resources, resource links, annotations, `_meta`, `structuredContent` (floats included) and `isError`.
 
@@ -198,15 +199,16 @@ polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--ar
 polarizer repair (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
-M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7:
+M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax.
 
 ```
-polarizer serve --config <absolute path> [--no-pins]
 polarizer pending (--config <absolute path> | --ledger-dir <absolute path>) [--upstream <prefix>]
-polarizer approve (--config <absolute path> | --ledger-dir <absolute path>) <prefix> <tool> <def_hash>
-polarizer approve (--config <absolute path> | --ledger-dir <absolute path>) --group <group id> [--upstream <prefix>]
-polarizer reject (--config <absolute path> | --ledger-dir <absolute path>) <prefix> <tool> <def_hash> --reason <text>
+polarizer approve (--config <absolute path> | --ledger-dir <absolute path>) <prefix> <tool> <def_hash> [--allow-no-terminal]
+polarizer approve (--config <absolute path> | --ledger-dir <absolute path>) --group <group id> [--upstream <prefix>] [--allow-no-terminal]
+polarizer reject (--config <absolute path> | --ledger-dir <absolute path>) <prefix> <tool> <def_hash> --reason <text> [--allow-no-terminal]
 ```
+
+`approve` and `reject` refuse to run when stdin is not a terminal, unless `--allow-no-terminal` is given: one line on stderr, exit 2, nothing written. It is a speed bump against accidents, not a barrier, since an agent can pass the flag.
 
 Each command takes exactly one of `--config` (the directory is `ledger_dir` from that file, or the default `~/.local/share/polarizer`) or `--ledger-dir`. There is no current-directory default. These errors go to stderr as one line and exit 2:
 

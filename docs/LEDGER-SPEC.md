@@ -64,7 +64,7 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | Kind | `data` |
 |---|---|
 | `ledger.genesis` | `chain_id` |
-| `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256`, and from M1a `pins` (`"on"`, or `"off"` under `serve --no-pins`) |
+| `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256` |
 | `session.client` | `session`, `client_name`, `client_version`, `protocol_version`: written once, on the first request that carries client information. In 2026-07-28 that's every request's `_meta`; in the older era it's `initialize`. |
 | `upstream.connected` | `prefix`, then either `protocol_version`, `tools` and `skipped_tools` (a list of names left out), or `error` |
 | `call.sent` | `session`, `tool` (the full exposed name, `<prefix>__<tool>`), `args_commit`, `meta_dropped` (a list of strings), `client_call_id` (a string, or `null` when the client sent none) |
@@ -201,7 +201,7 @@ Measured on WSL2 ext4: a plain write took 0.3 µs at p50, and write plus fsync t
 - **Security-state entries are fsynced before Polarizer acts on them:** `ledger.genesis`, `tool.approved`, `tool.rejected`, `tool.drift`, `ledger.repaired`, `ledger.head_rebuilt`, and later milestones' holds and decisions.
 - **`call.sent` is written before the call is forwarded, but not fsynced inline.** The write alone survives a Polarizer crash. An inline fsync would add about 1 ms to every call only to cover an operating-system crash. The writer fsyncs whenever its queue empties.
 - **A `call.sent` with no `call.returned`** means "outcome unknown", not a missing call.
-- **M1a (PIN-SPEC.md, section 3):** `tool.seen`, `tool.unservable` and `upstream.refresh_failed` are written like `call.sent`, without an inline fsync. `tool.rejected` and `tool.drift` are fsynced, but they only ever hide a tool, so Polarizer hides it at once without waiting for the fsync. Only `tool.approved` must be durable before Polarizer acts on it, and `serve` fsyncs the ledger itself before acting on one another process wrote.
+- **M1a (PIN-SPEC.md, section 3):** `tool.seen`, `tool.unservable` and `upstream.refresh_failed` are written like `call.sent`, without an inline fsync. `tool.approved` must be durable before anything acts on it: `approve` fsyncs it before reporting success, and `serve` fsyncs the ledger itself before acting on one another process wrote. `tool.rejected` is fsynced, and `ledger.head` updated, before `reject` reports success, because a rejection can revoke an approval and a lost one would bring the tool back. The startup head check catches such a lost tail only while `ledger.head` survives. `tool.drift` is fsynced, but it only ever hides a tool, so `serve` hides at once without waiting for the fsync, and it hides at once on a rejection it adopts too.
 
 ### ledger.head
 
