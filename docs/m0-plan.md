@@ -4,8 +4,9 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## Changes from the last version
 
+- **Stage 1 review:** `protected_paths` renamed `ledger_forbidden_paths` ("protected paths" is kept for M2a), a differential fuzz test, `mcp` pinned to 2.2.0, CI actions pinned by commit SHA, and `docs/PUSHING.md`.
 - **Revision 7** (the implementation session's step 0, second round):
-  - `protected_paths` in polarizer.toml replaces `.guard-paths` in the tool. Parallax's two directories are always protected, and paths are compared by resolved real path components.
+  - `ledger_forbidden_paths` in polarizer.toml (first named `protected_paths`) replaces `.guard-paths` in the tool. Parallax's two directories are always forbidden, and paths are compared by resolved real path components.
   - `verify` and `repair` take exactly one of `--config` or `--ledger-dir`, both absolute.
   - `ledger.head` holds `chain_id`, `hash` and `seq`. One status order for the whole file: lines, then the head, then a torn tail, with two new order fixtures.
   - `verify` never writes, and reports a missing `ledger.head` on one extra line.
@@ -72,7 +73,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - `lock.py`: the ledger lock and its 2 s wait;
    - `writer.py`: the writer thread, fsync policy, first run, `ledger.head` and repair;
    - `sidefiles.py`: argument side files and `verify --args`;
-   - `ledgerdir.py`: location, modes, the refusal inside protected paths, and the git-tree warning;
+   - `ledgerdir.py`: location, modes, the refusal inside forbidden paths, and the git-tree warning;
    - `config.py`: parse and validate polarizer.toml with tomllib, with no upstream connections (moved here from stage 2, because `verify --config` and `repair --config` need it);
    - `cli.py` with `verify [--args]` and `repair`, and `tests/golden/` for their output.
 
@@ -90,6 +91,11 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
      - requests to the client;
      - paging past the limits.
 7. **`scripts/live-check.sh`**: headless `claude -p` runs with a small model (`--model haiku`), using `--strict-mcp-config`, `--mcp-config` with a file in the repo, and `--no-session-persistence`.
+   - **It prints its conditions first,** so a result can be read against them. It reads only its own command line and environment, never a settings file:
+     - the exact `claude` arguments it passes;
+     - `permission mode: <value>` when it passes `--permission-mode`, otherwise `permission mode: not passed; the user-scope default applies and was not read`;
+     - `auto mode: <on or off>` when its own arguments or environment set it, otherwise `auto mode: not set here; user-scope settings may set it and were not read`;
+     - the names of set environment variables starting `CLAUDE_` or `ANTHROPIC_` (names only), and the values of `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`, `MCP_CONNECT_TIMEOUT_MS` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`.
    - A basic call with progress.
    - A 14 s call under `MCP_TOOL_TIMEOUT=5000`.
    - **It passes only if both hold:**
@@ -137,6 +143,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | stdout of `serve` carries only JSON-RPC | `pytest tests/test_stdout.py` | no |
 | Every `verify`, `verify --args` and `repair` case prints its exact stdout and exit code | `pytest tests/test_golden.py` | yes, Linux |
 | The canonical subset holds; non-ASCII keys break it | throwaway differential; `pytest tests/test_canon.py` | throwaway yes, repo yes (Linux) |
+| Both verifiers agree on status, line and seq for 5,000 randomly mutated chains per run (bit flips, deleted, swapped and duplicated lines, truncation, reformatted lines, `ledger.head` edits), from a printed seed | `pytest tests/test_differential.py` | yes, Linux: seed 20261002, plus 20,000 cases each on seeds 1 to 5, no disagreements |
 | Fixtures regenerate byte for byte, and both verifiers agree on every one | `pytest tests/test_fixtures.py tests/test_conformance.py` | yes, Linux |
 | Bytes read per append don't grow with ledger size; two processes leave one chain; catch-up works | `pytest tests/test_writer.py` | yes, Linux |
 | First run: the genesis entry is written once when two processes start together; a missing `ledger.head` is rebuilt and recorded | `pytest tests/test_first_run.py` | yes, Linux |
@@ -145,12 +152,12 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | `verify` creates, deletes and modifies nothing, on a writable and on a read-only directory, and never creates the lock file | `pytest tests/test_verify_readonly.py` | yes, Linux |
 | `verify` and `repair` need exactly one of `--config` or `--ledger-dir`, absolute, else one line and exit 2 | `pytest tests/test_golden.py` | yes, Linux |
 | Side files: exclusive create, orphans reported, deletion still verifies, tampering exits 8 | `pytest tests/test_args.py` | yes, Linux |
-| `ledger_dir` modes; refusal inside a `protected_paths` entry or Parallax's directories (always protected), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | yes, Linux |
+| `ledger_dir` modes; refusal inside a `ledger_forbidden_paths` entry or Parallax's directories (always forbidden), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | yes, Linux |
 | End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | no |
 
 ## Manual checklist (M0 isn't done until you confirm)
 
-1. **Protected paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `protected_paths`.
+1. **Forbidden paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `ledger_forbidden_paths`.
 2. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Everything server. Pre-warm the pinned Everything server once first. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
 
    ```
@@ -243,4 +250,4 @@ These stay until PLAN.md draft 5, which is deferred until after M0.
 11. M2a includes resolved-path rules. Without them, it can only hold whole tools.
 12. The rest of M2 is M2b, placed before the practice range.
 13. "Unchanged" means only the names gain a prefix, and M0 is tools only.
-14. The ledger lives in `ledger_dir`, by default `~/.local/share/polarizer/`. Startup and repair refuse it inside any `protected_paths` entry and Parallax's directories, and warn inside any other git working tree.
+14. The ledger lives in `ledger_dir`, by default `~/.local/share/polarizer/`. Startup and repair refuse it inside any `ledger_forbidden_paths` entry and Parallax's directories, and warn inside any other git working tree.

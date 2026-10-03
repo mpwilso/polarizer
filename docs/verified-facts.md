@@ -151,6 +151,17 @@ Not measured: native Windows (no Windows interop from this shell), macOS, and WS
 
 `parallax/accept.py:112`: the `Ledger-Head:` commit trailer is the full `hash` of the last entry at accept time.
 
+## CI actions pinned by commit (Oct 2, 2026)
+
+Looked up over the network from each action's own repository with the GitHub REST API (`/repos/<owner>/<repo>/releases`, `/git/ref/tags/<tag>` and `/commits/<sha>`), and `action.yml` read at that commit from raw.githubusercontent.com:
+
+| Action | Tag | Commit | Runtime in `action.yml` |
+|---|---|---|---|
+| `actions/checkout` | v7.0.1 (latest release, Jul 20, 2026) | `3d3c42e5aac5ba805825da76410c181273ba90b1` | node24 |
+| `astral-sh/setup-uv` | v10.2.0 (latest release, Sep 21, 2026) | `c18668ad3cf93ea998bef934396af7bb5c839dc7` | node24; still has the `version` input |
+
+Both tags are lightweight tags that point directly at those commits. The workflow had used the moving tags `v4` and `v6`; it now uses these newer releases, pinned by SHA.
+
 ## The v0 fixture (run once, Oct 2, 2026)
 
 `tools/make_v0_fixture.py ~/code/parallax` checked that `22ef600` resolves to `22ef60083b56683ab5abda19bb224309d07fee88`, wrote `git show 22ef600:parallax/ledger.py` and a small driver into a temporary directory, and ran the driver there with `PYTHONDONTWRITEBYTECODE=1` and `python -B`. The extracted file imports only the standard library (`hashlib`, `json`, `sys`, `threading`, `uuid`, `contextlib`, `datetime`, `pathlib`, and `fcntl` or `msvcrt`). Four appends produced `conformance/valid/v0-parallax.jsonl`: floats (0.5, 2.25), non-ASCII text escaped as `\u` sequences, and seconds-precision `+00:00` timestamps. `git status --porcelain` in the Parallax clone was empty afterwards, and the guard reported no change. Parallax's own `verify` skips blank lines; Polarizer's v0 check reports a blank line as `invalid` (not valid JSON).

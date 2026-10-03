@@ -9,7 +9,7 @@ from polarizer.config import ConfigError, load
 
 GOOD = """
 ledger_dir = "~/ledgers/polarizer"
-protected_paths = ["~/code/parallax", "{extra}"]
+ledger_forbidden_paths = ["~/code/parallax", "{extra}"]
 
 [upstream.probe]
 command = "/usr/bin/python3"
@@ -35,7 +35,7 @@ def good(tmp_path):
 def test_a_good_config(tmp_path, fake_home):
     cfg = load(good(tmp_path), environ={"NOTES_TOKEN": "secret"})
     assert cfg.ledger_dir == fake_home / "ledgers" / "polarizer"
-    assert cfg.protected_paths == (
+    assert cfg.ledger_forbidden_paths == (
         fake_home / ".local/share/parallax",
         fake_home / ".config/parallax",
         fake_home / "code/parallax",
@@ -53,7 +53,7 @@ def test_a_good_config(tmp_path, fake_home):
 def test_defaults(tmp_path, fake_home):
     cfg = load(write(tmp_path, '[upstream.a]\ncommand = "x"\n'))
     assert cfg.ledger_dir == fake_home / ".local/share/polarizer"
-    assert cfg.protected_paths == (
+    assert cfg.ledger_forbidden_paths == (
         fake_home / ".local/share/parallax",
         fake_home / ".config/parallax",
     )
@@ -69,11 +69,11 @@ def test_verify_and_repair_do_not_need_upstream_secrets(tmp_path, fake_home):
     [
         ("x = ]\n", "polarizer.toml: line 1: Invalid value"),
         ('ledger_path = "x"\n', 'polarizer.toml: unknown top-level key "ledger_path"'),
-        ("protected_paths = []\n", "polarizer.toml: no upstreams configured"),
+        ("ledger_forbidden_paths = []\n", "polarizer.toml: no upstreams configured"),
         ("ledger_dir = 3\n", "polarizer.toml: ledger_dir must be a string"),
         ('ledger_dir = "data/ledger"\n', "polarizer.toml: ledger_dir must be an absolute path, got data/ledger"),
-        ('protected_paths = "/x"\n', "polarizer.toml: protected_paths must be a list of absolute paths"),
-        ('protected_paths = ["rel"]\n', "polarizer.toml: protected_paths must be a list of absolute paths"),
+        ('ledger_forbidden_paths = "/x"\n', "polarizer.toml: ledger_forbidden_paths must be a list of absolute paths"),
+        ('ledger_forbidden_paths = ["rel"]\n', "polarizer.toml: ledger_forbidden_paths must be a list of absolute paths"),
         ("upstream = 1\n", 'polarizer.toml: "upstream" must be a table of [upstream.<prefix>] tables'),
         ("[upstream]\n", "polarizer.toml: no upstreams configured"),
         ("[upstream]\nnotes = 1\n", "polarizer.toml: [upstream.notes] must be a table"),

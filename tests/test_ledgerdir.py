@@ -1,4 +1,4 @@
-"""Where the ledger may live: protected paths are refused by real path components, Parallax's
+"""Where the ledger may live: forbidden paths are refused by real path components, Parallax's
 two directories always; any other git working tree only warns. Uses a temporary home."""
 
 import os
@@ -9,11 +9,11 @@ import pytest
 from conftest import install_fixture
 
 from polarizer import cli
-from polarizer.ledgerdir import ProtectedPath, always_protected, check_location, is_inside
+from polarizer.ledgerdir import ForbiddenPath, always_forbidden, check_location, is_inside
 
 
-def test_parallax_directories_are_always_protected(fake_home):
-    assert always_protected() == [
+def test_parallax_directories_are_always_forbidden(fake_home):
+    assert always_forbidden() == [
         fake_home / ".local" / "share" / "parallax",
         fake_home / ".config" / "parallax",
     ]
@@ -24,15 +24,15 @@ def test_parallax_directories_are_always_protected(fake_home):
     [".local/share/parallax", ".local/share/parallax/sub/ledger", ".config/parallax/x"],
 )
 def test_refused_inside_parallax_directories(fake_home, inside):
-    with pytest.raises(ProtectedPath) as raised:
-        check_location(fake_home / inside, always_protected())
+    with pytest.raises(ForbiddenPath) as raised:
+        check_location(fake_home / inside, always_forbidden())
     assert str(raised.value).startswith(f"polarizer: ledger_dir {fake_home / inside} is inside ")
     assert str(raised.value).endswith(", which Polarizer must not write to")
 
 
 def test_components_not_string_prefixes(fake_home):
-    assert check_location(fake_home / ".local/share/parallax2", always_protected()) is None
-    assert check_location(fake_home / ".config/parallax-old/x", always_protected()) is None
+    assert check_location(fake_home / ".local/share/parallax2", always_forbidden()) is None
+    assert check_location(fake_home / ".config/parallax-old/x", always_forbidden()) is None
 
 
 def test_dot_dot_and_symlinks_are_resolved(fake_home, tmp_path):
@@ -44,16 +44,16 @@ def test_dot_dot_and_symlinks_are_resolved(fake_home, tmp_path):
     target.mkdir(parents=True)
     link = tmp_path / "innocent"
     link.symlink_to(target)
-    with pytest.raises(ProtectedPath):
-        check_location(link / "ledger", always_protected())
+    with pytest.raises(ForbiddenPath):
+        check_location(link / "ledger", always_forbidden())
 
 
 def test_config_paths_add_to_the_defaults(fake_home, tmp_path):
     repo = tmp_path / "code" / "parallax"
-    with pytest.raises(ProtectedPath):
-        check_location(repo / "data", [*always_protected(), repo])
-    with pytest.raises(ProtectedPath):
-        check_location(fake_home / ".config/parallax", [*always_protected(), repo])
+    with pytest.raises(ForbiddenPath):
+        check_location(repo / "data", [*always_forbidden(), repo])
+    with pytest.raises(ForbiddenPath):
+        check_location(fake_home / ".config/parallax", [*always_forbidden(), repo])
 
 
 def git(*args, cwd):
@@ -64,7 +64,7 @@ def test_warning_inside_another_git_working_tree(fake_home, tmp_path):
     repo = tmp_path / "somerepo"
     repo.mkdir()
     git("init", "-q", cwd=repo)
-    warning = check_location(repo / "not" / "yet" / "made", always_protected())
+    warning = check_location(repo / "not" / "yet" / "made", always_forbidden())
     top = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"], cwd=repo, capture_output=True, text=True
     ).stdout.strip()
@@ -72,10 +72,10 @@ def test_warning_inside_another_git_working_tree(fake_home, tmp_path):
         f"polarizer: warning: ledger_dir {repo / 'not' / 'yet' / 'made'} "
         f"is inside the git working tree {top}"
     )
-    assert check_location(tmp_path / "plain", always_protected()) is None
+    assert check_location(tmp_path / "plain", always_forbidden()) is None
 
 
-def test_repair_refuses_a_protected_ledger_dir(fake_home, capsys):
+def test_repair_refuses_a_forbidden_ledger_dir(fake_home, capsys):
     directory = install_fixture("broken/tear_last_line", fake_home / ".local/share/parallax")
     before = sorted(os.listdir(directory))
     assert cli.main(["repair", "--ledger-dir", str(directory)]) == 2

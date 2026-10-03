@@ -23,8 +23,8 @@ Draft README text for the limits:
 ledger_dir = "~/.local/share/polarizer"
 
 # Directories the ledger must never be inside. Optional. These are added to Parallax's
-# runtime and config directories, which are always protected.
-protected_paths = ["~/code/parallax", "~/code/loupe", "~/code/isr"]
+# runtime and config directories, which are always forbidden.
+ledger_forbidden_paths = ["~/code/parallax", "~/code/loupe", "~/code/isr"]
 
 [upstream.probe]
 command = "/home/<you>/code/polarizer/.venv/bin/python"
@@ -44,7 +44,7 @@ env = { NOTES_TOKEN = "${NOTES_TOKEN}", NOTES_MODE = "read-only" }
 **Keys:**
 - **Top level:**
   - `ledger_dir`: string, optional; `~` is expanded, and the result must be absolute;
-  - `protected_paths`: list of strings, optional; `~` is expanded in each, and each result must be absolute. They are added to `~/.local/share/parallax` and `~/.config/parallax`, which are always protected (LEDGER-SPEC.md, Location and permissions);
+  - `ledger_forbidden_paths`: list of strings, optional; `~` is expanded in each, and each result must be absolute. They are added to `~/.local/share/parallax` and `~/.config/parallax`, which are always forbidden (LEDGER-SPEC.md, Location and permissions). The name is deliberately not "protected paths", which is reserved for M2a's tool-call policy;
   - one or more `[upstream.<prefix>]` tables.
 - **Each upstream:**
   - `command`: string, required;
@@ -77,7 +77,7 @@ polarizer.toml: unknown top-level key "ledger_path"
 polarizer.toml: no upstreams configured
 polarizer.toml: ledger_dir must be a string
 polarizer.toml: ledger_dir must be an absolute path, got data/ledger
-polarizer.toml: protected_paths must be a list of absolute paths
+polarizer.toml: ledger_forbidden_paths must be a list of absolute paths
 polarizer.toml: "upstream" must be a table of [upstream.<prefix>] tables
 polarizer.toml: [upstream.notes] must be a table
 polarizer.toml: upstream prefix "my__srv" must be 1 to 32 characters of letters, digits, "-" and "_", with no "__" and no "_" at either end
@@ -97,7 +97,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 
 1. **Read the config.** Any error stops here, as above.
 2. **Check `ledger_dir`'s location** (LEDGER-SPEC.md, Location and permissions). `repair` runs the same check, with the same messages.
-   - **Refuse**, with exit 2, inside any `protected_paths` entry or inside `~/.local/share/parallax` or `~/.config/parallax`, comparing resolved real paths by components: `polarizer: ledger_dir /path is inside /protected/path, which Polarizer must not write to`.
+   - **Refuse**, with exit 2, inside any `ledger_forbidden_paths` entry or inside `~/.local/share/parallax` or `~/.config/parallax`, comparing resolved real paths by components: `polarizer: ledger_dir /path is inside /protected/path, which Polarizer must not write to`.
    - **Warn**, and continue, inside any other git working tree: `polarizer: warning: ledger_dir /path is inside the git working tree /repo`.
 3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`.
    - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: <verify's first line>; run polarizer verify`. For a torn tail, whose line already ends `; run polarizer repair`, nothing is added.
@@ -166,7 +166,7 @@ Notes on the outcomes:
 ## Output streams
 
 - **`serve`:** its stdout carries only the protocol. Its logs and one-line errors go to stderr.
-- **Every other command** (`verify`, `repair`) prints its results to stdout. Usage errors, config errors, unreadable files, protected-path refusals and the git-tree warning go to stderr, each as one line starting `polarizer: ` (or the config file's name), and every error among them exits 2.
+- **Every other command** (`verify`, `repair`) prints its results to stdout. Usage errors, config errors, unreadable files, forbidden-path refusals and the git-tree warning go to stderr, each as one line starting `polarizer: ` (or the config file's name), and every error among them exits 2.
 
 ## Command line
 
@@ -237,14 +237,14 @@ orphaned           args/<name>
 | a v0 ledger | `refused: ledger is v0 (Parallax's format); Polarizer only writes v1` | 3 |
 | locked | the `locked:` line above | 7 |
 | no ledger | the `no ledger at` line above | 2 |
-| inside a protected path | nothing; the refusal line from Startup goes to stderr | 2 |
+| inside a forbidden path | nothing; the refusal line from Startup goes to stderr | 2 |
 
 Every row in these tables gets a golden-file test (`tests/golden/`), which runs the command on a fixture and compares stdout byte for byte, along with the exit code.
 
 ## Where the ledger lives
 
-`serve` and `repair` refuse a `ledger_dir` inside a protected path (every `protected_paths` entry, plus Parallax's two directories, always) and warn inside any other git working tree (startup step 2). `verify` only reads, never writes, and checks no locations.
+`serve` and `repair` refuse a `ledger_dir` inside a forbidden path (every `ledger_forbidden_paths` entry, plus Parallax's two directories, always) and warn inside any other git working tree (startup step 2). `verify` only reads, never writes, and checks no locations.
 
-The guard (`scripts/guard.sh`) is a development script, not part of the installed tool. It reads `.guard-paths`, and it is the backstop if a `polarizer.toml` lacks a protected path. It watches other tools' directories by metadata only, never opening contents:
+The guard (`scripts/guard.sh`) is a development script, not part of the installed tool. It reads `.guard-paths`, and it is the backstop if a `polarizer.toml` lacks a forbidden path. It watches other tools' directories by metadata only, never opening contents:
 - `~/.local/share/parallax` as a summary (file count, total size, newest mtime and one hash);
 - `~/.config/parallax` and `~/isr-notes` line by line. It also watches `~/.claude/settings.json` by metadata, and `~/.claude.json` through hashes of its MCP config. A search by name found no Loupe or ISR directories under `~/.local/share`, `~/.config` or `~/.cache`. Polarizer's own `ledger_dir` is not guarded; it's Polarizer's to write.

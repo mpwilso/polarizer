@@ -390,6 +390,7 @@ version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
+    { name = "mcp-types" },
     { name = "rfc8785" },
 ]
 
@@ -401,7 +402,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcp", specifier = ">=2.2,<3" },
+    { name = "mcp", specifier = "==2.2.0" },
+    { name = "mcp-types", specifier = "==2.2.0" },
     { name = "rfc8785", specifier = "==0.1.4" },
 ]
 

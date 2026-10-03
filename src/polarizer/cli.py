@@ -1,6 +1,6 @@
 """The polarizer command line: verify [--args] and repair (docs/PROXY-SPEC.md, Command line).
 
-Results go to stdout. Usage errors, config errors, unreadable files, protected-path refusals
+Results go to stdout. Usage errors, config errors, unreadable files, forbidden-path refusals
 and the git-tree warning go to stderr, one line each; every error among them exits 2.
 """
 
@@ -61,12 +61,12 @@ def main(argv=None) -> int:
             cfg = config.load(Path(args.config), require_env=False)
         except config.ConfigError as e:
             return _err(str(e))
-        ledger_dir, protected = cfg.ledger_dir, list(cfg.protected_paths)
+        ledger_dir, forbidden = cfg.ledger_dir, list(cfg.ledger_forbidden_paths)
     else:
-        ledger_dir, protected = Path(args.ledger_dir), ledgerdir.always_protected()
+        ledger_dir, forbidden = Path(args.ledger_dir), ledgerdir.always_forbidden()
     if args.command == "verify":
         return verify(ledger_dir, args.args)
-    return repair(ledger_dir, protected)
+    return repair(ledger_dir, forbidden)
 
 
 def verify(ledger_dir: Path, with_args: bool) -> int:
@@ -97,10 +97,10 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
     return code
 
 
-def repair(ledger_dir: Path, protected: list[Path]) -> int:
+def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
     try:
-        warning = ledgerdir.check_location(ledger_dir, protected)
-    except ledgerdir.ProtectedPath as e:
+        warning = ledgerdir.check_location(ledger_dir, forbidden)
+    except ledgerdir.ForbiddenPath as e:
         return _err(str(e))
     if warning:
         print(warning, file=sys.stderr)

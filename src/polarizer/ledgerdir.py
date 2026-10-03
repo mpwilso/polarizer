@@ -1,6 +1,6 @@
 """Where the ledger may live (docs/LEDGER-SPEC.md, Location and permissions).
 
-serve and repair refuse a ledger_dir inside a protected path, and warn inside any other git
+serve and repair refuse a ledger_dir inside a forbidden path, and warn inside any other git
 working tree. Paths are compared as resolved real paths, component by component, never as
 string prefixes. The installed tool never reads .guard-paths; that is scripts/guard.sh's file.
 """
@@ -11,15 +11,15 @@ from collections.abc import Iterable
 from pathlib import Path
 
 
-class ProtectedPath(Exception):
-    """ledger_dir is inside a protected path. The message is the one stderr line; exit 2."""
+class ForbiddenPath(Exception):
+    """ledger_dir is inside a forbidden path. The message is the one stderr line; exit 2."""
 
 
 def default_ledger_dir() -> Path:
     return Path.home() / ".local" / "share" / "polarizer"
 
 
-def always_protected() -> list[Path]:
+def always_forbidden() -> list[Path]:
     """Parallax's runtime and config directories. A config can add to these, never remove."""
     home = Path.home()
     return [home / ".local" / "share" / "parallax", home / ".config" / "parallax"]
@@ -55,12 +55,12 @@ def is_inside(child: Path, parent: Path) -> bool:
     return False
 
 
-def check_location(ledger_dir: Path, protected: Iterable[Path]) -> str | None:
-    """Raise ProtectedPath if ledger_dir is inside any protected path. Otherwise return the
+def check_location(ledger_dir: Path, forbidden: Iterable[Path]) -> str | None:
+    """Raise ForbiddenPath if ledger_dir is inside any forbidden path. Otherwise return the
     git-tree warning line, or None."""
-    for path in protected:
+    for path in forbidden:
         if is_inside(ledger_dir, path):
-            raise ProtectedPath(
+            raise ForbiddenPath(
                 f"polarizer: ledger_dir {ledger_dir} is inside {path}, "
                 "which Polarizer must not write to"
             )

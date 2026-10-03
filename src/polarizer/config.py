@@ -12,11 +12,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from polarizer.ledgerdir import always_protected, default_ledger_dir
+from polarizer.ledgerdir import always_forbidden, default_ledger_dir
 
 PREFIX = re.compile(r"(?!_)(?!.*__)[A-Za-z0-9_-]{1,32}(?<!_)")
 WHOLE_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-TOP_KEYS = ("ledger_dir", "protected_paths", "upstream")
+TOP_KEYS = ("ledger_dir", "ledger_forbidden_paths", "upstream")
 UPSTREAM_KEYS = ("command", "args", "env", "connect_timeout_seconds")
 _TOML_WHERE = re.compile(r"^(.*) \(at line (\d+), column \d+\)$", re.S)
 
@@ -39,7 +39,7 @@ class Config:
     path: Path
     sha256: str
     ledger_dir: Path
-    protected_paths: tuple[Path, ...]  # always includes Parallax's two directories
+    ledger_forbidden_paths: tuple[Path, ...]  # always includes Parallax's two directories
     upstreams: tuple[Upstream, ...]
 
 
@@ -79,17 +79,17 @@ def load(path: Path, *, require_env: bool = True, environ: dict | None = None) -
         if not ledger_dir.is_absolute():
             fail(f"ledger_dir must be an absolute path, got {doc['ledger_dir']}")
 
-    protected = list(always_protected())
-    if "protected_paths" in doc:
-        given = doc["protected_paths"]
+    forbidden = list(always_forbidden())
+    if "ledger_forbidden_paths" in doc:
+        given = doc["ledger_forbidden_paths"]
         if not isinstance(given, list) or not all(isinstance(p, str) for p in given):
-            fail("protected_paths must be a list of absolute paths")
+            fail("ledger_forbidden_paths must be a list of absolute paths")
         for p in given:
             expanded = Path(os.path.expanduser(p))
             if not expanded.is_absolute():
-                fail("protected_paths must be a list of absolute paths")
-            if expanded not in protected:
-                protected.append(expanded)
+                fail("ledger_forbidden_paths must be a list of absolute paths")
+            if expanded not in forbidden:
+                forbidden.append(expanded)
 
     tables = doc.get("upstream", {})
     if not isinstance(tables, dict):
@@ -103,7 +103,7 @@ def load(path: Path, *, require_env: bool = True, environ: dict | None = None) -
         path=path,
         sha256=hashlib.sha256(raw).hexdigest(),
         ledger_dir=ledger_dir,
-        protected_paths=tuple(protected),
+        ledger_forbidden_paths=tuple(forbidden),
         upstreams=tuple(upstreams),
     )
 

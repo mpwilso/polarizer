@@ -84,7 +84,7 @@ New kinds can be added without changing the version, as long as their `data` sta
 |---|---|---|
 | `intact` | 0 | Every rule holds. |
 | `tampered` | 1 | A line's `seq`, `prev` or `hash` doesn't match, or `ledger.head`'s hash differs from the entry at its seq. |
-| (usage error) | 2 | Bad arguments, an unreadable file, a config error, or no ledger. `serve` and `repair` also exit 2 when they refuse a `ledger_dir` inside a protected path (Part 2). |
+| (usage error) | 2 | Bad arguments, an unreadable file, a config error, or no ledger. `serve` and `repair` also exit 2 when they refuse a `ledger_dir` inside a forbidden path (Part 2). |
 | `invalid` | 3 | An entry breaks a structure rule (an extra or missing key, a float, an integer out of range, a non-ASCII key, a lone surrogate, an oversize line, a missing or second genesis, a mix of v0 and v1), or `ledger.head` isn't a valid head record or names another chain. `serve` and `repair` also exit 3 when `ledger_dir` holds a v0 ledger. |
 | `not canonical` | 4 | The entry parses and hashes correctly, but its stored bytes aren't its canonical bytes (v1) or its line form (v0). |
 | `torn tail` | 5 | There are bytes after the last newline. |
@@ -124,10 +124,11 @@ A ledger is all v0 or all v1, decided by its first line. A v1 verifier reports a
 
 The ledger directory is `ledger_dir` from polarizer.toml, by default `~/.local/share/polarizer/`, created with mode 0700. Every file Polarizer creates in it gets mode 0600. On Windows the same path under the user's profile is used; POSIX modes don't apply there, and the profile's ACLs are what protect it.
 
-**Protected paths.** `serve` (at startup) and `repair` refuse a `ledger_dir` inside any protected path, with exit 2.
-- **The protected paths** are the entries of `protected_paths` in polarizer.toml plus Parallax's runtime and config directories (`~/.local/share/parallax`, `~/.config/parallax`). Those two are always protected; the file can add paths but can't remove them.
-- **The comparison** uses resolved real paths (symlinks followed) compared component by component, never as string prefixes, so `/a/parallax2` is not inside `/a/parallax`. Where a protected path and some ancestor of `ledger_dir` both exist, they also count as the same when the operating system says they are the same directory, which covers case-insensitive file systems.
-- **A git working tree** that isn't protected only gets a warning on stderr: `serve` and `repair` continue if `git rev-parse --show-toplevel` succeeds in `ledger_dir` (or its nearest existing parent).
+**Forbidden paths.** `serve` (at startup) and `repair` refuse a `ledger_dir` inside any forbidden path, with exit 2.
+- **The forbidden paths** are the entries of `ledger_forbidden_paths` in polarizer.toml plus Parallax's runtime and config directories (`~/.local/share/parallax`, `~/.config/parallax`). Those two are always forbidden; the file can add paths but can't remove them.
+- **Naming:** the term "protected paths" is reserved for M2a's tool-call policy (writes to protected paths are held). It never means where the ledger may not live.
+- **The comparison** uses resolved real paths (symlinks followed) compared component by component, never as string prefixes, so `/a/parallax2` is not inside `/a/parallax`. Where a forbidden path and some ancestor of `ledger_dir` both exist, they also count as the same when the operating system says they are the same directory, which covers case-insensitive file systems.
+- **A git working tree** that isn't forbidden only gets a warning on stderr: `serve` and `repair` continue if `git rev-parse --show-toplevel` succeeds in `ledger_dir` (or its nearest existing parent).
 - **`verify`** only reads, so it checks no locations.
 - The installed tool never reads `.guard-paths`. That file belongs to the development guard, `scripts/guard.sh`.
 
@@ -222,7 +223,7 @@ A line is committed when its newline is written. Any bytes after the last newlin
 
 `polarizer repair` handles a torn tail and nothing else:
 
-0. Refuse a `ledger_dir` inside a protected path (exit 2), and warn inside another git working tree (see Location and permissions).
+0. Refuse a `ledger_dir` inside a forbidden path (exit 2), and warn inside another git working tree (see Location and permissions).
 1. Take the lock, waiting up to 2 seconds (see The lock). If it's still held, refuse with the one-line message.
 2. Under the lock, verify again; a torn tail seen before taking the lock doesn't count. A v0 ledger is refused (exit 3). If the status isn't `torn tail`, refuse and show the status, with that status's exit code. Tampered, invalid, not-canonical and truncated ledgers need a person, not a tool. Because head problems take precedence over a torn tail, repair never runs on a ledger whose `ledger.head` shows lost lines.
 3. Copy the torn bytes to `ledger.jsonl.torn-<seq>-<first 12 hex of their sha256>`, created exclusively, and fsync it. `<seq>` is the seq the torn line would have had: one past the last complete entry, or 0 for a torn genesis.

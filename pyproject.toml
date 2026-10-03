@@ -5,7 +5,11 @@ description = "A local proxy between an AI agent and its MCP servers, with a ver
 readme = "CLAUDE.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp>=2.2,<3",
+    # Exactly 2.2.0 for now: every SDK behavior in docs/verified-facts.md (outcomes, progress,
+    # cancellation, cache modes, capabilities) was checked against 2.2.0. M0's range is
+    # mcp>=2.2,<3; widen it only after re-checking those facts on the newer release.
+    "mcp==2.2.0",
+    "mcp-types==2.2.0",
     "rfc8785==0.1.4",
 ]
 
