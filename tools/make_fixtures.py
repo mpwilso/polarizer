@@ -518,9 +518,9 @@ def write(out_dir):
         "v0_source": {"repo": "parallax", "file": "parallax/ledger.py", "commit": V0_COMMIT},
         "fixtures": expected,
     }
-    (out_dir / "expected.json").write_text(
-        json.dumps(doc, indent=1, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    # Bytes, not text: text mode would write \r\n on Windows and break the byte-for-byte check.
+    text = json.dumps(doc, indent=1, sort_keys=True) + "\n"
+    (out_dir / "expected.json").write_bytes(text.encode("utf-8"))
 
 
 def main(argv=None):

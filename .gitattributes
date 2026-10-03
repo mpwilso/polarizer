@@ -1,0 +1,8 @@
+# Line endings are pinned, so no checkout can change bytes that tests compare exactly. GitHub's
+# Windows runners set core.autocrlf=true; eol=lf overrides it for text files.
+* text=auto eol=lf
+
+# Compared byte for byte by tests (fixture regeneration, both verifiers, golden output). Never
+# converted, whatever their content: some fixtures are deliberately broken bytes.
+conformance/** -text
+tests/golden/** -text
