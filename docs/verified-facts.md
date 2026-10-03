@@ -151,6 +151,13 @@ Not measured: native Windows (no Windows interop from this shell), macOS, and WS
 
 `parallax/accept.py:112`: the `Ledger-Head:` commit trailer is the full `hash` of the last entry at accept time.
 
+## RFC 8785 text (fetched Oct 2, 2026)
+
+`https://www.rfc-editor.org/rfc/rfc8785.txt`, 984 lines, fetched with curl and read for sections 3.2.2 to 3.2.3 and Appendix B. The vectors in `tests/test_rfc8785_vectors.py` were written out by hand from it.
+- **Used inside the subset:** the "string" and "literals" members of the 3.2.2 example; the same example without "numbers", sorted per 3.2.3; the 3.2.3 sort order "", "a", "aa", "ab"; the 3.2.2.2 control-character rules; Appendix B's zero and minus zero (as the JSON integer -0); and note (1)'s range limits, 2^53-1 and its negative.
+- **Checked as rejected, outside the subset:** the full 3.2.2 example (a float); the 3.2.3 sorting test data (non-ASCII keys; rfc8785 still gives the RFC's order, and the stdlib doesn't); a lone surrogate (3.2.2.2 note); and every other Appendix B row: integers past 2^53-1, every non-integer, NaN and Infinity.
+- **Left out:** the expected serializations of Appendix B's floats, since floats never enter a v1 entry; the development portal's large number file (Appendix I), for the same reason.
+
 ## CI actions pinned by commit (Oct 2, 2026)
 
 Looked up over the network from each action's own repository with the GitHub REST API (`/repos/<owner>/<repo>/releases`, `/git/ref/tags/<tag>` and `/commits/<sha>`), and `action.yml` read at that commit from raw.githubusercontent.com:

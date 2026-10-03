@@ -42,7 +42,19 @@ def _err(line: str) -> int:
     return 2
 
 
+def _set_up_streams() -> None:
+    """UTF-8, backslashreplace and "\n" newlines on stdout and stderr, so every platform prints
+    the same bytes. On native Windows the defaults would be the console or locale code page
+    and "\r\n". Not for serve: its stdout is the protocol channel."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace", newline="\n")
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] != ["serve"]:
+        _set_up_streams()
     try:
         args = _parser().parse_args(argv)
         if (args.config is None) == (args.ledger_dir is None):

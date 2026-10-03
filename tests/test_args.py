@@ -15,11 +15,11 @@ def call(commit, i):
 
 
 def test_side_file_format_and_commitment(tmp_path):
-    commit = write_args(tmp_path, {"path": "café", "n": 1.5})
+    commit = write_args(tmp_path, {"path": "caf\xe9", "n": 1.5})
     blob = (tmp_path / "args" / f"{commit}.bin").read_bytes()
     assert hashlib.sha256(blob).hexdigest() == commit
-    assert blob[32:] == '{"path":"café","n":1.5}'.encode()
-    assert write_args(tmp_path, {"path": "café", "n": 1.5}) != commit  # salted
+    assert blob[32:] == '{"path":"caf\xe9","n":1.5}'.encode()
+    assert write_args(tmp_path, {"path": "caf\xe9", "n": 1.5}) != commit  # salted
 
 
 def test_side_files_are_created_exclusively(tmp_path, monkeypatch):

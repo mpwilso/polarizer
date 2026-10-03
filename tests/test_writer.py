@@ -4,8 +4,8 @@ import asyncio
 import os
 import subprocess
 import sys
-import textwrap
 import time
+from pathlib import Path
 
 import pytest
 from conftest import build_chain
@@ -97,26 +97,13 @@ def test_two_writers_in_one_process_leave_one_chain(tmp_path):
     assert (result.status, result.state.lines) == ("intact", 31)
 
 
-WORKER = textwrap.dedent(
-    """
-    import sys, time
-    from pathlib import Path
-    from polarizer.writer import LedgerWriter
-    directory, go, count = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
-    while not go.exists():
-        time.sleep(0.001)
-    w = LedgerWriter.open(directory)
-    for i in range(count):
-        w.append("note", {"pid": sys.argv[4], "i": i}).result()
-    w.close()
-    """
-)
+WORKER = Path(__file__).parent / "helpers" / "append_worker.py"
 
 
 def run_workers(directory, go, n_workers, count):
     procs = [
         subprocess.Popen(
-            [sys.executable, "-c", WORKER, str(directory), str(go), str(count), str(k)],
+            [sys.executable, str(WORKER), str(directory), str(go), str(count), str(k)],
             stderr=subprocess.PIPE,
         )
         for k in range(n_workers)

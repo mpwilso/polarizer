@@ -98,6 +98,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 1. **Read the config.** Any error stops here, as above.
 2. **Check `ledger_dir`'s location** (LEDGER-SPEC.md, Location and permissions). `repair` runs the same check, with the same messages.
    - **Refuse**, with exit 2, inside any `ledger_forbidden_paths` entry or inside `~/.local/share/parallax` or `~/.config/parallax`, comparing resolved real paths by components: `polarizer: ledger_dir /path is inside /protected/path, which Polarizer must not write to`.
+   - **Letter case** follows the platform's path rules. On Windows, paths compare case-insensitively, so a differently cased `ledger_dir` (`~/.CONFIG/Parallax/x`) is refused. On Linux they are different paths, and it is not refused. On macOS, a differently cased path is refused when the forbidden directory exists on a case-insensitive volume (the default), through the same-directory check, and is otherwise compared case-sensitively. Tests pin all three.
    - **Warn**, and continue, inside any other git working tree: `polarizer: warning: ledger_dir /path is inside the git working tree /repo`.
 3. **Open the ledger** (LEDGER-SPEC.md Part 2): wait up to 2 s for the lock, create the genesis entry on first run, verify, and check or rebuild `ledger.head`.
    - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: <verify's first line>; run polarizer verify`. For a torn tail, whose line already ends `; run polarizer repair`, nothing is added.

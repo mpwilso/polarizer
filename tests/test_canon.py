@@ -16,7 +16,7 @@ from polarizer.canon import (
 )
 
 CHARS = [chr(c) for c in range(32)] + list("az AZ09\"\\/~") + [
-    "\x7f", "\x80", "\xa0", "\xe9", " ", " ", "﻿", "�", "",
+    "\x7f", "\x80", "\xa0", "\xe9", "\u2028", "\u2029", "\ufeff", "\ufffd", "\ue000",
     "\U000e0049", "\U0001f600", "\U0010ffff",
 ]  # fmt: skip
 
@@ -53,7 +53,7 @@ def test_differential_rfc8785_matches_stdlib_on_the_subset():
 
 
 def test_non_ascii_keys_break_the_equivalence():
-    value = {"": 1, "\U0001f600": 2}
+    value = {"\ue000": 1, "\U0001f600": 2}
     assert rfc8785.dumps(value) != stdlib_form(value)
     assert subset_problem(value) == "non-ASCII key at /\\ue000"
 
@@ -64,7 +64,7 @@ def test_non_ascii_keys_break_the_equivalence():
         ({"a": 1.5}, "float at /a"),
         ({"a": [1, 2**53]}, "integer out of range at /a/1"),
         ({"a": -(2**53)}, "integer out of range at /a"),
-        ({"x": {"café": 1}}, "non-ASCII key at /x/caf\\u00e9"),
+        ({"x": {"caf\xe9": 1}}, "non-ASCII key at /x/caf\\u00e9"),
         ({"s": "ok\ud800"}, "lone surrogate at /s"),
         ({"a/b~c": 0.5}, "float at /a~1b~0c"),
         ({"\U0001f600": 1}, "non-ASCII key at /\\ud83d\\ude00"),
@@ -95,5 +95,7 @@ def test_make_entry_refuses_floats_and_oversize_lines():
 
 
 def test_make_entry_line_is_canonical():
-    entry, line = make_entry(3, "2026-10-02T00:00:00.000Z", "note", {"b": 1, "a": " "}, "f" * 64)
+    entry, line = make_entry(
+        3, "2026-10-02T00:00:00.000Z", "note", {"b": 1, "a": "\u2028"}, "f" * 64
+    )
     assert line == canonical(entry) + b"\n" == stdlib_form(entry) + b"\n"

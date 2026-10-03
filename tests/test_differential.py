@@ -25,7 +25,7 @@ SEED = int(os.environ.get("POLARIZER_FUZZ_SEED", "20261002"))
 CASES = int(os.environ.get("POLARIZER_FUZZ_CASES", "5000"))
 REPRO = ROOT / ".repro"
 KINDS = ["session.started", "call.sent", "call.returned", "tool.approved", "note"]
-TEXT = ["", "a", "probe__wait", "café", " ", "\U0001f600", "\x00\x1f", '"\\', "﻿"]
+TEXT = ["", "a", "probe__wait", "caf\xe9", "\u2028", "\U0001f600", "\x00\x1f", '"\\', "\ufeff"]
 
 
 def value(rng, depth=0):

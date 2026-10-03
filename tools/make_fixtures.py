@@ -126,9 +126,9 @@ def session_chain():
 def unicode_chain():
     values = {
         "controls": "".join(chr(c) for c in range(32)) + "\x7f",
-        "separators": "  ﻿ ",
+        "separators": "\u2028\u2029\ufeff\xa0",
         "astral": "\U0001f600\U000e0049\U0010ffff",
-        "private": "�",
+        "private": "\ue000\ufffd",
         "quotes": 'a "quoted" \\ back\\slash /',
         "ints": [2**53 - 1, -(2**53 - 1), 0, -1],
         "nested": {"a": [[], {}, [{"b": None}]], "t": True, "f": False},
@@ -184,7 +184,7 @@ def big_integer(entries, index):
 
 
 def non_ascii_key(entries, index):
-    return change_data(entries, index, {"café": 1})
+    return change_data(entries, index, {"caf\xe9": 1})
 
 
 def lone_surrogate(entries, index):

@@ -97,3 +97,36 @@ def test_repair_warns_inside_a_git_tree_and_continues(fake_home, tmp_path, capsy
     out, err = capsys.readouterr()
     assert out == "nothing to repair: ledger is intact\n"
     assert err.startswith("polarizer: warning: ledger_dir ")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows compares paths case-insensitively")
+@pytest.mark.parametrize("exists", [False, True])
+def test_differently_cased_path_is_refused_on_windows(fake_home, exists):
+    forbidden = fake_home / ".config" / "parallax"
+    if exists:
+        forbidden.mkdir(parents=True)
+    with pytest.raises(ForbiddenPath):
+        check_location(fake_home / ".CONFIG" / "Parallax" / "ledger", always_forbidden())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux paths are case-sensitive")
+@pytest.mark.parametrize("exists", [False, True])
+def test_differently_cased_path_is_not_refused_on_linux(fake_home, exists):
+    if exists:
+        (fake_home / ".config" / "parallax").mkdir(parents=True)
+        (fake_home / ".CONFIG" / "Parallax").mkdir(parents=True)
+    assert check_location(fake_home / ".CONFIG" / "Parallax" / "ledger", always_forbidden()) is None
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS: depends on the volume")
+def test_differently_cased_path_on_macos_follows_the_file_system(fake_home):
+    """On a case-insensitive volume (the default) the differently cased path is the same
+    directory and is refused; on a case-sensitive volume it is a different path."""
+    (fake_home / ".config" / "parallax").mkdir(parents=True)
+    same_dir = (fake_home / ".CONFIG" / "Parallax").exists()
+    target = fake_home / ".CONFIG" / "Parallax" / "ledger"
+    if same_dir:
+        with pytest.raises(ForbiddenPath):
+            check_location(target, always_forbidden())
+    else:
+        assert check_location(target, always_forbidden()) is None
