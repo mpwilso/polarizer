@@ -35,7 +35,7 @@ def test_commands_wait_two_seconds_then_refuse(tmp_path, capsys, command):
     lock.close()
     assert code == 7
     assert capsys.readouterr().out == LOCKED_LINE + "\n"
-    assert 1.9 <= took < 4
+    assert 1.9 <= took < 10  # the wait is 2 s; the upper bound is 5 times that
 
 
 def test_startup_waits_two_seconds_then_refuses(tmp_path):

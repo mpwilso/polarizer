@@ -4,7 +4,7 @@ Checked on Oct 2, 2026, on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2, ext4,
 
 ## Claude Code
 
-Version: 2.1.287 (`claude --version`).
+Version: 2.1.287 (`claude --version`). The stage 3 live check ran on 2.1.288 (see Stage 3).
 
 ### How the probe runs were done
 
@@ -264,6 +264,13 @@ Everything fetched for tests is pinned to an exact version. Commands, run from `
 
 The first `uv lock` resolved `mcp>=2.2,<3` to the newest release in range, 2.3.0 (with `mcp-types` 2.3.0), and `uv sync` installed it in `.venv` before this was noticed. Nothing ran against it; stage 1 never imports `mcp`. The second command re-locked both to 2.2.0, the version every SDK fact above was checked against. `uv.lock` now pins, among others: mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5, anyio 4.15.1, opentelemetry-api 1.45.0, rfc8785 0.1.4, pytest 9.1.1 (with pluggy 1.6.0, iniconfig 2.3.0, packaging 26.3, pygments 2.21.0, and colorama 0.4.6 on Windows) and ruff 0.16.10. CI installs with `uv sync --locked`, using uv 0.12.19 from `astral-sh/setup-uv`.
 
+**Stage 3 (Oct 2, 2026).** The Filesystem server's version was resolved once with `npm view @modelcontextprotocol/server-filesystem dist-tags` (latest: 2026.8.31, published Aug 31, 2026) and pinned. Node v24.21.0, npm 11.19.0. Both servers were pre-warmed, as run from the scratch directory:
+
+    npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio < /dev/null
+    npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir> < /dev/null
+
+`npx` pins only the named package. Its own dependencies are caret ranges, resolved at fetch time; npm's npx cache recorded `@modelcontextprotocol/sdk` 1.32.0 under both, and `diff` 8.0.4, `glob` 13.0.6 and `minimatch` 10.2.6 under Filesystem (103 and 107 packages in the two lock files). A fresh fetch later may resolve them differently. `pyproject.toml` now also declares `pydantic==2.13.5`, the version `uv.lock` already held, because `proxy.py` imports it; `uv lock --offline` changed only Polarizer's own entries in `uv.lock`.
+
 ## Cancellation through the proxy, with timestamps (headless)
 
 Run `r2_timeout` from the round 2 spike:
@@ -392,6 +399,44 @@ A low-level `Server` with only `on_list_tools`, `on_call_tool` and `on_subscript
 
 `~/.claude.json` grew from 85,455 to 85,543 bytes when the four startup runs began, at 19:19:14Z. The long-name run changed its mtime again without changing its size. The guard's MCP hashes stayed unchanged.
 
+## Stage 3 (Oct 2, 2026)
+
+### Results through the SDK (installed package, executed)
+
+- **Unknown fields:** `CallToolResult`, the content models and the resource models have no `extra` setting, so pydantic ignores fields the protocol doesn't define. Raw bytes from `polarizer serve`, in front of the probe's `rich` result, lacked every unknown field: at the result, in a content block, in an embedded resource and in annotations (`tests/test_fidelity.py::test_rich_result_on_the_wire`).
+- **`isError`:** `CallToolResult.is_error` is `bool = False` (`mcp_types/_types.py`, around line 1480), so a result whose upstream left `isError` out is sent with `"isError": false`.
+- **`execution`:** `ToolExecution` is documented as "2025-11-25 only", and the 2026-07-28 wire `Tool` has no such field, so tool definitions served on a 2026-07-28 connection have no `execution`.
+- **The serverInfo stamp:** `mcp/server/runner.py`, `_stamp_server_info` (around lines 397 to 417), adds `_meta["io.modelcontextprotocol/serverInfo"]` to every 2026-era result. A value the handler set wins, and an explicit null is stamped over. Older-era results are never stamped. On the same connections, `resultType` is filled in when absent.
+- **Unparseable results:** a content block with `"type": "video"` made the upstream call raise pydantic's `ValidationError`, whose message quotes the input (`input_value={'type': 'video', ...}`). Stage 2 passed that message to the client and into the ledger's `error`; stage 3 replaced it with a fixed line.
+
+### The reference servers through the proxy (local, no Claude Code)
+
+Run with `POLARIZER_REFERENCE=1 uv run --locked pytest tests/test_reference.py`, on Linux:
+- **Everything 2026.8.31** reports `serverInfo` `mcp-servers/everything` 2.0.0, answers `initialize` with 2025-11-25, lists 13 tools in one page, and sends `notifications/tools/list_changed` right after `initialize`.
+- **Filesystem 2026.8.31** reports `secure-filesystem-server` 0.2.0, 2025-11-25, 14 tools, and uses the directory from its arguments when the client has no roots capability.
+- **Raw JSON-RPC at 2025-11-25 on both sides:** all 27 tool definitions were identical apart from the prefix. `echo`, `list_directory` and `read_text_file` results were identical apart from an added `"isError": false`.
+- **SDK clients:** the client side of the proxy negotiated 2026-07-28, and the direct side 2025-11-25. Every one of the 27 tools lost only `execution` (`{"taskSupport": "forbidden"}` on all of them). The three results were identical apart from Polarizer's serverInfo stamp.
+
+### Live check (headless, Claude Code 2.1.288)
+
+`scripts/live-check.sh`, run once. `claude -p` with `--model haiku`, `--strict-mcp-config`, a generated `--mcp-config`, `--allowedTools=mcp__pz__probe__wait`, `--permission-mode default`, `--no-session-persistence` and `--output-format json`, with `MCP_TOOL_TIMEOUT=5000`. Auto mode was not set by the script; user-scope settings were not read. The run was started from inside another Claude Code session, so `CLAUDE_CODE_*` variables (names only, listed by the script) were set.
+
+| Time | Log | Line |
+|---|---|---|
+| 1790998917.738 | wire, Claude Code to Polarizer | `server/discover` |
+| 1790998918.182 | wire, Claude Code to Polarizer | `subscriptions/listen` (id `listen:0`) |
+| 1790998920.778 | wire, Claude Code to Polarizer | `tools/call` `probe__wait` `{"seconds": 14}`, request id 2 |
+| 1790998920.780 | probe | `tools/call` `wait`, request id 5, `progressToken` 5 |
+| 1790998925.790 | wire, Claude Code to Polarizer | `notifications/cancelled` `{"requestId": 2, "reason": "SdkError: Request timed out"}` |
+| 1790998925.791 | probe | `notifications/cancelled` `{"requestId": 5, "reason": "caller cancelled"}` |
+| 1790998926.939 | probe | end of input |
+
+- **The cancel** came 5.012 s after the call, and reached the probe 1 ms later.
+- **The ledger** verified intact: 6 entries, with `call.returned` outcome `cancelled`, `latency_ms` 5012 and `client_call_id` set from `claudecode/toolUseId`.
+- **The model replied:** "The probe__wait tool timed out after 5 seconds while attempting to wait for 14 seconds."
+- **Cost:** 0.0239 USD, from Claude Code's own `total_cost_usd`.
+- **Bookkeeping:** `~/.claude.json` went from 91,166 bytes (mtime 03:25:28Z, Oct 3 UTC) to 88,917 bytes (03:41:57Z) during the run. The run's working directory was a new temp directory.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -406,6 +451,7 @@ These are assumed or open. Nothing here has been observed.
 - **Startup in interactive sessions:** whether `MCP_TIMEOUT` (30 s) and `MCP_CONNECT_TIMEOUT_MS` (5 s) behave there as they did headless.
 - **What `MCP_CONNECT_TIMEOUT_MS` controls.**
 - **Polarizer's own `unsupported` path end to end:** only the SDK behavior beneath it was run.
+- **Claude Code and the result limits:** whether Claude Code reads anything that the SDK drops or adds (PROXY-SPEC.md, Results). Through Polarizer it always gets the 2026-07-28 form.
 - **Discover-verdict cache:** whether a cached "modern" verdict changes the connection order.
 - **Claude Code and cache hints:** whether it honors server cache hints on `tools/list`.
 - **Older-era list changes from an upstream:** receiving `notifications/tools/list_changed` from a 2025-11-25 upstream through the SDK `Client`'s `message_handler`. Stage 2 ran it SDK to SDK only (`tests/test_eras.py::test_handshake_upstream`, an in-memory upstream in the 2025-11-25 era); never with a real third-party server.

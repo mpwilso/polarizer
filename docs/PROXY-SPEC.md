@@ -12,7 +12,7 @@ M0 proxies tools only.
 
 Draft README text for the limits:
 
-> Polarizer 0.1 proxies tools only. Resources, prompts and completions from upstream servers are not exposed. When an upstream server asks the client for input (elicitation, sampling or roots), Polarizer doesn't pass the request on, and the tool call fails. A server on the 2026-07-28 protocol gets a one-line error naming it. A server on an older protocol gets the error it returns itself, recorded as a protocol error, because Polarizer can't see those requests without advertising support for them. Upstreams start once per session; one that fails to start stays off until Claude Code restarts Polarizer.
+> Polarizer 0.1 proxies tools only. Resources, prompts and completions from upstream servers are not exposed. When an upstream server asks the client for input (elicitation, sampling or roots), Polarizer doesn't pass the request on, and the tool call fails. A server on the 2026-07-28 protocol gets a one-line error naming it. A server on an older protocol gets the error it returns itself, recorded as a protocol error, because Polarizer can't see those requests without advertising support for them. Upstreams start once per session; one that fails to start stays off until Claude Code restarts Polarizer. Results pass through the MCP Python SDK, which drops fields the protocol doesn't define.
 
 ## Configuration: polarizer.toml
 
@@ -161,8 +161,21 @@ Everything below happens before the proxy answers Claude Code's first message. C
 
 Notes on the outcomes:
 - **Timeouts.** M0 has no transport timeout, and "timeout" is not part of `transport-error`. Polarizer sets no per-call read timeout in M0, so the SDK's local -32001 can't occur. A call is bounded only by Claude Code's own limit, which arrives as `cancelled`.
+- **Unreadable results.** A result the SDK can't parse into its models (for example a content block of an unknown `type`) is a `transport-error`, with the fixed line `polarizer: upstream <prefix> failed: result did not match the MCP schema` for the client and the ledger. The SDK's own message quotes the result, so it is never passed on or recorded (Results).
 - **Dead upstreams.** The SDK reports them as `MCPError` -32000, with nothing marking the error as local. An upstream that sends -32000 itself is therefore recorded as a transport error. That's rare, and harmless apart from the label.
 - **Older-era requests to the client.** "unsupported" is reliable only for an `InputRequiredResult`. In the older era, an upstream's elicit, sample or roots request is refused by the SDK (-32600 "... not supported") before Polarizer could see it. Detecting it would mean registering callbacks, which would advertise those capabilities and invite the requests. The upstream then usually returns -32600, recorded as `protocol-error`. A 2026-07-28 upstream that calls `ctx.session.elicit_form` instead of returning `InputRequiredResult` fails on its own side (`NoBackChannelError`, -32600), also recorded as `protocol-error`.
+
+## Results
+
+Polarizer hands the client the result object the SDK's upstream client parsed, unchanged; its own code edits nothing in it. The SDK still changes a result, or a tool definition, in the ways below. These are stated limits of M0. `tests/test_fidelity.py` pins each one exactly with fakes in every run, and `tests/test_reference.py` checks them against the Everything and Filesystem reference servers locally (verified-facts.md, Stage 3).
+
+1. **Unknown fields are dropped.** The SDK parses each upstream result into its own models, which ignore fields the protocol doesn't define, at every level: the result, each content block, an embedded resource and annotations. Tool definitions lose unknown fields the same way (verified-facts.md, the SDK's `Tool`).
+2. **Results follow the client's protocol version.** On a 2026-07-28 client connection, the SDK adds `resultType` and stamps `_meta["io.modelcontextprotocol/serverInfo"]` on every result, as that version requires. A result from an older-era upstream gets Polarizer's own stamp; a 2026-07-28 upstream's stamp is kept. A 2025-11-25 client in front of a 2026-07-28 upstream receives that upstream's stamp, which it would not get directly.
+3. **`isError: false` is added** when an upstream leaves `isError` out. The protocol reads an absent `isError` as false.
+4. **No `execution` in 2026-07-28 tool definitions.** A tool's `execution` (task support) exists only in 2025-11-25, so a 2026-07-28 client never sees it. Polarizer doesn't proxy tasks in any era.
+5. **A result the SDK can't parse becomes an error**, recorded as `transport-error` with a fixed line (Calls, Notes on the outcomes).
+
+Everything else arrives as the upstream sent it, at every level: text, image, audio, embedded resources, resource links, annotations, `_meta`, `structuredContent` (floats included) and `isError`.
 
 ## Output streams
 

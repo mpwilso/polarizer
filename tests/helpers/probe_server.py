@@ -6,14 +6,19 @@ notifications/cancelled that arrives while a call is running. It answers server/
 
 Tools:
 - wait(seconds): sleeps, sending notifications/progress every second when the call carries a
-  progress token. A notifications/cancelled for the call ends it with no response.
+  progress token. A notifications/cancelled for the call ends it with no response. A call that
+  finishes logs `span <id> <start> <end>`, its own time.monotonic() at both ends, before it
+  answers.
 - crash(): the process exits at once, mid-call.
 - env(): the environment it was started with, as a JSON object in text.
 - fail(): a tool error (isError true).
+- rich(): RICH below, as written: every kind of content, plus fields the protocol doesn't define.
+- invalid(): a result with a content type the protocol doesn't define.
 
 Environment:
 - PROBE_LOG: a file to append every inbound line to, each prefixed with a Unix timestamp.
 - PROBE_DELAY: seconds to wait before reading the first message (a slow handshake).
+- PROBE_GATE: a path; the probe reads nothing until that file exists (after PROBE_DELAY).
 """
 
 import json
@@ -35,7 +40,40 @@ TOOLS = [
     {"name": "crash", "description": "Exit mid-call.", "inputSchema": {"type": "object"}},
     {"name": "env", "description": "List environment names.", "inputSchema": {"type": "object"}},
     {"name": "fail", "description": "Return a tool error.", "inputSchema": {"type": "object"}},
+    {"name": "rich", "description": "Return RICH.", "inputSchema": {"type": "object"}},
+    {"name": "invalid", "description": "Return a bad result.", "inputSchema": {"type": "object"}},
 ]
+
+# Keys starting "x-unknown" are not in the protocol's schema; everything else is.
+RICH = {
+    "content": [
+        {
+            "type": "text",
+            "text": "hello",
+            "annotations": {"audience": ["user"], "priority": 0.5, "x-unknown-annotation": 1},
+            "_meta": {"block": "text"},
+            "x-unknown-block": 2,
+        },
+        {"type": "image", "data": "aGVsbG8=", "mimeType": "image/png", "_meta": {"block": 2}},
+        {
+            "type": "resource",
+            "resource": {
+                "uri": "file:///notes.txt",
+                "mimeType": "text/plain",
+                "text": "body",
+                "_meta": {"r": [1, None, True]},
+                "x-unknown-resource": 3,
+            },
+            "annotations": {"lastModified": "2026-10-02T00:00:00Z"},
+        },
+        {"type": "resource", "resource": {"uri": "file:///blob.bin", "blob": "AAEC"}},
+    ],
+    "structuredContent": {"n": 1.5, "s": "x", "nested": {"a": [1, None, True]}},
+    "isError": True,
+    "_meta": {"result": {"k": 1}},
+    "x-unknown-result": 4,
+}
+INVALID = {"content": [{"type": "video", "data": "c2VjcmV0IHJlc3VsdA=="}]}
 
 _out = threading.Lock()
 _log = threading.Lock()
@@ -68,6 +106,7 @@ def call(request: dict) -> None:
     token = (params.get("_meta") or {}).get("progressToken")
     stop = _cancelled.setdefault(rid, threading.Event())
     if name == "wait":
+        began = time.monotonic()
         seconds = float(arguments.get("seconds", 0))
         ticks = int(seconds)
         for i in range(1, ticks + 1):
@@ -79,6 +118,7 @@ def call(request: dict) -> None:
                 send({"jsonrpc": "2.0", "method": "notifications/progress", "params": progress})
         if stop.wait(seconds - ticks):
             return
+        log(f"span {rid} {began:.6f} {time.monotonic():.6f}")
         send({"jsonrpc": "2.0", "id": rid, "result": text(f"waited {seconds:g} s")})
     elif name == "crash":
         log("crashing")
@@ -87,6 +127,10 @@ def call(request: dict) -> None:
         send({"jsonrpc": "2.0", "id": rid, "result": text(json.dumps(dict(os.environ)))})
     elif name == "fail":
         send({"jsonrpc": "2.0", "id": rid, "result": text("the probe failed on purpose", True)})
+    elif name == "rich":
+        send({"jsonrpc": "2.0", "id": rid, "result": RICH})
+    elif name == "invalid":
+        send({"jsonrpc": "2.0", "id": rid, "result": INVALID})
     else:
         error = {"code": -32602, "message": f"unknown tool {name}"}
         send({"jsonrpc": "2.0", "id": rid, "error": error})
@@ -142,6 +186,9 @@ def main() -> int:
     delay = float(os.environ.get("PROBE_DELAY", "0"))
     if delay:
         time.sleep(delay)
+    gate = os.environ.get("PROBE_GATE")
+    while gate and not os.path.exists(gate):
+        time.sleep(0.01)
     done = threading.Event()
     threading.Thread(target=read_stdin, args=(done,), daemon=True).start()
     done.wait()

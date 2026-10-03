@@ -2,7 +2,7 @@
 
 A local proxy between an AI agent and its MCP servers. It holds risky calls for a person, lets routine work through, keeps a verifiable ledger, and measures whether the person's approvals still catch anything.
 
-Read these first, in this order: CLAUDE.md, docs/m0-plan.md, docs/LEDGER-SPEC.md, docs/PROXY-SPEC.md, docs/milestones.md, docs/verified-facts.md, docs/STAGE1-NOTES.md, docs/STAGE2-NOTES.md, then docs/PLAN.md if it exists.
+Read these first, in this order: CLAUDE.md, docs/m0-plan.md, docs/LEDGER-SPEC.md, docs/PROXY-SPEC.md, docs/milestones.md, docs/verified-facts.md, docs/STAGE1-NOTES.md, docs/STAGE2-NOTES.md, docs/STAGE3-NOTES.md, then docs/PLAN.md if it exists. docs/MANUAL-CHECK.md and docs/QUICKSTART-DRAFT.md are for the owner and for readers; read them when the task touches them.
 
 docs/PLAN.md is background only. Draft 5 is deferred until after M0 is done. Where PLAN.md differs from m0-plan.md, LEDGER-SPEC.md, PROXY-SPEC.md or milestones.md, those win. The "Corrections to PLAN.md" list in m0-plan.md stays until draft 5.
 

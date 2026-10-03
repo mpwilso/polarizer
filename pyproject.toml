@@ -10,6 +10,8 @@ dependencies = [
     # mcp>=2.2,<3; widen it only after re-checking those facts on the newer release.
     "mcp==2.2.0",
     "mcp-types==2.2.0",
+    # Imported directly (proxy.py catches its ValidationError); the version mcp 2.2.0 resolved.
+    "pydantic==2.13.5",
     "rfc8785==0.1.4",
 ]
 
@@ -29,6 +31,9 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "reference: runs the pinned reference MCP servers with npx; skipped unless POLARIZER_REFERENCE=1",
+]
 
 [tool.ruff]
 line-length = 100

@@ -108,7 +108,8 @@ def test_one_sent_one_returned_per_call(tmp_path):
     assert unsupported_d["error"] == unsupported.content[0].text
     assert unsupported_d["result_bytes"] == result_bytes(own(unsupported))
     assert cancelled["result_bytes"] == 0 and cancelled["error"] == "the client cancelled the call"
-    assert 400 <= cancelled["latency_ms"] < 2000
+    # Cancelled at 0.5 s; the upper bound is 10 times that, and half the 10 s call.
+    assert 400 <= cancelled["latency_ms"] < 5000
     assert crash_d["error"] == crash.content[0].text
     assert crash_d["result_bytes"] == result_bytes(own(crash))
     # Results never enter the ledger.

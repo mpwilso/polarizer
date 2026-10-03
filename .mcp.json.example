@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "polarizer": {
+      "command": "/home/<you>/code/polarizer/.venv/bin/polarizer",
+      "args": ["serve", "--config", "/home/<you>/code/polarizer/polarizer.toml"]
+    }
+  }
+}

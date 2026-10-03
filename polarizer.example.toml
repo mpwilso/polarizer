@@ -1,0 +1,29 @@
+# Copy to polarizer.toml (gitignored) and replace /home/<you> with your home directory:
+#   sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
+# docs/PROXY-SPEC.md describes every key.
+
+# Optional; this is the default.
+ledger_dir = "~/.local/share/polarizer"
+
+# The ledger must never be inside these. Parallax's ~/.local/share/parallax and
+# ~/.config/parallax are always forbidden as well.
+ledger_forbidden_paths = [
+    "~/code/parallax",
+    "~/code/parallax-backup-before-rewrite",
+    "~/code/loupe",
+    "~/code/isr",
+]
+
+# The stdlib test probe: wait(seconds), crash, env, fail, rich, invalid.
+[upstream.probe]
+command = "/home/<you>/code/polarizer/.venv/bin/python"
+args = ["/home/<you>/code/polarizer/tests/helpers/probe_server.py"]
+env = { PROBE_LOG = "/tmp/polarizer-probe.log" }
+connect_timeout_seconds = 5
+
+# The reference Filesystem server, pinned, confined to one directory. Pre-warm it once first
+# (docs/MANUAL-CHECK.md, step 1).
+[upstream.fs]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/tmp/polarizer-manual"]
+connect_timeout_seconds = 20

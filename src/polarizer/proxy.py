@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 import mcp_types as types
+import pydantic
 from mcp import MCPError
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
@@ -33,6 +34,9 @@ RESERVED_META_PREFIX = "io.modelcontextprotocol/"
 PROGRESS_TOKEN_KEYS = ("progressToken", "progress_token")
 CLIENT_CALL_ID = "claudecode/toolUseId"
 MAX_DROPPED = 32  # meta_dropped keeps at most this many key names, each cut to 128 bytes
+# The client's line when the SDK can't parse an upstream's result. The SDK's own message quotes
+# the result, which must not reach the ledger.
+UNREADABLE = "result did not match the MCP schema"
 INPUT_KINDS = {
     "elicitation/create": "elicitation",
     "sampling/createMessage": "sampling",
@@ -51,6 +55,13 @@ class _ProxyServer(Server):
 
 def _text_result(line: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(text=line)], is_error=True)
+
+
+def _leaf(error: BaseException, kind: type) -> bool:
+    """True if `error`, or the first leaf of an exception group, is a `kind`."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return isinstance(error, kind)
 
 
 def result_bytes(result: types.Result) -> int:
@@ -304,7 +315,8 @@ class Gateway:
             line = f"polarizer: upstream {upstream.prefix} failed: {describe(e)}"
             return await self._reply_error(line, "transport-error", finish)
         except Exception as e:
-            line = f"polarizer: upstream {upstream.prefix} failed: {describe(e)}"
+            why = UNREADABLE if _leaf(e, pydantic.ValidationError) else describe(e)
+            line = f"polarizer: upstream {upstream.prefix} failed: {why}"
             return await self._reply_error(line, "transport-error", finish)
 
         if isinstance(result, types.InputRequiredResult):

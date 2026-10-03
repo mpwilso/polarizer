@@ -3,7 +3,6 @@ concurrency, isolation, unknown tools and session.client (docs/PROXY-SPEC.md).""
 
 import json
 import sys
-import time
 from pathlib import Path
 
 import anyio
@@ -200,7 +199,12 @@ def test_progress_relay_stdio_upstream(tmp_path):
 
 @pytest.mark.parametrize("upstream", ["memory", "stdio"])
 def test_two_concurrent_calls(tmp_path, upstream):
-    target = FakeUpstream().server if upstream == "memory" else rig.probe()
+    """Two 1 s calls at once overlap in the upstream: each starts before the other ends. The
+    upstream records its own monotonic start and end for each call, so a slow machine can't
+    fail this the way a bound on the total time could."""
+    log = tmp_path / "probe.log"
+    fake = FakeUpstream()
+    target = fake.server if upstream == "memory" else rig.probe({"PROBE_LOG": str(log)})
     results = []
 
     async def scenario():
@@ -209,35 +213,42 @@ def test_two_concurrent_calls(tmp_path, upstream):
             async def one():
                 results.append(await client.call_tool("u__wait", {"seconds": 1}))
 
-            start = time.monotonic()
             async with anyio.create_task_group() as tasks:
                 tasks.start_soon(one)
                 tasks.start_soon(one)
-            return time.monotonic() - start
 
-    elapsed = anyio.run(scenario)
+    anyio.run(scenario)
     assert len(results) == 2 and not any(r.is_error for r in results)
-    assert 0.95 <= elapsed < 1.8, elapsed
+    if upstream == "memory":
+        spans = fake.spans
+    else:
+        spans = [
+            tuple(float(x) for x in line.split()[3:5])
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.split()[1] == "span"
+        ]
+    (start1, end1), (start2, end2) = spans
+    assert start1 < end2 and start2 < end1, spans  # the two intervals overlap
     returned = rig.kinds(tmp_path / "ledger", "call.returned")
     assert len(returned) == 2
-    assert all(900 <= e["data"]["latency_ms"] < 1800 for e in returned)
+    # A lower bound only: each call took its full second. Load can only make it longer.
+    assert all(e["data"]["latency_ms"] >= 900 for e in returned)
 
 
 def test_upstream_isolation(tmp_path):
     """A missing command, a hung handshake and a crash mid-call each stay in their own
     upstream; the gateway and the other upstreams keep serving."""
     fake = FakeUpstream()
+    hung_log = tmp_path / "hung.log"
     specs = [
         rig.spec("good", fake.server),
         rig.spec("missing", StdioServerParameters(command=str(tmp_path / "no-such-command"))),
-        rig.spec("hung", rig.probe({"PROBE_DELAY": "30"}), timeout=1),
+        rig.spec("hung", rig.probe({"PROBE_DELAY": "30", "PROBE_LOG": str(hung_log)}), timeout=1),
         rig.spec("crashy", rig.probe()),
     ]
 
     async def scenario():
-        start = time.monotonic()
         async with rig.proxied(tmp_path / "ledger", specs) as (client, _):
-            startup = time.monotonic() - start
             names = [t.name for t in (await client.list_tools()).tools]
             assert "good__echo" in names and "crashy__crash" in names
             assert not any(n.startswith(("missing__", "hung__")) for n in names)
@@ -245,10 +256,12 @@ def test_upstream_isolation(tmp_path):
             again = await client.call_tool("crashy__wait", {"seconds": 0})
             good = await client.call_tool("good__echo", {"still": "here"})
             names_after = [t.name for t in (await client.list_tools()).tools]
-            return startup, crashed, again, good, names_after
+            return crashed, again, good, names_after
 
-    startup, crashed, again, good, names_after = anyio.run(scenario)
-    assert startup < 5, startup
+    crashed, again, good, names_after = anyio.run(scenario)
+    # The gateway served without waiting out the hung probe's 30 s delay: the probe was
+    # stopped before it read a single message.
+    assert [line.split()[1] for line in hung_log.read_text().splitlines()] == ["start"]
     assert crashed.is_error and crashed.content[0].text.startswith(
         "polarizer: upstream crashy failed: "
     )

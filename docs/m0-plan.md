@@ -4,6 +4,7 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## Changes from the last version
 
+- **Stage 3:** results are compared with direct calls, and the SDK's own changes to them are stated limits (PROXY-SPEC.md, Results); the reference Filesystem server is pinned for the manual check and the local reference tests; the live check generates its config in a temp directory and makes one 14 s call; the quickstart draft is `docs/QUICKSTART-DRAFT.md`; M1a must record a failed refresh and never read it as "unchanged".
 - **Stage 1 review:** `protected_paths` renamed `ledger_forbidden_paths` ("protected paths" is kept for M2a), a differential fuzz test, `mcp` pinned to 2.2.0, CI actions pinned by commit SHA, and `docs/PUSHING.md`.
 - **Revision 7** (the implementation session's step 0, second round):
   - `ledger_forbidden_paths` in polarizer.toml (first named `protected_paths`) replaces `.guard-paths` in the tool. Parallax's two directories are always forbidden, and paths are compared by resolved real path components.
@@ -47,7 +48,7 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## What M0 is and when it's done
 
-`polarizer serve` is a stdio MCP server that Claude Code starts from a project-scope `.mcp.json`. It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope).
+`polarizer serve` is a stdio MCP server that Claude Code starts from a project-scope `.mcp.json`. It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope). The few ways the MCP SDK itself changes results and tool definitions are stated limits (PROXY-SPEC.md, Results).
 
 M0 is done when all of these hold, and you've confirmed the manual checklist:
 
@@ -90,21 +91,20 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
      - errors of each outcome type;
      - requests to the client;
      - paging past the limits.
-7. **`scripts/live-check.sh`**: headless `claude -p` runs with a small model (`--model haiku`), using `--strict-mcp-config`, `--mcp-config` with a file in the repo, and `--no-session-persistence`.
+7. **`scripts/live-check.sh`**: one headless `claude -p` run with a small model (`--model haiku`), using `--strict-mcp-config`, `--mcp-config` with a config it generates in a new temp directory, and `--no-session-persistence`. A stdlib wiretap (`scripts/wiretap.py`) between Claude Code and Polarizer timestamps Claude Code's own cancel.
    - **It prints its conditions first,** so a result can be read against them. It reads only its own command line and environment, never a settings file:
      - the exact `claude` arguments it passes;
      - `permission mode: <value>` when it passes `--permission-mode`, otherwise `permission mode: not passed; the user-scope default applies and was not read`;
      - `auto mode: <on or off>` when its own arguments or environment set it, otherwise `auto mode: not set here; user-scope settings may set it and were not read`;
      - the names of set environment variables starting `CLAUDE_` or `ANTHROPIC_` (names only), and the values of `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`, `MCP_CONNECT_TIMEOUT_MS` and `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`.
-   - A basic call with progress.
-   - A 14 s call under `MCP_TOOL_TIMEOUT=5000`.
+   - One 14 s call to the probe's `wait` under `MCP_TOOL_TIMEOUT=5000`.
    - **It passes only if both hold:**
      - the probe's log shows `notifications/cancelled` within 2 seconds of Claude Code's cancel;
      - the ledger has a `call.returned` with outcome `cancelled` for that call.
    - **Otherwise** it exits 1 and names the failed check.
 
    It is manual only: it calls a model, so it's a script, never a CI test. It reports `~/.claude.json` bookkeeping. Steps 7 and 8 are implementation stage 3, with `docs/MANUAL-CHECK.md` (the checklist below) and the claims table.
-8. **Manual-check files:** a project-scope `.mcp.json` and `polarizer.example.toml` (the example in PROXY-SPEC.md). The Everything server is pinned: `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio`. Also `docs/README-quickstart.md`, a draft and not yet a README. It includes the limits text from PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
+8. **Manual-check files:** `.mcp.json.example` (the real project-scope `.mcp.json` is gitignored) and `polarizer.example.toml`, with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
 
 ## Test methods
 
@@ -122,7 +122,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 
 ## Tests and claims
 
-| Claim | Command | Run? (local runs; CI has run stage 1 only) |
+| Claim | Command | Run? (local runs; CI has run stages 1 and 2) |
 |---|---|---|
 | Claude Code 2.1.287 speaks 2026-07-28 to an SDK 2.2 server, opens `subscriptions/listen`, and re-lists after a change notice | spike, headless | yes |
 | Claude Code cancels on its own timeout in both eras, and the upstream behind the proxy gets its own cancel 1 ms later | spike, headless (timestamped logs in verified-facts.md) | yes |
@@ -133,7 +133,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | Advertised capabilities are exactly tools in each era | `pytest tests/test_scope.py` | yes, Linux (stage 2) |
 | An `InputRequiredResult` gives `unsupported` with the one-line error; older-era requests to the client are refused and recorded as `protocol-error` | `pytest tests/test_outcomes.py` | yes, Linux (stage 2) |
 | Each config error gives its exact message and exit 2; `${NAME}` expansion; the upstream gets only the minimal environment plus its `env` | `pytest tests/test_config.py` | errors and `${NAME}`: yes, Linux; minimal environment: yes, Linux (stage 2) |
-| Upstreams connect in parallel; a hung one times out at its `connect_timeout_seconds` while the others serve; no retry | `pytest tests/test_startup.py` | yes, Linux (stage 2) |
+| Upstreams connect in parallel; a hung one times out at its `connect_timeout_seconds` while the others serve; no retry | `pytest tests/test_startup.py` | yes, Linux (stage 2; shown by events, not elapsed time, since stage 3) |
 | Paging stops at 100 pages or 1,000 tools; names over 128 characters are skipped and recorded | `pytest tests/test_listing.py tests/test_proxy.py::test_prefix_rules` | yes, Linux (stage 2) |
 | Each outcome is recorded and returned as in PROXY-SPEC.md | `pytest tests/test_outcomes.py` | yes, Linux (stage 2) |
 | Prefixes, exact arguments, `_meta` filter, progress relay, concurrency, and one sent and one returned entry per call | `pytest tests/test_proxy.py tests/test_outcomes.py` | yes, Linux (stage 2) |
@@ -156,12 +156,15 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | `verify` and `repair` need exactly one of `--config` or `--ledger-dir`, absolute, else one line and exit 2 | `pytest tests/test_golden.py` | yes, Linux |
 | Side files: exclusive create, orphans reported, deletion still verifies, tampering exits 8 | `pytest tests/test_args.py` | yes, Linux |
 | `ledger_dir` modes; refusal inside a `ledger_forbidden_paths` entry or Parallax's directories (always forbidden), by real path components; the warning inside any other git working tree | `pytest tests/test_ledgerdir.py` | yes, Linux |
-| End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | no |
+| Results through the proxy equal direct results, apart from the SDK's stated limits, which are pinned exactly; an unreadable result gives a fixed line and no result data in the ledger | `pytest tests/test_fidelity.py` | yes, Linux (stage 3) |
+| The pinned Everything and Filesystem servers list the same tools and give the same results through the proxy, apart from the stated limits | `POLARIZER_REFERENCE=1 pytest tests/test_reference.py` (local only, never in CI) | yes, Linux (stage 3) |
+| live-check's pass and fail decision, on made-up logs | `pytest tests/test_live_check.py` | yes, Linux (stage 3) |
+| End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | yes, once, headless: Claude Code 2.1.288, haiku, Linux (stage 3) |
 
 ## Manual checklist (M0 isn't done until you confirm)
 
 1. **Forbidden paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `ledger_forbidden_paths`.
-2. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Everything server. Pre-warm the pinned Everything server once first. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
+2. **A real session.** Use the project-scope `.mcp.json` in `~/code/polarizer`, never user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Filesystem server. Pre-warm the pinned Filesystem server once first. docs/MANUAL-CHECK.md has the exact commands for this checklist. Start `claude` in `~/code/polarizer` and use both servers' tools. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
 
    ```
    intact: 31 entries, 2 sessions, 12 calls
@@ -212,6 +215,7 @@ Why not the alternatives:
 - When the exposed set changes, publish `ToolsListChanged()` on the bus. The spike showed Claude Code then re-lists, headless.
 - `send_tool_list_changed` is only for older-era clients, and is untested with Claude Code because Claude Code negotiates 2026-07-28.
 - Whether M1a also re-checks the pin on each call is decided when M1a is planned.
+- A failed refresh of an upstream's tool list must never be treated as "unchanged" for drift detection, and must be recorded. M0 keeps the last good list after a failed refresh and says so only on stderr (STAGE2-NOTES.md, guess 2); that is not enough for pins.
 
 **Tests.**
 - A fixed hash for a fixed definition.
