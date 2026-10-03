@@ -64,15 +64,18 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | Kind | `data` |
 |---|---|
 | `ledger.genesis` | `chain_id` |
-| `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256` |
+| `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256`, and from M1a `pins` (`"on"`, or `"off"` under `serve --no-pins`) |
 | `session.client` | `session`, `client_name`, `client_version`, `protocol_version`: written once, on the first request that carries client information. In 2026-07-28 that's every request's `_meta`; in the older era it's `initialize`. |
 | `upstream.connected` | `prefix`, then either `protocol_version`, `tools` and `skipped_tools` (a list of names left out), or `error` |
 | `call.sent` | `session`, `tool` (the full exposed name, `<prefix>__<tool>`), `args_commit`, `meta_dropped` (a list of strings), `client_call_id` (a string, or `null` when the client sent none) |
 | `call.returned` | `call_seq`, `outcome` (`ok`, `tool-error`, `protocol-error`, `transport-error`, `cancelled`, `unsupported`; defined in PROXY-SPEC.md), `latency_ms`, `result_bytes`, plus `error` (one line) for every outcome but `ok`, and `code` for `protocol-error` |
-| `call.refused` | `session`, `tool` (the name as called), `reason`. M0: a name that matches no listed tool. M1a adds hidden tools called by name. |
-| `tool.approved` | `upstream`, `tool`, `def_hash`, `actor` (M1a) |
+| `call.refused` | `session`, `tool` (the name as called), `reason`. M0: a name that matches no listed tool. M1a adds hidden tools called by name, with the reasons in PIN-SPEC.md (section 4). |
+| `tool.approved` | `upstream`, `tool`, `def_hash`, `actor`, `group` (null, or the group id of a group approval) (M1a; PIN-SPEC.md, section 3) |
 | `tool.rejected` | `upstream`, `tool`, `def_hash`, `actor`, `reason` (M1a) |
-| `tool.drift` | `upstream`, `tool`, `approved_hash`, `live_hash` (M1a) |
+| `tool.drift` | `session`, `upstream`, `tool`, `approved_hash`, `live_hash` (M1a) |
+| `tool.seen` | `session`, `upstream`, `tool`, `def_hash`: a live definition no decision covers (M1a) |
+| `tool.unservable` | `session`, `upstream`, `tool`, `def_hash` (or null), `problem`: a tool hidden because it can't be hashed or its stored copy fails its check (M1a) |
+| `upstream.refresh_failed` | `session`, `prefix`, `trigger` (`client-list`, `upstream-notice` or `connection-lost`), `error` (M1a) |
 | `ledger.repaired` | `bytes`, `sha256`, `file` |
 | `ledger.head_rebuilt` | `from_seq`, `from_hash` (the verified chain head it was rebuilt from) |
 
@@ -198,6 +201,7 @@ Measured on WSL2 ext4: a plain write took 0.3 µs at p50, and write plus fsync t
 - **Security-state entries are fsynced before Polarizer acts on them:** `ledger.genesis`, `tool.approved`, `tool.rejected`, `tool.drift`, `ledger.repaired`, `ledger.head_rebuilt`, and later milestones' holds and decisions.
 - **`call.sent` is written before the call is forwarded, but not fsynced inline.** The write alone survives a Polarizer crash. An inline fsync would add about 1 ms to every call only to cover an operating-system crash. The writer fsyncs whenever its queue empties.
 - **A `call.sent` with no `call.returned`** means "outcome unknown", not a missing call.
+- **M1a (PIN-SPEC.md, section 3):** `tool.seen`, `tool.unservable` and `upstream.refresh_failed` are written like `call.sent`, without an inline fsync. `tool.rejected` and `tool.drift` are fsynced, but they only ever hide a tool, so Polarizer hides it at once without waiting for the fsync. Only `tool.approved` must be durable before Polarizer acts on it, and `serve` fsyncs the ledger itself before acting on one another process wrote.
 
 ### ledger.head
 

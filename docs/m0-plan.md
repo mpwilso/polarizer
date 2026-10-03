@@ -185,6 +185,8 @@ Ideas from mcpclerk, credited by name; none of its code is used:
 
 ## Appendix: M1a
 
+Superseded by docs/PIN-SPEC.md, which wins where the two differ. Kept for history.
+
 **Definition hash.**
 - Parse each upstream tool as an SDK `Tool`, keeping the upstream's own name.
 - Take `model_dump(by_alias=True, mode="json", exclude_none=True)`. That is how the SDK serializes what it serves.

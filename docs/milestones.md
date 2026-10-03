@@ -19,3 +19,11 @@ The order puts M2b before the practice range, because the range's exfiltration c
 | Stretch | OCSF export | `polarizer export --ocsf` maps ledger fields to OCSF names. | small |
 | Stretch | Anchoring and signatures | A signed checkpoint (chain id, size, head hash) is anchored in a commit trailer, and verify reports the last anchored position. | medium |
 | Stretch | Parallax and ISR adoption | Parallax gets a dual-version verifier and the identical `conformance/` folder. One Parallax task routes its MCP calls through Polarizer, and ISR names what the agents touched. This needs a separate, explicit prompt, run in its own session and branch with that project's tests. | large |
+
+## Carry-forward notes
+
+From the M1a spec round (docs/PIN-SPEC.md, section 8). They change no size or done-when.
+
+- **M2b:** session taint must survive process restarts, because Esc kills the server process and a fresh process would otherwise start clean.
+- **M3:** the approval page and pending holds cannot live only inside the stdio proxy process, since Esc terminates it.
+- **M5 and M6:** time per decision comes from monotonic elapsed values stored in the entries, not from `ts` differences.

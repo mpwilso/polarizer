@@ -101,7 +101,7 @@ Installed with `pip install mcp==2.2.0` into a venv on Python 3.12.3, then read 
   - Fields and wire names: `name`, `title`, `description`, `input_schema` (`inputSchema`, a `dict[str, Any]`), `execution`, `output_schema` (`outputSchema`), `icons`, `annotations`, `meta` (`_meta`).
   - Every optional field defaults to `None`. The model config is camelCase aliases with `populate_by_name`, `validate_by_alias` and `validate_by_name`, and no `extra` setting.
   - Executed: an unknown field (`bogusField`) is silently dropped on parse.
-  - Executed: a snake_case `input_schema` on the wire is accepted and dumps as `inputSchema`.
+  - Executed with `Tool.model_validate` and its default settings: a snake_case `input_schema` is accepted and dumps as `inputSchema`. That is not how the SDK client parses a list: through `Client.list_tools`, a tool sent with `input_schema` fails the whole list (see M1a spec round).
   - Executed: an explicit `"description": null` survives `exclude_unset=True` but not `exclude_none=True`.
   - Floats in schemas (`"minimum": 0.5`) are kept.
 - **Serving:** results are serialized with `model_dump(by_alias=True, mode="json", exclude_none=True)` (`mcp/server/runner.py:118`).
@@ -465,7 +465,7 @@ Claude Code's own log for the server (`~/.cache/claude-cli-nodejs/-home-matt-cod
     14:04:34.942Z  MCP server process exited cleanly
 
 - **Esc stopped the call:** Polarizer sent its own `notifications/cancelled` upstream, the probe stopped, and the ledger recorded `call.returned` with outcome `cancelled`. The cancel reached the probe 6.611 s after the call did, by the probe's wall clock. `latency_ms` 7730 is on the monotonic clock; see "Wall clock and monotonic clock on WSL2" below for the 1.1 s difference.
-- **How Claude Code stopped it is not settled.** Claude Code logged a SIGINT to the Polarizer process in the same millisecond as `call.returned`. Polarizer's source has no signal handler. Whether Claude Code also sent `notifications/cancelled` to Polarizer is not visible in these logs, because no wiretap was running. The text `caller cancelled` is what Polarizer's own upstream client sends, whatever the reason for the cancellation.
+- **How Claude Code stopped it.** Claude Code logged a SIGINT to the Polarizer process in the same millisecond as `call.returned`, then a SIGTERM 100 ms later. The owner confirmed that pressing Esc alone caused this; the session was not quit. Polarizer's source has no signal handler of its own, but anyio runs asyncio through `asyncio.Runner`, whose SIGINT handler cancels the main task (see M1a spec round), which is why the call was recorded as `cancelled`. Whether Claude Code also sent `notifications/cancelled` to Polarizer is not visible in these logs, because no wiretap was running. The text `caller cancelled` is what Polarizer's own upstream client sends, whatever the reason for the cancellation.
 
 ### After the Esc: Polarizer restarted (unresolved)
 
@@ -487,7 +487,7 @@ In order, from the three logs, between the cancel and the next ledger entry (seq
 - **The ledger** has no entry between seq 22 and seq 23. Polarizer writes no session-end entry, so none was expected.
 - **Polarizer's stderr:** Claude Code's log records stderr only once, at connect (14:03:27.865Z: the probe and Filesystem startup lines). Nothing from Polarizer's stderr was logged after the signals.
 - **This session's transcript** shows the call as interrupted: "the session ended before this call's result was recorded".
-- **Unresolved:** whether Esc itself makes Claude Code signal the server process, or the session was ended by hand, and what started the new connection 12 s later. The owner will say whether they quit `claude`.
+- **Settled:** Esc itself made Claude Code signal the server process; the owner did not quit `claude`. **Still unknown:** what started the new connection 12 s later.
 
 ### Wall clock and monotonic clock on WSL2
 
@@ -496,6 +496,18 @@ A throwaway script sampled `time.time()` and `time.monotonic()` once a second fo
 - **The ledger's own calls** (`~/.local/share/polarizer/ledger.jsonl` against `/tmp/polarizer-probe.log`): `call.sent` `ts` was 1 to 6 ms before the probe received each call. For the four probe calls, `latency_ms` minus the gap between `call.returned` and `call.sent` `ts` was -1 ms (2 s call), +1063 ms (30 s), +1119 ms (30 s, cancelled) and +1125 ms (30 s). In the two completed 30 s calls, the probe's own monotonic span (30116 and 30168 ms) matched `latency_ms`, while its own wall clock showed 29047 and 29042 ms: the same gap in a separate process.
 - **Through the test rig** (in-memory SDK client, `polarizer` Gateway, the stdio probe; no model, no Claude Code), three 5 s calls with wall and monotonic times taken at the `call.sent` timestamp, the forward, the upstream's return and the `call.returned` timestamp: no step happened, the two clocks agreed throughout, and the `ts` gaps (5041, 5060, 5017 ms) matched `latency_ms` (5040, 5059, 5017).
 - **So:** `ts` is the wall clock and `latency_ms` is monotonic. On this machine they can disagree by about 1.1 s whenever a step falls inside a call; the code measures each one as specified.
+
+## M1a spec round (Oct 3, 2026)
+
+Checked for docs/PIN-SPEC.md on mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5, anyio 4.15.1 and rfc8785 0.1.4, in `.venv`, with throwaway scripts in the session scratch directory. Nothing from them is in the repo. No Claude Code, no model.
+
+- **How the SDK client parses a result** (`mcp/client/session.py`, around lines 588 to 601, read): it validates the raw result against the negotiated era's model, drops fields from a later revision, then parses the version-free model with `by_name=False`. Executed: a stdlib stdio server at 2025-11-25 listing a tool with `inputSchema` listed fine through `Client.list_tools`. The same server with `input_schema` instead made `list_tools` raise pydantic's `ValidationError` for `ListToolsResult`.
+- **`execution` on the client side** (executed, in memory): an SDK server whose tool sets `execution` (`taskSupport` `optional`), listed by an SDK `Client`. In `legacy` mode (2025-11-25) the parsed `Tool` kept `execution`. In `auto` mode (2026-07-28) it was `None`, because the server's own 2026-07-28 serializer leaves it out. The version-free `Tool` keeps `execution` whenever the wire has it, in either era.
+- **How the SDK serves a result** (`mcp_types.methods.serialize_server_result`, read and executed): it validates against the era's model (`extra="ignore"`) and dumps with `exclude_none`. Every handshake version (2024-11-05 to 2025-11-25) uses the 2025-11-25 model. Comparing the two models' fields recursively, the only `Tool` field the 2025-11-25 model has and the 2026-07-28 model lacks is `execution`. The 2025-11-25 `inputSchema` and `outputSchema` models also type `properties` and `required`. Both eras' schema models allow extra keys.
+- **Nulls when serving** (executed, both eras): a null nested in a schema property (`"default": null`) is kept. A null key at the top level of `inputSchema` is kept by `model_dump` but dropped when served. `"annotations": {"title": null}` is served as `"annotations": {}`.
+- **rfc8785** (executed): `dumps` raises `IntegerDomainError` for 9223372036854775807 in a schema, and writes the float 1e21 as `1e+21`.
+- **Definition hashes** under PIN-SPEC.md's form (executed): the probe's `wait` definition hashes to `ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b`. With `"description": "How long."` added to its `seconds` property, it hashes to `3462be54bba570aacd2a87ea2bb68c6806a68abac4761e0d848d1b6deb8a11b5`. The `legacy` and `auto` listings above gave one hash. Adding `execution`, a null `title`, a null top-level schema key or an unknown top-level field, or reordering keys, left the hash unchanged.
+- **anyio and SIGINT** (`anyio/_backends/_asyncio.py`, around lines 114 to 228, read): on Python 3.11 and later, `anyio.run` uses `asyncio.Runner`, which installs a SIGINT handler that cancels the main task when SIGINT still has Python's default handler. SIGTERM keeps the operating system's default, which ends the process at once.
 
 ## Unverified
 
