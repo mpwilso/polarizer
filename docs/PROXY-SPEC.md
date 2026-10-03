@@ -28,7 +28,7 @@ ledger_forbidden_paths = ["~/code/parallax", "~/code/loupe", "~/code/isr"]
 
 [upstream.probe]
 command = "/home/<you>/code/polarizer/.venv/bin/python"
-args = ["/home/<you>/code/polarizer/tests/probe_server.py"]
+args = ["/home/<you>/code/polarizer/tests/helpers/probe_server.py"]
 connect_timeout_seconds = 5
 
 [upstream.every]

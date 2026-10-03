@@ -10,7 +10,7 @@ Version: 2.1.287 (`claude --version`).
 
 The probe was a stdlib Python MCP server over stdio. It answered `initialize` by echoing the requested `protocolVersion`, `tools/list` with one tool `wait(seconds)`, and `tools/call` by sleeping. With `PROBE_PROGRESS=1` and a `progressToken` present, it sent `notifications/progress` every 2 s. It answered everything else, including `server/discover`, with JSON-RPC error -32601. It logged every inbound message with a timestamp to `probe.log` next to itself.
 
-Flaw: it read stdin on the main thread, so it could not log anything that arrived while it slept. The repo's `tests/probe_server.py` must read stdin on a separate thread.
+Flaw: it read stdin on the main thread, so it could not log anything that arrived while it slept. The repo's probe (`tests/helpers/probe_server.py`) reads stdin on a separate thread.
 
 The command was:
 
@@ -408,8 +408,8 @@ These are assumed or open. Nothing here has been observed.
 - **Polarizer's own `unsupported` path end to end:** only the SDK behavior beneath it was run.
 - **Discover-verdict cache:** whether a cached "modern" verdict changes the connection order.
 - **Claude Code and cache hints:** whether it honors server cache hints on `tools/list`.
-- **Older-era list changes from an upstream:** receiving `notifications/tools/list_changed` from a 2025-11-25 upstream through the SDK `Client`'s `message_handler`.
-- **Older-era list changes toward a client:** `send_tool_list_changed` toward an older-era client, with Claude Code, which always negotiates 2026-07-28 with an SDK 2.2 server.
+- **Older-era list changes from an upstream:** receiving `notifications/tools/list_changed` from a 2025-11-25 upstream through the SDK `Client`'s `message_handler`. Stage 2 ran it SDK to SDK only (`tests/test_eras.py::test_handshake_upstream`, an in-memory upstream in the 2025-11-25 era); never with a real third-party server.
+- **Older-era list changes toward a client:** `send_tool_list_changed` toward an older-era client, with Claude Code, which always negotiates 2026-07-28 with an SDK 2.2 server. Stage 2 ran it toward an SDK client only (`tests/test_eras.py::test_eras`).
 - **Append costs:** native Windows, macOS, and WSL on the Windows filesystem (the CI benchmark will measure the first two).
 - **Windows `ledger.head`:** the `os.replace` failure when the file is held open is expected from Windows semantics, not observed.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.

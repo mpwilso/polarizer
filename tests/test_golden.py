@@ -196,7 +196,16 @@ def test_locked(command, tmp_path, capsys):
         ([], "polarizer: the following arguments are required: command"),
         (
             ["serve"],
-            "polarizer: argument command: invalid choice: 'serve' (choose from ",
+            "polarizer: serve needs --config <absolute path to polarizer.toml>",
+        ),
+        (
+            ["serve", "--config", "polarizer.toml"],
+            "polarizer: --config must be an absolute path, got polarizer.toml",
+        ),
+        (["serve", "--ledger-dir", "/x"], "polarizer: unrecognized arguments: --ledger-dir /x"),
+        (
+            ["bogus"],
+            "polarizer: argument command: invalid choice: 'bogus' (choose from ",
         ),
     ],
 )

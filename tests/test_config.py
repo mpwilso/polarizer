@@ -1,7 +1,10 @@
 """polarizer.toml: parse and validate only, with each error's exact one line."""
 
+import json
+import sys
 import textwrap
 
+import anyio
 import pytest
 
 from polarizer import cli
@@ -131,3 +134,70 @@ def test_verify_config_error_is_one_line_and_exit_2(tmp_path, capsys):
     assert cli.main(["verify", "--config", str(path)]) == 2
     out, err = capsys.readouterr()
     assert (out, err) == ("", 'polarizer.toml: unknown top-level key "x"\n')
+
+
+def test_serve_config_errors_exit_2_before_any_upstream(tmp_path, fake_home, capsys, monkeypatch):
+    monkeypatch.delenv("NOTES_TOKEN", raising=False)
+    marker = tmp_path / "started"
+    # If any case started the upstream, it would create the marker file.
+    script = f'open({json.dumps(str(marker))}, "w")'
+    upstream = f"[upstream.a]\ncommand = {json.dumps(sys.executable)}\nargs = ['-c', '{script}']\n"
+    cases = [
+        ("x = 1\n" + upstream, 'polarizer.toml: unknown top-level key "x"'),
+        (
+            upstream + 'env = { T = "${NOTES_TOKEN}" }\n',
+            'polarizer.toml: [upstream.a] env T: "${NOTES_TOKEN}" is not set in Polarizer\'s environment',
+        ),
+        (
+            f'ledger_dir = "{(fake_home / ".config/parallax/led").as_posix()}"\n' + upstream,
+            f"polarizer: ledger_dir {fake_home / '.config/parallax/led'} is inside {fake_home / '.config/parallax'}, which Polarizer must not write to",
+        ),
+    ]
+    for text, line in cases:
+        path = write(tmp_path, text)
+        assert cli.main(["serve", "--config", str(path)]) == 2
+        out, err = capsys.readouterr()
+        assert (out, err) == ("", line + "\n")
+    assert not marker.exists()
+    assert not (fake_home / ".config").exists()
+
+
+def test_serve_refuses_a_v0_ledger(tmp_path, fake_home, capsys):
+    from conftest import install_fixture
+
+    directory = install_fixture("valid/v0-parallax", tmp_path / "led")
+    path = write(tmp_path, f'ledger_dir = "{directory.as_posix()}"\n[upstream.a]\ncommand = "x"\n')
+    assert cli.main(["serve", "--config", str(path)]) == 3
+    out, err = capsys.readouterr()
+    line = f"polarizer: ledger at {directory} is v0 (Parallax's format); Polarizer only writes v1\n"
+    assert (out, err) == ("", line)
+
+
+def test_upstream_gets_minimal_environment(tmp_path):
+    """serve starts each upstream with the SDK's minimal environment plus its own env table:
+    a whole "${NAME}" value is copied from Polarizer's environment, and nothing else is."""
+    from helpers import rig
+    from mcp import Client
+    from mcp.client.stdio import DEFAULT_INHERITED_ENV_VARS
+
+    toml = (
+        f"[upstream.p]\ncommand = {rig.toml_str(sys.executable)}\nargs = [{rig.toml_str(rig.PROBE)}]\n"
+        'env = { PROBE_COPIED = "${SECRET_VAR}", PROBE_LITERAL = "as written" }\n'
+    )
+    cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
+    env = {"SECRET_VAR": "s3cret", "OTHER_VAR": "not passed on"}
+
+    async def scenario():
+        async with Client(rig.serve_params(cfg, env)) as client:
+            result = await client.call_tool("p__env", {})
+            return json.loads(result.content[0].text)
+
+    seen = anyio.run(scenario)
+    assert seen["PROBE_COPIED"] == "s3cret"
+    assert seen["PROBE_LITERAL"] == "as written"
+    assert "SECRET_VAR" not in seen and "OTHER_VAR" not in seen
+    # LC_CTYPE: Python sets it in its own environment when it coerces the C locale (PEP 538).
+    # __CF_*: macOS adds these to every process.
+    allowed = set(DEFAULT_INHERITED_ENV_VARS) | {"PROBE_COPIED", "PROBE_LITERAL", "LC_CTYPE"}
+    extra = {k for k in seen if k not in allowed and not k.startswith("__CF_")}
+    assert extra == set()

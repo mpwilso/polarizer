@@ -84,7 +84,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - The file is stdlib-only at `22ef600`. The Parallax package is never imported.
 5. **The proxy**, as in PROXY-SPEC.md: `upstream.py`, `proxy.py`, and `serve` added to `cli.py`. Steps 5 and 6 are implementation stage 2.
 6. **Test servers.**
-   - `tests/probe_server.py`: a stdlib MCP server that reads stdin on its own thread and runs each call on a worker. It has one tool, `wait(seconds)`, sends progress every second when given a token, logs every inbound message with a timestamp, and can delay its handshake (`PROBE_DELAY`).
+   - `tests/helpers/probe_server.py`: a stdlib MCP server that reads stdin on its own thread and runs each call on a worker. Its main tool is `wait(seconds)` (stage 2 added `crash`, `env` and `fail` for tests). It sends progress every second when given a token, logs every inbound message with a timestamp, and can delay its handshake (`PROBE_DELAY`).
    - In-memory fake upstreams built on the SDK's low-level `Server`, covering:
      - both protocol eras, with a TTL cache hint and a listen bus;
      - errors of each outcome type;
@@ -122,25 +122,25 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 
 ## Tests and claims
 
-| Claim | Command | Run? (CI has not run yet) |
+| Claim | Command | Run? (local runs; CI has run stage 1 only) |
 |---|---|---|
 | Claude Code 2.1.287 speaks 2026-07-28 to an SDK 2.2 server, opens `subscriptions/listen`, and re-lists after a change notice | spike, headless | yes |
 | Claude Code cancels on its own timeout in both eras, and the upstream behind the proxy gets its own cancel 1 ms later | spike, headless (timestamped logs in verified-facts.md) | yes |
 | Claude Code's startup limit is `MCP_TIMEOUT`, 30 s by default; an 8 s handshake works with defaults | binary and spike, headless | yes |
 | SDK outcomes: tool error as a result; upstream JSON-RPC error as `MCPError` with code kept; dead upstream as -32000; `InputRequiredResult` returned with `allow_input_required=True` | spike, SDK only | yes |
-| A 2026-07-28 upstream works through the proxy (versions, list change through listen, TTL hint, progress, cancel) | spike round 3; `pytest tests/test_eras.py::test_modern_upstream` (memory and stdio) | spike yes, repo no |
-| A 2025-11-25 upstream works through the proxy while Claude Code's side is 2026-07-28 | spike round 2; `pytest tests/test_eras.py::test_handshake_upstream` | spike yes, repo no |
-| Advertised capabilities are exactly tools in each era | `pytest tests/test_scope.py` | no |
-| An `InputRequiredResult` gives `unsupported` with the one-line error; older-era requests to the client are refused and recorded as `protocol-error` | `pytest tests/test_scope.py` | no |
-| Each config error gives its exact message and exit 2; `${NAME}` expansion; the upstream gets only the minimal environment plus its `env` | `pytest tests/test_config.py` | errors and `${NAME}`: yes, Linux; minimal environment: no (stage 2) |
-| Upstreams connect in parallel; a hung one times out at its `connect_timeout_seconds` while the others serve; no retry | `pytest tests/test_startup.py` | no |
-| Paging stops at 100 pages or 1,000 tools; names over 128 characters are skipped and recorded | `pytest tests/test_listing.py` | no |
-| Each outcome is recorded and returned as in PROXY-SPEC.md | `pytest tests/test_outcomes.py` | no |
-| Prefixes, exact arguments, `_meta` filter, progress relay, concurrency, and one sent and one returned entry per call | `pytest tests/test_proxy.py` | no |
-| An upstream tool whose own name contains `__` lists and calls correctly, split at the first `__` | `pytest tests/test_proxy.py::test_double_underscore_tool_name` | no |
-| `session.client` is written exactly once per process, even when two requests arrive at once | `pytest tests/test_proxy.py::test_session_client_once` | no |
-| `serve` without `--config`, or with a relative path, exits 2 with one line on stderr | `pytest tests/test_config.py` | no |
-| stdout of `serve` carries only JSON-RPC | `pytest tests/test_stdout.py` | no |
+| A 2026-07-28 upstream works through the proxy (versions, list change through listen, TTL hint, progress, cancel) | spike round 3; `pytest tests/test_eras.py::test_modern_upstream` (memory and stdio) | spike yes, repo yes, Linux (stage 2) |
+| A 2025-11-25 upstream works through the proxy while Claude Code's side is 2026-07-28 | spike round 2; `pytest tests/test_eras.py::test_handshake_upstream` | spike yes, repo yes, Linux (stage 2) |
+| Advertised capabilities are exactly tools in each era | `pytest tests/test_scope.py` | yes, Linux (stage 2) |
+| An `InputRequiredResult` gives `unsupported` with the one-line error; older-era requests to the client are refused and recorded as `protocol-error` | `pytest tests/test_outcomes.py` | yes, Linux (stage 2) |
+| Each config error gives its exact message and exit 2; `${NAME}` expansion; the upstream gets only the minimal environment plus its `env` | `pytest tests/test_config.py` | errors and `${NAME}`: yes, Linux; minimal environment: yes, Linux (stage 2) |
+| Upstreams connect in parallel; a hung one times out at its `connect_timeout_seconds` while the others serve; no retry | `pytest tests/test_startup.py` | yes, Linux (stage 2) |
+| Paging stops at 100 pages or 1,000 tools; names over 128 characters are skipped and recorded | `pytest tests/test_listing.py tests/test_proxy.py::test_prefix_rules` | yes, Linux (stage 2) |
+| Each outcome is recorded and returned as in PROXY-SPEC.md | `pytest tests/test_outcomes.py` | yes, Linux (stage 2) |
+| Prefixes, exact arguments, `_meta` filter, progress relay, concurrency, and one sent and one returned entry per call | `pytest tests/test_proxy.py tests/test_outcomes.py` | yes, Linux (stage 2) |
+| An upstream tool whose own name contains `__` lists and calls correctly, split at the first `__` | `pytest tests/test_proxy.py::test_double_underscore_tool_name` | yes, Linux (stage 2) |
+| `session.client` is written exactly once per process, even when two requests arrive at once | `pytest tests/test_proxy.py::test_session_client_once` | yes, Linux (stage 2) |
+| `serve` without `--config`, or with a relative path, exits 2 with one line on stderr | `pytest tests/test_golden.py tests/test_config.py` | yes, Linux (stage 2) |
+| stdout of `serve` carries only JSON-RPC | `pytest tests/test_stdout.py` | yes, Linux (stage 2) |
 | Every `verify`, `verify --args` and `repair` case prints its exact stdout and exit code | `pytest tests/test_golden.py` | yes, Linux |
 | The canonical subset holds; non-ASCII keys break it | throwaway differential; `pytest tests/test_canon.py` | throwaway yes, repo yes (Linux) |
 | Both verifiers agree on status, line and seq for 5,000 randomly mutated chains per run (bit flips, deleted, swapped and duplicated lines, truncation, reformatted lines, `ledger.head` edits, and structure-level edits: reordered keys with the hash kept, whitespace between tokens, `\uXXXX` escapes, integers as `1.0` or `1e0`, a UTF-8 BOM, a CR before the newline), from a printed seed, under 60 s | `pytest tests/test_differential.py` | yes, Linux: seed 20261002, plus 20,000 cases each on seeds 1 to 5, with and without the structure-level edits, no disagreements |
