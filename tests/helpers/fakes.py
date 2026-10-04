@@ -100,6 +100,7 @@ class FakeUpstream:
         self.bump_on_list = False
         self.fail_list = False
         self.fail_message = "listing failed on purpose"
+        self.refuse_message = "upstream says no"  # the "refuse" tool's MCPError message
         self._last_lister = None  # (protocol version, session) of the latest tools/list
         self.log = log
         self.bus = InMemorySubscriptionBus()
@@ -178,7 +179,7 @@ class FakeUpstream:
         if name in ("rich", "rich_error"):
             return rich(name == "rich_error")
         if name == "refuse":
-            raise MCPError(code=-32042, message="upstream says no", data={"why": "secret"})
+            raise MCPError(code=-32042, message=self.refuse_message, data={"why": "secret"})
         if name == "closed":
             raise MCPError(code=-32000, message="the upstream says connection closed")
         if name == "ask":

@@ -771,3 +771,48 @@ def test_notices_at_most_once_per_second(tmp_path):
     times, listed = anyio.run(scenario)
     assert times[1] - times[0] >= 0.95  # lower bound only: load can only make it later
     assert listed == ["f__echo", "f__wait"]
+
+
+def test_change_during_a_notice_round_is_not_lost(tmp_path):
+    """A change that lands while the notifier works out the exposed list still reaches
+    clients. Here the notifier's _exposed_dump reads the list, then holds until a second
+    decision has been adopted, and returns the list as it was before it: clients get one
+    notice for the first decision and another for the second, within about two notice
+    intervals, with no further change to wake the notifier."""
+    fake = FakeUpstream(names=["echo", "wait"])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(
+            ledger_dir, [rig.spec("f", fake.server)], approve=False, watch_interval=3600
+        ) as (client, gw):
+            assert names((await client.list_tools()).tools) == []
+            real = gw._exposed_dump
+            reading, second_adopted = anyio.Event(), anyio.Event()
+
+            async def held_dump():
+                current = await real()
+                if not reading.is_set():  # only the first round is held
+                    reading.set()
+                    await second_adopted.wait()
+                return current
+
+            gw._exposed_dump = held_dump
+            async with client.listen(tools_list_changed=True) as subscription:
+                await approve(ledger_dir, "f", "echo", hash_now(fake, "echo"))
+                await gw.catch_up()
+                with anyio.fail_after(10):
+                    await reading.wait()
+                await approve(ledger_dir, "f", "wait", hash_now(fake, "wait"))
+                await gw.catch_up()
+                second_adopted.set()
+                await rig.next_notice(subscription)
+                first = anyio.current_time()
+                await rig.next_notice(subscription, 2 * gw.notice_interval)
+                gap = anyio.current_time() - first
+            return gap, gw._announced, names((await client.list_tools()).tools)
+
+    gap, announced, listed = anyio.run(scenario)
+    assert gap >= 0.95  # still at most one notice a second
+    assert [t["name"] for t in announced] == ["f__echo", "f__wait"]
+    assert listed == ["f__echo", "f__wait"]

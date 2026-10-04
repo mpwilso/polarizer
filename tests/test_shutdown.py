@@ -15,6 +15,7 @@ from helpers import rig
 from helpers.raw import RawClient
 
 from polarizer.ledger import verify_bytes
+from polarizer.text import safe
 
 POSIX_ONLY = pytest.mark.skipif(
     sys.platform == "win32",
@@ -236,3 +237,44 @@ def test_upstream_ignoring_end_of_input_is_left_running(tmp_path):
         os.kill(pid, 0)  # still there after serve exited; the SDK's SIGTERM never came
     finally:
         _stop(pid)
+
+
+# serve with a writer whose close raises: the real close runs, then OSError with hostile text.
+FAILING_CLOSE = """
+import sys
+from polarizer import cli, writer
+
+real = writer.LedgerWriter.close
+
+
+def close(self):
+    real(self)
+    raise OSError(5, "disk gone" + chr(27) + "[2J" + chr(10) + "INJECTED " + "Z" * 5000)
+
+
+writer.LedgerWriter.close = close
+sys.exit(cli.main(sys.argv[1:]))
+"""
+
+
+def test_failing_close_is_one_line_and_nonzero(tmp_path):
+    """If the writer's final close raises, serve prints one safe line naming the error on
+    stderr and exits non-zero, with no traceback."""
+    cfg, ledger_dir, _ = primed(tmp_path)
+    done = subprocess.run(
+        [sys.executable, "-c", FAILING_CLOSE, "serve", "--config", str(cfg)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=60,
+    )
+    err = done.stderr.decode("utf-8", "replace")
+    assert done.returncode != 0
+    assert "Traceback" not in err
+    lines = [line for line in err.splitlines() if "close" in line]
+    message = "disk gone" + chr(27) + "[2J" + chr(10) + "INJECTED " + "Z" * 5000
+    assert lines == [f"polarizer: could not close the ledger: {safe(OSError(5, message))}"]
+    assert lines[0].endswith("ZZZ...")
+    for line in err.splitlines():
+        assert all(" " <= c <= "~" for c in line), line
+    the_ledger = (ledger_dir / "ledger.jsonl").read_bytes()
+    assert verify_bytes(the_ledger, (ledger_dir / "ledger.head").read_bytes()).status == "intact"

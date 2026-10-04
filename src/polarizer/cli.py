@@ -426,19 +426,25 @@ async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.
             with anyio.CancelScope() as stop.phase:  # step 2; a second signal cancels it
                 await gateway.close_upstreams(CLOSE_UPSTREAMS_BOUND)
         with anyio.CancelScope(shield=True):  # step 3
-            await anyio.to_thread.run_sync(ledger.close)
+            try:
+                await anyio.to_thread.run_sync(ledger.close)
+            except Exception as e:
+                from polarizer.upstream import describe, log
+
+                log(f"polarizer: could not close the ledger: {describe(e)}")
+                _exit_now(1)
         _exit_now()
 
 
-def _exit_now() -> None:
-    """End serve with 0 once its writer is closed. Nothing is left to do, and a normal exit
-    would still tear down: an upstream still in the SDK's shielded shutdown (which anyio can't
-    abandon) would hold the process, and a signal arriving after the receiver closes would get
-    the operating system's default action. An upstream left running sees end of input when
-    Polarizer's pipes close."""
+def _exit_now(code: int = 0) -> None:
+    """End serve with `code` (0, once its writer is closed). Nothing is left to do, and a
+    normal exit would still tear down: an upstream still in the SDK's shielded shutdown (which
+    anyio can't abandon) would hold the process, and a signal arriving after the receiver
+    closes would get the operating system's default action. An upstream left running sees end
+    of input when Polarizer's pipes close."""
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
         except (OSError, ValueError):
             pass
-    os._exit(0)
+    os._exit(code)

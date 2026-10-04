@@ -338,11 +338,15 @@ class Gateway:
         last = None
         while True:
             await self._dirty.wait()
+            # Swapped before this round's first await. No other task runs between wait()
+            # returning and here, so every _changed() either came before the swap, and the
+            # exposed list read below already shows it, or comes after, and sets the new
+            # event, which wakes the next round. None can land on the spent event unseen.
+            self._dirty = anyio.Event()
             if last is not None:
                 wait = last + self.notice_interval - anyio.current_time()
                 if wait > 0:
                     await anyio.sleep(wait)
-            self._dirty = anyio.Event()  # changes from here on wake the next round
             current = await self._exposed_dump()
             if current != self._announced:
                 self._announced = current
@@ -658,7 +662,7 @@ class Gateway:
                     "call.sent",
                     {
                         "session": self.session,
-                        "tool": params.name,
+                        "tool": clip(params.name, 256),
                         "args_commit": commit,
                         "meta_dropped": [clip(k, 128) for k in dropped[:MAX_DROPPED]],
                         "client_call_id": clip(call_id, 256) if isinstance(call_id, str) else None,
@@ -681,8 +685,8 @@ class Gateway:
             returned["latency_ms"] = (time.monotonic_ns() - start) // 1_000_000
             returned["result_bytes"] = size
             if error is not None:
-                # Polarizer's own line, already safe, except for protocol-error: the upstream's
-                # own message, which the client gets too, kept whole up to 1 KiB by design.
+                # Polarizer's own line, already safe, or a protocol-error's ledger copy of the
+                # upstream's message, made safe by the caller.
                 returned["error"] = one_line(error)
             if code is not None:
                 returned["code"] = code if -MAX_INT <= code <= MAX_INT else str(code)
@@ -708,7 +712,10 @@ class Gateway:
             raise
         except MCPError as e:
             if e.code != CONNECTION_CLOSED:
-                await self._append("call.returned", finish("protocol-error", 0, e.message, e.code))
+                # The client gets the upstream's message unchanged (PROXY-SPEC.md, Calls); the
+                # ledger gets it through safe(), cut to 1 KiB.
+                recorded = safe(e.message, 1024)
+                await self._append("call.returned", finish("protocol-error", 0, recorded, e.code))
                 raise MCPError(code=e.code, message=e.message) from None
             line = f"polarizer: upstream {upstream.prefix} failed: {describe(e)}"
             reply = await self._reply_error(line, "transport-error", finish)

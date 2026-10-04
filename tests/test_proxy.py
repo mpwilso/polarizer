@@ -12,6 +12,7 @@ from helpers.fakes import FakeUpstream
 from mcp import Client, StdioServerParameters
 
 from polarizer import config
+from polarizer.canon import MAX_LINE
 from polarizer.sidefiles import ARGS
 
 
@@ -319,6 +320,54 @@ def test_unknown_tool(tmp_path):
     assert rig.kinds(tmp_path / "ledger", "call.returned") == []
     assert not (tmp_path / "ledger" / ARGS).exists()
     assert fake.calls == []
+
+
+def test_long_names_are_clipped(tmp_path):
+    """A 5,000-character name that routes to nothing, in every way it can fail to route, is
+    refused with its recorded name clipped, every entry inside the line limit, and no
+    call.sent. A name that does route is short (exposed names are at most 128 characters), and
+    call.sent clips it all the same."""
+    fake = FakeUpstream()
+    long = "x" * 5000
+    wide = chr(0xE9) * 5000  # two UTF-8 bytes each
+    names = [long, f"{long}__echo", f"f__{long}", f"f__{wide}", f"{wide}__{wide}"]
+
+    async def scenario():
+        async with rig.proxied(tmp_path / "ledger", [rig.spec("f", fake.server)]) as (client, _):
+            return [await client.call_tool(name, {}) for name in names]
+
+    for result in anyio.run(scenario):
+        assert result.is_error
+        assert result.content[0].text.startswith("polarizer: no tool named ")
+    raw = (tmp_path / "ledger" / "ledger.jsonl").read_bytes()
+    assert max(len(line) + 1 for line in raw.splitlines()) <= MAX_LINE
+    refused = [e["data"] for e in rig.kinds(tmp_path / "ledger", "call.refused")]
+    assert len(refused) == len(names)
+    for data in refused:
+        assert len(data["tool"].encode("utf-8")) <= 1024
+        assert len(data["reason"].encode("utf-8")) <= 1024
+    assert rig.kinds(tmp_path / "ledger", "call.sent") == []
+    assert fake.calls == []
+
+    # A long name that routes: only a routing change could make one, so _route is replaced
+    # to send it to f's echo. 9,000 two-byte characters would not fit in a line unclipped.
+    routed = "f__" + chr(0xE9) * 9000
+
+    async def routes():
+        async with rig.proxied(tmp_path / "ledger2", [rig.spec("f", fake.server)]) as (c, gw):
+            real = gw._route
+
+            async def route(name):
+                return await real("f__echo" if name == routed else name)
+
+            gw._route = route
+            return await c.call_tool(routed, {})
+
+    assert not anyio.run(routes).is_error
+    (sent,) = rig.kinds(tmp_path / "ledger2", "call.sent")
+    assert sent["data"]["tool"] == routed[: 3 + (256 - 3) // 2]  # cut to 256 UTF-8 bytes
+    raw = (tmp_path / "ledger2" / "ledger.jsonl").read_bytes()
+    assert max(len(line) + 1 for line in raw.splitlines()) <= MAX_LINE
 
 
 def test_session_client_once(tmp_path):

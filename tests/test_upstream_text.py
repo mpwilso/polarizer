@@ -5,8 +5,8 @@ through polarizer.text.safe(): escaped, on one line, at most 200 characters.
 Each test feeds HOSTILE text (escape sequences, a bell, a newline, a carriage return, 5,000
 characters, a bidi override and a lone surrogate) through an upstream that fails at connect,
 fails a refresh and drops its connection, then checks every stderr line and every string in
-the ledger. The upstream's own protocol-error messages are kept whole up to 1 KiB by design,
-and none of these tests sends one."""
+the ledger. An upstream's own protocol-error message reaches the client unchanged, by design;
+the ledger's copy goes through safe() too, cut to 1 KiB instead of 200 characters."""
 
 import json
 import logging
@@ -180,6 +180,43 @@ def test_hostile_upstream_in_memory(tmp_path, capsys):
     (returned,) = [e for e in entries if e["kind"] == "call.returned"]
     assert returned["data"]["outcome"] == "transport-error"
     assert returned["data"]["error"] == reply
+
+
+def test_hostile_protocol_error(tmp_path):
+    """An upstream's protocol-error message (ESC, a newline, a lone surrogate, a bidi override,
+    a C1 control and 5,000 characters) reaches the client unchanged, with its code, as
+    PROXY-SPEC.md asks. The ledger's copy goes through safe(): escaped, on one line, cut to
+    1 KiB."""
+    message = (
+        ESC + "[2J\nINJECTED polarizer: a line of its own\r" + LONE + chr(0x202E) + chr(0x9B)
+        + "Z" * 5000
+    )  # fmt: skip
+    fake = FakeUpstream()
+    fake.refuse_message = message
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)]) as (client, _):
+            with pytest.raises(MCPError) as refused:
+                await client.call_tool("f__refuse", {})
+            return refused.value
+
+    error = anyio.run(scenario)
+    assert (error.code, error.message) == (-32042, message)  # the client's copy is the original
+    data = (ledger_dir / "ledger.jsonl").read_bytes()
+    assert verify_bytes(data, (ledger_dir / "ledger.head").read_bytes()).status == "intact"
+    (returned,) = [e["data"] for e in rig.kinds(ledger_dir, "call.returned")]
+    assert (returned["outcome"], returned["code"]) == ("protocol-error", -32042)
+    recorded = returned["error"]
+    assert recorded == safe(message, 1024)
+    assert all(" " <= c <= "~" for c in recorded), "a raw character in the ledger's copy"
+    assert len(recorded) == 1024 and recorded.endswith("...")
+    assert recorded.startswith(
+        BACKSLASH + "x1b[2J INJECTED polarizer: a line of its own "
+        + BACKSLASH + "ud800" + BACKSLASH + "u202e" + BACKSLASH + "x9bZZZ"
+    )  # fmt: skip
+    # Canonical JSON writes ESC as an escape on its own, but stores a C1 control as raw UTF-8.
+    assert chr(0x9B).encode("utf-8") not in data
 
 
 # Over stdio, through polarizer serve -----------------------------------------------------
