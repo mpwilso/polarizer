@@ -140,7 +140,7 @@ Three paths don't reach `os._exit`. None is changed here, because each would cha
 
 - **They end on their own** if they exit at end of input, which the SDK sends within about 0.5 s of step 2 and serve's exit sends anyway, or when their stdout breaks, at their next write after serve exits. The probe and the SDK's servers do the first, and so does the Filesystem server, which returns at once with stdin at `/dev/null` (MANUAL-CHECK.md, step 1); the Everything server wasn't checked.
 - **They can be left running** if they ignore end of input and never write again: `sleep 3600` in MANUAL-CHECK.md step 6, a server that its own threads keep alive, and anything such a server started. The SDK's sequence (close stdin, 2 s, SIGTERM to the process group, 2 s, SIGKILL) is cut off by `os._exit` after 1 s, before its SIGTERM. On POSIX each upstream runs in a session of its own, so no terminal hangup or signal to serve reaches it. A leftover also keeps serve's stderr open, because it writes its stderr to serve's: `subprocess.run(..., capture_output=True)` on such a serve returned after 60.7 s, when the probe's 60 s linger ended, though serve itself had exited long before (the test below waits for serve's own exit, and takes about 1.7 s in all).
-- **A bounded terminate step isn't possible with the SDK's handles.** `stdio_client` keeps the process in a local variable, and `Client` exposes neither it nor its pid (verified-facts.md, Stage 5 follow-up). Finding the process by name or by walking the process table would be a pattern, which the brief rules out. So it is a stated limit, in PIN-SPEC.md section 8, step 2, and MANUAL-CHECK.md steps 6, 8 and M6, with the commands that list leftovers. Two ways the owner could choose later, neither done: wrap the SDK's private `_create_platform_compatible_process` to keep the handles, at the cost of depending on a private function of a pinned SDK, or start upstreams with a transport of Polarizer's own.
+- **A bounded terminate step isn't possible with the SDK's handles.** `stdio_client` keeps the process in a local variable, and `Client` exposes neither it nor its pid (verified-facts.md, Stage 5 follow-up). Finding the process by name or by walking the process table would be a pattern, which the brief rules out. So it is a stated limit, in PIN-SPEC.md section 8, step 2, and MANUAL-CHECK.md steps 6 and 8 and `scripts/m1a-check.sh finish`, with the commands that list leftovers. Two ways the owner could choose later, neither done: wrap the SDK's private `_create_platform_compatible_process` to keep the handles, at the cost of depending on a private function of a pinned SDK, or start upstreams with a transport of Polarizer's own.
 - **The test,** `test_shutdown::test_upstream_ignoring_end_of_input_is_left_running` (POSIX only): the probe with `PROBE_LINGER=60` ignores end of input for 60 s. serve, with stdin closed, exits 0 well before that, the probe logs end of input and `lingering`, and it is still running afterwards; the test then kills it by the pid it logged.
 - **On Windows** the SDK puts each upstream in a job object that is killed when its last handle closes, so the upstream should end with serve. Not run.
 
@@ -189,6 +189,10 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 - The reference tests. They don't exercise any changed path except serve's stderr, which now goes through `SafeLog` too.
 - A hostile `protocol-error` message: kept whole by design, and not tested with hostile text.
 
+## The M1a check script
+
+`scripts/m1a-check.sh` (parsing in `scripts/m1a_check.py`) replaces MANUAL-CHECK.md's M1a steps, which had placeholders for the group id and hashes, with five commands that find them from `polarizer pending`, ask the owner only what `/mcp` and Claude showed, and record everything in `/tmp/m1a-check-results.txt`; its claims are the table's last rows, run in the final `scripts/test.sh` of that change (524 passed, 7 skipped, in 121.5 s).
+
 ## Claims
 
 "Yes" means run locally on Linux (WSL2, Python 3.12.3, mcp 2.2.0), in the final run of `scripts/test.sh` (509 passed, 7 skipped: stage 1's 4 platform skips and the 3 reference tests), unless the row says otherwise. The rows from "Upstream text" on are the follow-up's, run in its final `scripts/test.sh` (515 passed, 7 skipped, in 112.8 s).
@@ -219,8 +223,8 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 | The new and changed tests pass five times in a row and once under load | the loop in Repeated runs | yes, 5 of 5 and 1 of 1 |
 | The whole suite, ruff and the docs check | `scripts/test.sh` | yes: 509 passed, 7 skipped |
 | The live check passes after priming | `scripts/live-check.sh` | no: for the owner, from a plain terminal |
-| Interactive Claude Code lists the tools again after an approval, without a reconnect | docs/MANUAL-CHECK.md, M1a, steps M3 and M5 | no: for the owner |
-| The rug-pull check in an interactive session | docs/MANUAL-CHECK.md, M1a, step M4 | no: for the owner |
+| Interactive Claude Code lists the tools again after an approval, without a reconnect | docs/MANUAL-CHECK.md, M1a: `scripts/m1a-check.sh approve` and `approve-changed` | no: for the owner |
+| The rug-pull check in an interactive session | docs/MANUAL-CHECK.md, M1a: `scripts/m1a-check.sh rugpull` | no: for the owner |
 | All of the above on Windows and macOS | CI | no |
 | Upstream text: `safe()` escapes, folds, cuts to 200 characters, never splits an escape, and changes nothing the second time; `describe()` never quotes pydantic's input | `pytest tests/test_upstream_text.py::test_safe_escapes_folds_and_cuts tests/test_upstream_text.py::test_describe_is_safe_and_quotes_no_pydantic_input` | yes |
 | A log record, the SDK's included, reaches stderr as one safe line with no traceback | `pytest tests/test_upstream_text.py::test_log_records_are_one_safe_line` | yes |
@@ -233,3 +237,10 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 | The follow-up's changed and affected test files pass five times in a row, leaving no test upstream running | the loop in Follow-up, Repeated runs | yes, 5 of 5 |
 | The whole suite, ruff and the docs check, after the follow-up | `scripts/test.sh` | yes: 515 passed, 7 skipped, in 112.8 s |
 | The pre-push scan finds none of the private strings | Follow-up, Pre-push scan | yes: every count 0 |
+| `scripts/m1a-check.sh`: reset, approve, rugpull, approve-changed and finish in order on a pseudo-terminal with scripted answers, a `serve` run with stdin closed standing in for each Claude Code start; status names the right next step before each; every printed command is complete; the toml and rug-pull file are back as before | `pytest tests/test_m1a_check.py::test_whole_check` | yes (POSIX only) |
+| Ctrl+C or a blank answer stops a step with a line saying what was done, other text is asked again, and a step run again carries on | `pytest tests/test_m1a_check.py::test_ctrl_c_and_blank_answers_stop_cleanly` | yes (POSIX only) |
+| The script refuses the test overrides without `POLARIZER_CHECK_TESTING=1` before writing anything, and reset and finish refuse while a probe runs, naming its pid in the `kill` command | `pytest tests/test_m1a_check.py::test_reset_refusals` | yes (POSIX only) |
+| `scripts/m1a_check.py` reads `pending`'s real output, the golden files, the toml and the ledger | the other six tests in `tests/test_m1a_check.py` | yes |
+| The new tests pass five times in a row and leave no process running | `pytest tests/test_m1a_check.py`, five times | yes, 5 of 5 |
+| shellcheck on `scripts/m1a-check.sh` | `shellcheck scripts/m1a-check.sh` | no: not installed; `bash -n` passed |
+| The script in a real check, with Claude Code | `scripts/m1a-check.sh reset`, then each step | no: for the owner |
