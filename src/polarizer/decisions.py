@@ -1,17 +1,24 @@
-"""Decisions on tool definitions: approve one, approve a group, reject (docs/PIN-SPEC.md,
-section 7). The command line and the test helpers share this code.
+"""Decisions: on tool definitions, approve one, approve a group, reject (docs/PIN-SPEC.md,
+section 7); on holds, allow and deny (docs/HOLD-SPEC.md, section 8). The command line and the
+test helpers share this code.
 
-Each decision is a tool.approved or tool.rejected entry with actor "person", fsynced with
-ledger.head updated before the call returns. Nothing here creates a ledger.
+Each decision is a tool.approved, tool.rejected or hold.decided entry with actor "person",
+fsynced with ledger.head updated before the call returns. A hold decision is a conditional
+append: its check runs under the ledger lock after catching up, so two processes can never both
+end one hold. Nothing here creates a ledger.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from polarizer import defhash
+from polarizer import defhash, sidefiles
+from polarizer.holds import HoldState, listener, session_state, warning
+from polarizer.holds import block as hold_block
 from polarizer.ledger import LEDGER
 from polarizer.pins import PinState, blocks, group
+from polarizer.text import printable
 from polarizer.upstream import one_line
 from polarizer.writer import FileOps, LedgerError, LedgerWriter
 
@@ -133,3 +140,95 @@ class Decider:
 def fold_reason(text: str | None) -> str:
     """A rejection's reason: whitespace folded to single spaces, cut to 1 KiB. Empty if none."""
     return one_line(text) if text is not None else ""
+
+
+# Holds (docs/HOLD-SPEC.md, section 8) -------------------------------------------------------
+
+
+@dataclass
+class HoldDecider:
+    """An open ledger with its hold fold, ready to record decisions on holds."""
+
+    ledger_dir: Path
+    writer: LedgerWriter
+    holds: HoldState
+
+    @classmethod
+    def open(cls, ledger_dir: Path, ops: FileOps | None = None) -> "HoldDecider":
+        """As Decider.open: 2 s lock wait, full verification, pin state and holds folded in the
+        same pass. Raises Refusal."""
+        ledger_dir = Path(ledger_dir)
+        path = ledger_dir / LEDGER
+        if not path.is_file() or path.stat().st_size == 0:
+            raise Refusal(f"polarizer: no ledger at {ledger_dir}")
+        pin_state, hold_state = PinState(), HoldState()
+        try:
+            writer = LedgerWriter.open(
+                ledger_dir, on_entry=listener(pin_state.apply, hold_state.apply), ops=ops
+            )
+        except LedgerError as e:
+            raise Refusal(e.line, e.exit_code) from None
+        return cls(ledger_dir, writer, hold_state)
+
+    def close(self) -> None:
+        self.writer.close()
+
+    def decide(
+        self,
+        hold_id: str,
+        decision: str,
+        reason: str | None,
+        out: Callable[[str], None],
+        err: Callable[[str], None],
+        now: datetime,
+    ) -> None:
+        """Steps 4 to 7 of `allow` (decision "allow") or `deny`. Raises Refusal."""
+        found = self.holds.get(hold_id)
+        side_problem = None
+        if found is not None:
+            try:
+                sidefiles.read_args(self.ledger_dir, found.args_commit)
+            except sidefiles.ArgsProblem as e:
+                side_problem = str(e)
+
+        def check():
+            held = self.holds.get(hold_id)
+            if held is None:
+                raise Refusal(f"polarizer: no hold {hold_id} in this ledger")
+            ending = held.ending
+            if ending is not None:
+                if ending.kind == "hold.decided":
+                    raise Refusal(
+                        f"polarizer: hold {hold_id} was already decided at seq {ending.seq}: "
+                        f"{ending.decision}"
+                    )
+                if ending.kind == "hold.expired":
+                    raise Refusal(
+                        f"polarizer: hold {hold_id} expired at seq {ending.seq}: "
+                        f"{printable(ending.reason or '')}"
+                    )
+                raise Refusal(f"polarizer: hold {hold_id} was abandoned at seq {ending.seq}")
+            if decision == "allow" and side_problem is not None:
+                raise Refusal(
+                    f"polarizer: hold {hold_id} cannot be allowed: side file "
+                    f"args/{held.args_commit}.bin {printable(side_problem)}"
+                )
+
+        commit = found.args_commit if found is not None else None
+        data = {
+            "hold": hold_id,
+            "args_commit": commit,
+            "decision": decision,
+            "actor": ACTOR,
+            "reason": reason,
+        }
+        done = self.writer.append("hold.decided", data, check=check).result()
+        held = self.holds.get(hold_id)
+        state = session_state(self.ledger_dir, held.session)
+        for line in hold_block(held, self.holds, self.ledger_dir, now, state):
+            out(line)
+        verb = "allowed" if decision == "allow" else "denied"
+        out(f"{verb} hold {hold_id} at seq {done.seq}")
+        warned = warning(state)
+        if warned:
+            err(warned)

@@ -113,6 +113,7 @@ class FakeUpstream:
             on_call_tool=self._call,
             on_subscriptions_listen=ListenHandler(self.bus) if listen else None,
         )
+        self.server.fake = self  # so rig.classified() can find the names this fake declares
 
     def _event(self, line: str) -> None:
         self.events.append(line)

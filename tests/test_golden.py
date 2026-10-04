@@ -2,6 +2,7 @@
 compared byte for byte with tests/golden/<case>.txt, and the exit code. The temporary directory
 is shown as <dir>. Set POLARIZER_UPDATE_GOLDEN=1 to rewrite the files, then read the diff."""
 
+import json
 import os
 from pathlib import Path
 
@@ -396,3 +397,189 @@ def test_usage_pins(tmp_path, capsys, monkeypatch):
         assert out == "" and err.count("\n") == 1, (argv, err)
         lines.append(err)
     check("usage_pins", "".join(lines), 2, 2, tmp_path)
+
+
+# Hold commands (docs/HOLD-SPEC.md, section 8) -------------------------------------------------
+
+from helpers import holdledger as hl  # noqa: E402
+
+
+@pytest.fixture
+def held_clock(monkeypatch):
+    """holds' clock, fixed at holdledger.NOW."""
+    monkeypatch.setattr(cli, "_now", lambda: hl.NOW)
+
+
+@pytest.fixture
+def running_session():
+    """Holds the running session's lock, as its serve would, for the length of a test."""
+    held = []
+
+    def take(directory):
+        held.append(hl.hold_running(directory))
+        return directory
+
+    yield take
+    for lock in held:
+        lock.close()
+
+
+HOLDS = {
+    "holds_nothing": (hl.nothing, 0),
+    "holds_mixed": (hl.mixed, 0),
+    "holds_state_unknown": (hl.state_unknown, 0),
+    "holds_side_file_missing": (hl.side_file_problem("missing"), 0),
+    "holds_side_file_altered": (hl.side_file_problem("altered"), 0),
+    "holds_side_file_not_json": (hl.side_file_problem("not_json"), 0),
+    "holds_tampered": (fixture("broken/edit_value"), 1),
+    "holds_invalid": (fixture("broken/insert_float"), 3),
+    "holds_torn_tail": (fixture("broken/tear_last_line"), 5),
+    "holds_truncated": (fixture("broken/truncated"), 6),
+    "holds_no_ledger": (lambda d: d, 2),
+}
+
+
+@pytest.mark.parametrize("case", sorted(HOLDS))
+def test_holds(case, tmp_path, capsys, held_clock, running_session):
+    setup, want = HOLDS[case]
+    directory = setup(tmp_path / "ledger")
+    if (directory / "sessions" / f"{hl.RUNNING}.lock").exists():
+        running_session(directory)
+    code = cli.main(["holds", "--ledger-dir", str(directory)])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check(case, out, code, want, tmp_path)
+
+
+def test_holds_locked(tmp_path, capsys):
+    directory = hl.nothing(tmp_path / "ledger")
+    lock = LedgerLock.create(directory / LOCK)
+    assert lock.acquire(0)
+    try:
+        code = cli.main(["holds", "--ledger-dir", str(directory)])
+    finally:
+        lock.close()
+    check("holds_locked", capsys.readouterr().out, code, 7, tmp_path)
+
+
+def hold_main(argv, terminal=False):
+    """cli.main for allow and deny: --allow-no-terminal unless the case is about it."""
+    return cli.main(argv if terminal else [*argv, "--allow-no-terminal"])
+
+
+def test_allow_one(tmp_path, capsys, held_clock, running_session, fake_home):
+    directory = running_session(hl.mixed(tmp_path / "ledger"))
+    code = hold_main(["allow", "--ledger-dir", str(directory), hl.WRITE_PATTERN])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("allow_one", out, code, 0, tmp_path)
+
+
+def test_allow_ended_session(tmp_path, capsys, held_clock, running_session, fake_home):
+    directory = running_session(hl.mixed(tmp_path / "ledger"))
+    code = hold_main(["allow", "--ledger-dir", str(directory), hl.FROM_ANNOTATIONS])
+    out, err = capsys.readouterr()
+    assert err == (
+        "polarizer: warning: the session that held this call has ended; "
+        "no process will act on this decision\n"
+    )
+    check("allow_ended_session", out, code, 0, tmp_path)
+
+
+def _hold_refusals():
+    return {
+        "bad_id": (hl.endings, ["ABC"], 2),
+        "no_such_hold": (hl.endings, ["0123456789abcdef"], 2),
+        "already_decided": (hl.endings, [hl.DENIED], 2),
+        "expired": (hl.endings, [hl.EXPIRED], 2),
+        "abandoned": (hl.endings, [hl.ABANDONED], 2),
+        "side_file_altered": (hl.endings, [hl.ALTERED], 2),
+        "broken_ledger": (fixture("broken/edit_value"), [hl.WRITE_PATTERN], 1),
+        "no_terminal": (hl.endings, [hl.WRITE_PATTERN], 2),
+    }
+
+
+@pytest.mark.parametrize("case", sorted(_hold_refusals()))
+def test_allow_refused(case, tmp_path, capsys, fake_home, monkeypatch, held_clock):
+    setup, extra, want = _hold_refusals()[case]
+    directory = setup(tmp_path / "ledger")
+    before = (directory / "ledger.jsonl").read_bytes()
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    code = hold_main(
+        ["allow", "--ledger-dir", str(directory), *extra], terminal=case == "no_terminal"
+    )
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.count("\n") == 1
+    check(f"allow_refused_{case}", err, code, want, tmp_path)
+    assert (directory / "ledger.jsonl").read_bytes() == before  # nothing written
+
+
+@pytest.mark.parametrize(
+    "case, extra",
+    [("deny_one", []), ("deny_with_reason", ["--reason", "  not\n  now  "])],
+)
+def test_deny(case, extra, tmp_path, capsys, held_clock, running_session, fake_home):
+    directory = running_session(hl.mixed(tmp_path / "ledger"))
+    code = hold_main(["deny", "--ledger-dir", str(directory), hl.UNCLASSIFIED, *extra])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check(case, out, code, 0, tmp_path)
+    decided = [
+        line
+        for line in (directory / "ledger.jsonl").read_bytes().splitlines()
+        if b"hold.decided" in line
+    ]
+    want = "not now" if extra else None
+    last = json.loads(decided[-1])["data"]  # the mixed ledger already holds one deny
+    assert (last["hold"], last["decision"], last["reason"]) == (hl.UNCLASSIFIED, "deny", want)
+
+
+@pytest.mark.parametrize(
+    "case, extra, terminal",
+    [
+        ("deny_refused_empty_reason", [hl.WRITE_PATTERN, "--reason", " \t\n "], False),
+        ("deny_refused_already_decided", [hl.DENIED], False),
+        ("deny_refused_no_terminal", [hl.WRITE_PATTERN], True),
+    ],
+)
+def test_deny_refused(case, extra, terminal, tmp_path, capsys, fake_home, monkeypatch, held_clock):
+    directory = hl.endings(tmp_path / "ledger")
+    before = (directory / "ledger.jsonl").read_bytes()
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    code = hold_main(["deny", "--ledger-dir", str(directory), *extra], terminal=terminal)
+    out, err = capsys.readouterr()
+    assert out == ""
+    check(case, err, code, 2, tmp_path)
+    assert (directory / "ledger.jsonl").read_bytes() == before
+
+
+HOLD_USAGE = [
+    ["holds"],
+    ["holds", "--config", "/a.toml", "--ledger-dir", "/b"],
+    ["holds", "--ledger-dir", "relative"],
+    ["holds", "--ledger-dir", "/x", "extra"],
+    ["allow", "--ledger-dir", "/x", "--allow-no-terminal"],
+    ["allow", "--ledger-dir", "/x", "0123456789abcdef", "0123456789abcdef", "--allow-no-terminal"],
+    ["allow", "--ledger-dir", "/x", "0123456789abcdef", "--reason", "r", "--allow-no-terminal"],
+    ["deny", "--ledger-dir", "/x", "--allow-no-terminal"],
+    ["deny", "--ledger-dir", "/x", "0123456789abcdef", "--reason", "  ", "--allow-no-terminal"],
+    ["deny", "--ledger-dir", "/x", "0123456789abcdef"],
+    ["allow", "--config", "polarizer.toml", "0123456789abcdef"],
+    ["holds", "--ledger-dir", "/x", "--no-holds"],
+    ["verify", "--ledger-dir", "/x", "--no-holds"],
+    ["allow", "--ledger-dir", "/x", "0123456789abcdef", "--no-holds", "--allow-no-terminal"],
+    ["serve", "--no-holds"],
+]
+
+
+def test_usage_holds(tmp_path, capsys, monkeypatch):
+    """Each usage error: one line on stderr, nothing on stdout, exit 2."""
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    lines = []
+    for argv in HOLD_USAGE:
+        assert cli.main(argv) == 2, argv
+        out, err = capsys.readouterr()
+        assert out == "" and err.count("\n") == 1, (argv, err)
+        lines.append(err)
+    check("usage_holds", "".join(lines), 2, 2, tmp_path)

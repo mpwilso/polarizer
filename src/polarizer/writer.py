@@ -4,6 +4,10 @@ docs/LEDGER-SPEC.md, Part 2. One writer thread per process owns the file. Each a
 lock, checks the file size against the offset this process expects, reads only bytes another
 process appended (if any), writes one line, and releases the lock. Security-state entries are
 fsynced, and ledger.head moved forward, before their futures resolve.
+
+An append may carry a check (the conditional append, docs/HOLD-SPEC.md, section 6): it runs in
+the writer thread, under the lock, after the catch-up, against the state the listener folded,
+and if it raises, nothing is written and the append's future raises that.
 """
 
 import asyncio
@@ -44,6 +48,8 @@ SECURITY_KINDS = frozenset(
         "tool.drift",
         "ledger.repaired",
         "ledger.head_rebuilt",
+        "hold.decided",
+        "policy.loaded",
     }
 )
 _BINARY = getattr(os, "O_BINARY", 0)
@@ -190,6 +196,13 @@ def _fold_failed(entry: dict, error: Exception) -> str:
     return f"could not fold seq {entry['seq']} into pin state: {why}"
 
 
+def _allows(entry: dict) -> bool:
+    """A hold.decided that allows: serve forwards a held call on it (HOLD-SPEC.md, section 6)."""
+    data = entry.get("data")
+    allows = isinstance(data, dict) and data.get("decision") == "allow"
+    return entry["kind"] == "hold.decided" and allows
+
+
 def refusal(result: Result) -> str:
     """serve's one stderr line for a ledger that isn't intact. A torn tail's message already
     names its command (repair); the others point at verify."""
@@ -321,22 +334,26 @@ class LedgerWriter:
     def chain_id(self) -> str:
         return self._state.chain_id
 
-    def append(self, kind: str, data: dict, *, durable: bool | None = None) -> Future:
+    def append(self, kind: str, data: dict, *, durable: bool | None = None, check=None) -> Future:
         """Queue one entry. The future resolves to Appended once the line is written, and
-        fsynced first when durable (by default: when kind is a security-state kind)."""
+        fsynced first when durable (by default: when kind is a security-state kind).
+
+        `check`, if given, is called with no arguments in the writer thread, under the ledger
+        lock, after catching up with the file, so it sees every entry before this one through
+        the listener's state. If it raises, nothing is written and the future raises that."""
         future: Future = Future()
         if durable is None:
             durable = kind in SECURITY_KINDS
-        return self._submit((kind, data, durable, future))
+        return self._submit((kind, data, durable, check, future))
 
-    async def append_async(self, kind: str, data: dict, *, durable: bool | None = None):
-        return await asyncio.wrap_future(self.append(kind, data, durable=durable))
+    async def append_async(self, kind: str, data: dict, *, durable: bool | None = None, check=None):
+        return await asyncio.wrap_future(self.append(kind, data, durable=durable, check=check))
 
     def catch_up(self) -> Future:
         """Queue a catch-up: adopt whatever other processes appended, handing each entry to
         on_entry. The future resolves to the number of entries adopted, or raises Stopped.
         If the file hasn't grown, nothing is read and the lock isn't taken."""
-        return self._submit((_CATCH_UP, None, False, Future()))
+        return self._submit((_CATCH_UP, None, False, None, Future()))
 
     def _submit(self, item: tuple) -> Future:
         """Queue item, or fail its future with Stopped once close() has begun. Under the gate,
@@ -377,13 +394,13 @@ class LedgerWriter:
             item = self._queue.get()
             if item is None:
                 return
-            kind, data, durable, future = item
+            kind, data, durable, check, future = item
             if future.set_running_or_notify_cancel():
                 try:
                     if kind is _CATCH_UP:
                         future.set_result(self._catch_up_only())
                     else:
-                        future.set_result(self._append(kind, data, durable))
+                        future.set_result(self._append(kind, data, durable, check))
                 except BaseException as e:
                     future.set_exception(e)
             if self._queue.empty() and self._dirty and self._idle_fsync and not self._stopped:
@@ -398,7 +415,7 @@ class LedgerWriter:
                     except Stopped:
                         pass
 
-    def _append(self, kind: str, data: dict, durable: bool) -> Appended:
+    def _append(self, kind: str, data: dict, durable: bool, check=None) -> Appended:
         if self._stopped:
             raise Stopped(self._stopped, 1)
         self._lock.acquire(None)
@@ -406,6 +423,8 @@ class LedgerWriter:
             self._catch_up()
             if self._stopped:  # a fold in that catch-up failed; this entry is not written
                 raise Stopped(self._stopped, 1)
+            if check is not None:
+                check()  # the conditional append: a refusal raises, and nothing is written
             state = self._state
             entry, line = make_entry(state.lines, now_ts(), kind, data, state.last_hash)
             self._ops.write(self._fd, line)
@@ -457,6 +476,11 @@ class LedgerWriter:
                     self._ops.fsync(self._fd)
                 except OSError as e:
                     self._stop(f"could not fsync an approval another process wrote: {e}")
+            elif any(_allows(e) for e in adopted):
+                try:
+                    self._ops.fsync(self._fd)  # before a held call is forwarded on it
+                except OSError as e:
+                    self._stop(f"could not fsync an allow another process wrote: {e}")
             for entry in adopted:
                 if not self._hand_over(entry):
                     break

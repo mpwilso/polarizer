@@ -27,6 +27,17 @@ TOOL = "probe__wait"
 WITHIN = 2.0  # seconds from Claude Code's cancel to the probe's
 
 
+# The probe's tools, all harmless test tools, classified local-read so no call is held
+# (docs/HOLD-SPEC.md, section 11).
+PROBE_TOOLS = ("wait", "crash", "env", "fail", "rich", "invalid", "change")
+
+
+def probe_classes() -> str:
+    """The [upstream.probe.tools] table: every probe tool local-read."""
+    rows = "".join(f'{name} = {{ class = "local-read" }}\n' for name in PROBE_TOOLS)
+    return "\n[upstream.probe.tools]\n" + rows
+
+
 def setup(directory: Path, repo: Path) -> None:
     python = repo / ".venv" / "bin" / "python"
     toml = (
@@ -34,7 +45,7 @@ def setup(directory: Path, repo: Path) -> None:
         "[upstream.probe]\n"
         f"command = {json.dumps(str(python))}\n"
         f"args = [{json.dumps(str(repo / 'tests' / 'helpers' / 'probe_server.py'))}]\n"
-        f"env = {{ PROBE_LOG = {json.dumps(str(directory / 'probe.log'))} }}\n"
+        f"env = {{ PROBE_LOG = {json.dumps(str(directory / 'probe.log'))} }}\n" + probe_classes()
     )
     (directory / "polarizer.toml").write_text(toml, encoding="utf-8")
     serve = ["-m", "polarizer", "serve", "--config", str(directory / "polarizer.toml")]

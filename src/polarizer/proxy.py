@@ -16,9 +16,16 @@ In motion (docs/PIN-SPEC.md, sections 6 and 8): an upstream's change notice refr
 upstream (one refresh at a time, and notices during one cause exactly one more); a refresh that
 fails is retried on a timer; and clients are told when the exposed list changes, at most once a
 second, never just because an upstream said something changed.
+
+Holds (docs/HOLD-SPEC.md, sections 4 to 6): a call that routes to an approved tool goes through
+the rule function. A held call records hold.created and waits, inside this process, for its
+ending: a decision another process writes, its timeout, or the client's cancel. While any hold
+is open the watch runs every quarter second. After an allow the call is routed again and
+forwarded with the arguments read back from its side file.
 """
 
 import asyncio
+import functools
 import json
 import secrets
 import threading
@@ -36,9 +43,11 @@ from mcp.shared.subscriptions import ToolsListChanged
 from mcp_types import CLIENT_INFO_META_KEY, CONNECTION_CLOSED, PROTOCOL_VERSION_META_KEY
 
 from polarizer import __version__, defhash, pins
+from polarizer import policy as policy_mod
 from polarizer.canon import MAX_INT, EntryRefused
+from polarizer.holds import HoldState
 from polarizer.pins import PinState
-from polarizer.sidefiles import write_args
+from polarizer.sidefiles import ArgsProblem, read_args, write_args
 from polarizer.text import safe
 from polarizer.upstream import SEPARATOR, Upstream, UpstreamSpec, clip, describe, log, one_line
 from polarizer.writer import LedgerWriter, Stopped
@@ -56,6 +65,10 @@ UNREADABLE = "result did not match the MCP schema"
 SHUTDOWN_ERROR = "polarizer shut down during the call"
 CLIENT_CANCEL_ERROR = "the client cancelled the call"
 WATCH_INTERVAL = 1.0  # seconds between catch-ups with the ledger
+HOLD_WATCH_INTERVAL = 0.25  # the same while any hold of this process is open
+MAX_OPEN_HOLDS = 16  # per process; a further call that would be held is refused at once
+TOO_MANY = f"too many held calls: {MAX_OPEN_HOLDS} already wait in this session"
+CANCELLED_BEFORE_FORWARD = "the client cancelled the call before it was forwarded"
 NOTICE_INTERVAL = 1.0  # at most one change notice to clients per this many seconds
 RETRY = (30.0, 300.0)  # the retry timer after a failed refresh: first interval, and the cap
 INPUT_KINDS = {
@@ -98,8 +111,11 @@ def result_bytes(result: types.Result) -> int:
 class Gateway:
     """The proxy for one Polarizer process: its upstreams, its ledger session and its server.
 
-    `pins` must be the PinState the writer folded at open (LedgerWriter.open(on_entry=...)),
-    so it reflects the whole ledger. Without one, the gateway starts from an empty state.
+    `pins` and `holds` must be the PinState and HoldState the writer folds (LedgerWriter.open
+    with on_entry=holds.listener(...)), so they reflect the whole ledger. Without them, the
+    gateway starts from empty states. `policy` is the policy.Policy serve runs with; without
+    one, every tool is unclassified and every call to it is held. `hold_timeout` replaces the
+    policy's timeout in seconds, for tests only: the ledger still records the policy's.
     """
 
     def __init__(
@@ -109,11 +125,23 @@ class Gateway:
         *,
         config_sha256: str,
         pins: PinState | None = None,
+        holds: HoldState | None = None,
+        policy: "policy_mod.Policy | None" = None,
         watch_interval: float = WATCH_INTERVAL,
+        hold_watch_interval: float = HOLD_WATCH_INTERVAL,
         notice_interval: float = NOTICE_INTERVAL,
         retry: tuple[float, float] = RETRY,
+        hold_timeout: float | None = None,
     ):
         self.writer = writer
+        self.policy = policy if policy is not None else policy_mod.Policy()
+        self.holds = holds if holds is not None else HoldState()
+        self.hold_watch_interval = hold_watch_interval
+        self.hold_timeout = hold_timeout
+        self._open: dict[str, _Waiter] = {}  # this process's open holds, by id
+        self._mismatch_told: set[int] = set()
+        self._watch_wake = anyio.Event()
+        self.before_forward = None  # tests: awaited with the hold id after an allow
         self.watch_interval = watch_interval
         self.notice_interval = notice_interval
         self.retry_first, self.retry_max = retry
@@ -181,6 +209,8 @@ class Gateway:
                 "config_sha256": self.config_sha256,
             },
         )
+        # Fsynced, with ledger.head moved, before any upstream is connected (SECURITY_KINDS).
+        await self._append("policy.loaded", self.policy.loaded(self.session))
         for upstream in self.upstreams.values():
             upstream.started = True
             tasks.start_soon(upstream.run)
@@ -195,12 +225,26 @@ class Gateway:
         waiting = self._count_waiting()
         if waiting:
             log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
+        self._log_unclassified()
         self._announced = await self._exposed_dump()
         self._background = await tasks.start(self._run_background)
         self._started = True
         for prefix in sorted(self._deferred):
             await self._upstream_changed(self.upstreams[prefix])
         self._deferred.clear()
+
+    def _log_unclassified(self) -> None:
+        """Once per process, after startup has listed the upstreams: how many listed tools, in
+        any pin state, have no class (HOLD-SPEC.md, section 2). Nothing with --no-holds."""
+        if not self.policy.holds:
+            return
+        listed = [(u.prefix, name) for u in self.upstreams.values() for name in self._listed(u)]
+        unclassified = sum(not self.policy.has_class(prefix, name) for prefix, name in listed)
+        if unclassified:
+            log(
+                f"polarizer: {unclassified} of {len(listed)} listed tools have no class in "
+                "polarizer.toml; every call to them is held"
+            )
 
     async def _run_background(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
         async with anyio.create_task_group() as background:
@@ -259,12 +303,15 @@ class Gateway:
 
     async def _append(self, kind: str, data: dict):
         """Append one entry. A ledger that stopped, or an entry that can't be written, is
-        reported on stderr and returns None; it never takes the gateway down."""
+        reported on stderr and returns None; it never takes the gateway down. Its catch-up may
+        have adopted a hold's ending, so waiting holds are checked afterwards."""
         try:
             return await self.writer.append_async(kind, data)
         except (Stopped, EntryRefused) as e:
             log(f"polarizer: could not record {kind}: {e}")
             return None
+        finally:
+            self._wake_holds()
 
     async def _client_middleware(self, ctx, call_next):
         """session.client, written once per process: from the first initialize (older era)
@@ -355,9 +402,15 @@ class Gateway:
 
     async def _watch(self) -> None:
         """Catch up with the ledger once every watch_interval, so another process's decision
-        applies within about that long (PIN-SPEC.md, section 8)."""
+        applies within about that long (PIN-SPEC.md, section 8), and every hold_watch_interval
+        while a hold of this process is open (HOLD-SPEC.md, section 6). A new hold wakes it, so
+        the shorter interval starts at once."""
         while True:
-            await anyio.sleep(self.watch_interval)
+            interval = self.hold_watch_interval if self._open else self.watch_interval
+            with anyio.move_on_after(interval):
+                await self._watch_wake.wait()
+            if self._watch_wake.is_set():
+                self._watch_wake = anyio.Event()
             await self._catch_up()
 
     async def _upstream_changed(self, upstream: Upstream) -> None:
@@ -434,6 +487,7 @@ class Gateway:
                     self._changed()
             except Stopped:
                 pass
+        self._wake_holds()
         await self._check_stopped()
 
     async def _check_stopped(self) -> None:
@@ -604,46 +658,68 @@ class Gateway:
 
     # tools/call ------------------------------------------------------------------------
 
-    async def _route(self, name: str) -> tuple[Upstream | None, str, str | None]:
-        """(upstream, the upstream's tool name, None), or (None, the refusal reason, the
-        client's <why>; None for M0's refusals, which say there is no such tool)."""
+    async def _route(self, name: str) -> tuple[Upstream | None, str, str | None, dict | None]:
+        """(upstream, the upstream's tool name, None, the approved stored copy), or (None, the
+        refusal reason, the client's <why>, None); <why> is None for M0's refusals, which say
+        there is no such tool."""
         if SEPARATOR not in name:
-            return None, "not a prefixed name", None
+            return None, "not a prefixed name", None, None
         prefix, tool = name.split(SEPARATOR, 1)
         upstream = self.upstreams.get(prefix)
         if upstream is None:
-            return None, f'no upstream with prefix "{clip(prefix, 256)}"', None
+            return None, f'no upstream with prefix "{clip(prefix, 256)}"', None, None
         if not upstream.connected:
-            return None, f"upstream {prefix} did not connect", None
+            return None, f"upstream {prefix} did not connect", None, None
         if not upstream.list_known or prefix not in self._live:
             reason = f"upstream {prefix} tool list could not be refreshed"
-            return None, reason, "its server's tool list could not be checked"
+            return None, reason, "its server's tool list could not be checked", None
         if tool not in upstream.tools:
-            return None, f'upstream {prefix} has no tool "{clip(tool, 512)}"', None
-        st, problem, _ = await self._tool_state(prefix, tool)
+            return None, f'upstream {prefix} has no tool "{clip(tool, 512)}"', None, None
+        st, problem, obj = await self._tool_state(prefix, tool)
         if st != "approved":
             reason, why = pins.REASONS[st]
             reason = reason.format(problem=problem)
-            return None, f'upstream {prefix} tool "{clip(tool, 512)}" {reason}', why
-        return upstream, tool, None
+            return None, f'upstream {prefix} tool "{clip(tool, 512)}" {reason}', why, None
+        return upstream, tool, None, obj
+
+    def _unrecordable(self, name: str, why: str) -> types.CallToolResult:
+        log(f"polarizer: refused {safe(name)}: could not record it: {why}")
+        return _text_result(f"polarizer: {name} was not called: the ledger could not record it")
+
+    async def _refuse_route(self, name: str, reason: str, why, hold: str | None = None):
+        """A call that routes to no exposed tool: one call.refused (with the hold's id when
+        the call was held), and the client's line."""
+        data = {"session": self.session, "tool": clip(name), "reason": reason}
+        if hold is not None:
+            data["hold"] = hold
+        await self._append("call.refused", data)
+        if why is None:
+            return _text_result(f"polarizer: no tool named {clip(name, 4096)}")
+        return _text_result(f"polarizer: {clip(name, 4096)} is not available: {why}")
 
     async def _call_tool(self, ctx, params: types.CallToolRequestParams):
         await self._catch_up()
         if self.writer.stopped:
-            name = safe(params.name)
-            log(f"polarizer: refused {name}: could not record it: {self.writer.stopped}")
-            return _text_result(
-                f"polarizer: {params.name} was not called: the ledger could not record it"
-            )
-        upstream, tool, why = await self._route(params.name)
+            return self._unrecordable(params.name, self.writer.stopped)
+        upstream, tool, why, definition = await self._route(params.name)
         if upstream is None:
-            await self._append(
-                "call.refused", {"session": self.session, "tool": clip(params.name), "reason": tool}
-            )
-            if why is None:
-                return _text_result(f"polarizer: no tool named {clip(params.name, 4096)}")
-            return _text_result(f"polarizer: {clip(params.name, 4096)} is not available: {why}")
+            return await self._refuse_route(params.name, tool, why)
+        # The rule function (HOLD-SPEC.md, section 4) on a worker thread, since it resolves
+        # paths; shielded, so a call the client cancels meanwhile is still decided and recorded.
+        evaluate = functools.partial(
+            policy_mod.evaluate, self.policy, upstream.prefix, tool, params.arguments, definition
+        )
+        with anyio.CancelScope(shield=True):
+            verdict = await anyio.to_thread.run_sync(evaluate)
+        if verdict.action == "hold":
+            return await self._held(ctx, params, verdict)
+        return await self._forward(ctx, params, upstream, tool, params.arguments, verdict.rule)
 
+    async def _forward(
+        self, ctx, params, upstream, tool, arguments, allowed_by, hold=None, commit=None
+    ):
+        """M0's order: the side file (unless a held call's is reused), call.sent, the upstream
+        call, call.returned. call.sent records `allowed_by`, and `hold` for a held call."""
         meta = dict(params.meta or {})
         forward = {key: meta[key] for key in FORWARDED_META if key in meta}
         dropped = sorted(
@@ -654,27 +730,25 @@ class Gateway:
             and not key.startswith(RESERVED_META_PREFIX)
         )
         call_id = meta.get(CLIENT_CALL_ID)
-        arguments = params.arguments
         try:
             # Shielded: once started, the side file and call.sent are written even if the
             # client cancels meanwhile; the cancel then lands on the upstream call below.
             with anyio.CancelScope(shield=True):
-                commit = write_args(self.writer.ledger_dir, arguments)
-                sent = await self.writer.append_async(
-                    "call.sent",
-                    {
-                        "session": self.session,
-                        "tool": clip(params.name, 256),
-                        "args_commit": commit,
-                        "meta_dropped": [clip(k, 128) for k in dropped[:MAX_DROPPED]],
-                        "client_call_id": clip(call_id, 256) if isinstance(call_id, str) else None,
-                    },
-                )
+                if commit is None:
+                    commit = write_args(self.writer.ledger_dir, arguments)
+                data = {
+                    "session": self.session,
+                    "tool": clip(params.name, 256),
+                    "args_commit": commit,
+                    "meta_dropped": [clip(k, 128) for k in dropped[:MAX_DROPPED]],
+                    "client_call_id": clip(call_id, 256) if isinstance(call_id, str) else None,
+                    "allowed_by": allowed_by,
+                }
+                if hold is not None:
+                    data["hold"] = hold
+                sent = await self.writer.append_async("call.sent", data)
         except (Stopped, EntryRefused, OSError) as e:
-            log(f"polarizer: refused {safe(params.name)}: could not record it: {describe(e)}")
-            return _text_result(
-                f"polarizer: {params.name} was not called: the ledger could not record it"
-            )
+            return self._unrecordable(params.name, describe(e))
 
         async def relay(progress, total, message):
             await ctx.session.report_progress(progress, total, message)
@@ -751,3 +825,189 @@ class Gateway:
         reply = _text_result(line)
         await self._append("call.returned", finish(outcome, result_bytes(reply), line))
         return reply
+
+    # Holds (HOLD-SPEC.md, section 6) -------------------------------------------------------
+
+    def _not_allowed(self, name: str) -> types.CallToolResult:
+        """The model's one line for every ending that refuses: no rule, reason or path."""
+        return _text_result(f"polarizer: {clip(name, 4096)} was not allowed")
+
+    async def _held(self, ctx, params, verdict) -> types.CallToolResult:
+        """A call the rules hold: record it, wait for its ending, and act on that."""
+        name = params.name
+        if len(self._open) >= MAX_OPEN_HOLDS:
+            await self._append(
+                "call.refused", {"session": self.session, "tool": clip(name), "reason": TOO_MANY}
+            )
+            return self._not_allowed(name)
+        waiter = _Waiter(secrets.token_hex(8), params.arguments)
+        self._open[waiter.hold] = waiter  # takes its place under the cap before any await
+        try:
+            try:
+                with anyio.CancelScope(shield=True):
+                    waiter.commit = write_args(self.writer.ledger_dir, params.arguments)
+                    data = {
+                        "session": self.session,
+                        "hold": waiter.hold,
+                        "tool": clip(name, 256),
+                        "args_commit": waiter.commit,
+                        "class": verdict.cls,
+                        "class_from": verdict.class_from,
+                        "rule": verdict.rule,
+                        "reason": verdict.reason,
+                        "timeout_seconds": self.policy.hold_timeout_seconds,
+                    }
+                    await self.writer.append_async("hold.created", data)
+            except (Stopped, EntryRefused, OSError) as e:
+                return self._unrecordable(name, describe(e))
+            waiter.started = anyio.current_time()
+            log(f"polarizer: held {safe(name)} as hold {waiter.hold} ({verdict.rule}); "
+                "run polarizer holds")  # fmt: skip
+            self._watch_wake.set()  # the watch runs every hold_watch_interval from now on
+            try:
+                ending = await self._await_ending(waiter)
+                if ending is None:
+                    return self._unrecordable(name, self.writer.stopped or "the writer stopped")
+                if _allows(ending) and self.before_forward is not None:
+                    await self.before_forward(waiter.hold)  # tests hold the forward back here
+            except anyio.get_cancelled_exc_class():
+                # Shutdown during a hold is stage 7 (HOLD-SPEC.md, section 15): for now the hold
+                # stays open, as if the process had been killed.
+                if not self.shutting_down:
+                    with anyio.CancelScope(shield=True):
+                        await self._client_cancelled(waiter, name)
+                raise
+        finally:
+            self._open.pop(waiter.hold, None)
+        if not _allows(ending):
+            data = {"session": self.session, "tool": clip(name), "hold": waiter.hold}
+            await self._append("call.refused", {**data, "reason": _ended_reason(ending, waiter)})
+            return self._not_allowed(name)
+        return await self._allowed(ctx, params, waiter)
+
+    async def _await_ending(self, waiter: "_Waiter"):
+        """The hold's ending (holds.Ending), or None once the writer has stopped. On timeout,
+        hold.expired is a conditional append; if an ending got there first, that is the one."""
+        timeout = self.hold_timeout
+        if timeout is None:
+            timeout = self.policy.hold_timeout_seconds
+        deadline = waiter.started + timeout
+        while True:
+            if self.writer.stopped:
+                return None
+            held = self.holds.get(waiter.hold)
+            if held is not None and held.ending is not None:
+                return held.ending
+            with anyio.move_on_at(deadline) as scope:
+                await waiter.event.wait()
+            waiter.event = anyio.Event()
+            if scope.cancelled_caught:
+                reason = f"timeout after {self.policy.hold_timeout_seconds} s"
+                with anyio.CancelScope(shield=True):
+                    if not await self._expire(waiter, reason):
+                        return None
+                return self.holds.get(waiter.hold).ending
+
+    async def _expire(self, waiter: "_Waiter", reason: str) -> bool:
+        """Append hold.expired unless the hold already has an ending (the conditional append).
+        False if the writer stopped."""
+        hold_id = waiter.hold
+
+        def check():
+            held = self.holds.get(hold_id)
+            if held is None or held.ending is not None:
+                raise _HasEnding()
+
+        data = {"session": self.session, "hold": hold_id, "reason": reason}
+        try:
+            await self.writer.append_async("hold.expired", data, check=check)
+        except _HasEnding:
+            pass
+        except (Stopped, EntryRefused) as e:
+            log(f"polarizer: could not record hold.expired: {e}")
+            return False
+        return True
+
+    async def _client_cancelled(self, waiter: "_Waiter", name: str) -> None:
+        """The client cancelled a held call (or Claude Code's own timeout did): end the hold
+        with hold.expired unless it has an ending, then one call.refused for whichever ending
+        the ledger has first. The client gets nothing; the SDK has abandoned the request."""
+        if waiter.commit is None or self.writer.stopped:
+            return
+        held = self.holds.get(waiter.hold)
+        if held is not None and held.ending is None:
+            if not await self._expire(waiter, CLIENT_CANCEL_ERROR):
+                return
+            held = self.holds.get(waiter.hold)
+        if held is None or held.ending is None:
+            return
+        if _allows(held.ending):
+            reason = CANCELLED_BEFORE_FORWARD
+        else:
+            reason = _ended_reason(held.ending, waiter)
+        data = {"session": self.session, "tool": clip(name), "hold": waiter.hold}
+        await self._append("call.refused", {**data, "reason": reason})
+
+    async def _allowed(self, ctx, params, waiter: "_Waiter"):
+        """After an allow (already fsynced by the writer's catch-up): route again, read the
+        side file back and check it, then forward what it holds, never the in-memory copy."""
+        name, hold_id = params.name, waiter.hold
+        with anyio.CancelScope(shield=True):
+            upstream, tool, why, _ = await self._route(name)
+            if upstream is None:
+                return await self._refuse_route(name, tool, why, hold=hold_id)
+            try:
+                arguments, _ = read_args(self.writer.ledger_dir, waiter.commit)
+            except ArgsProblem as e:
+                log(
+                    f"polarizer: refused {safe(name)}: hold {hold_id}'s side file "
+                    f"args/{waiter.commit}.bin {safe(str(e))}"
+                )
+                reason = f"hold {hold_id} was allowed, but its side file {e.problem}"
+                data = {"session": self.session, "tool": clip(name), "hold": hold_id}
+                await self._append("call.refused", {**data, "reason": reason})
+                return self._not_allowed(name)
+        return await self._forward(
+            ctx, params, upstream, tool, arguments, "hold", hold=hold_id, commit=waiter.commit
+        )
+
+    def _wake_holds(self) -> None:
+        """Wake each waiting hold whose ending the fold now has, or all of them once the writer
+        has stopped. A decision ignored for its args_commit gets one stderr line."""
+        for seq, hold_id in self.holds.mismatched():
+            if hold_id in self._open and seq not in self._mismatch_told:
+                self._mismatch_told.add(seq)
+                log(f"polarizer: ignored a decision for hold {hold_id} with another args_commit")
+        for hold_id, waiter in list(self._open.items()):
+            held = self.holds.get(hold_id)
+            if self.writer.stopped or (held is not None and held.ending is not None):
+                waiter.event.set()
+
+
+class _HasEnding(Exception):
+    """The conditional append's refusal: the hold already has an ending."""
+
+
+class _Waiter:
+    """A held call waiting in this process: only a way to wake its handler. Everything else
+    about the hold is in the ledger and its side file."""
+
+    def __init__(self, hold: str, arguments):
+        self.hold = hold
+        self.arguments = arguments  # the request's copy: never forwarded (HOLD-SPEC.md, section 6)
+        self.commit: str | None = None
+        self.started: float = 0.0
+        self.event = anyio.Event()
+
+
+def _allows(ending) -> bool:
+    return ending is not None and ending.kind == "hold.decided" and ending.decision == "allow"
+
+
+def _ended_reason(ending, waiter: _Waiter) -> str:
+    """call.refused's reason for a hold that ended without being forwarded."""
+    if ending.kind == "hold.decided":
+        return f"hold {waiter.hold} was denied"
+    if ending.kind == "hold.expired":
+        return f"hold {waiter.hold} expired: {clip(str(ending.reason), 1024)}"
+    return f"hold {waiter.hold} was abandoned"

@@ -653,6 +653,15 @@ What it does not show:
 - **Windows or macOS.** It ran on Linux (WSL2) only.
 - **The documented conditions.** It ran inside a Claude Code session, not from a plain terminal. The script now says so in its first line when `CLAUDE_CODE_SESSION_ID` is set, and names the `CLAUDE_CODE_*` variables it passes on.
 
+## Stage 6 (Oct 4, 2026, UTC)
+
+Checked while building M2a's policy and holds, on Python 3.12.3, mcp 2.2.0 and anyio 4.15.1, in `.venv`, on Linux (WSL2). No Claude Code, no model, nothing fetched.
+
+- **flock between two descriptions in one process** (executed, by the golden and CLI tests): with an exclusive `fcntl.flock` held on one descriptor of `sessions/<session>.lock`, a second `os.open` of the same file in the same process gets `BlockingIOError` from `flock(LOCK_SH | LOCK_NB)`; once the first is released, the shared lock is taken. flock locks belong to the open file description, so a test can stand in for a running serve from its own process. `msvcrt.locking` on Windows was not run.
+- **tomllib and control characters** (executed): a raw ESC in a quoted key is a parse error (`Illegal character '\x1b'`); the TOML escape for it (backslash, u, 001b) is accepted and gives the character, so a key or pattern holding ESC can reach Polarizer's own error lines only through an escape in the file.
+- **lstat below a directory with no permissions** (executed, `tests/test_paths.py::test_unreadable_part_is_held`): `os.lstat` of a path under a mode-000 directory raises `PermissionError` with `strerror` `Permission denied` for a non-root user.
+- **The SDK and held calls** (executed, in memory, `tests/test_holds.py`): a `tools/call` handler that awaits for seconds while the SDK client waits needs nothing from the SDK; cancelling the client's call delivers `CancelledError` to the waiting handler, as verified-facts.md's spike found for a forwarding handler. No SDK behavior was found that contradicts this file.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

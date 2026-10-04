@@ -74,6 +74,55 @@ def test_example_config_uses_the_manual_ledger(tmp_path, fake_home):
     assert [u.prefix for u in cfg.upstreams] == ["probe", "fs"]
 
 
+def test_example_config_policy(tmp_path, fake_home):
+    """The example's policy (docs/HOLD-SPEC.md, section 11): the probe's seven tools local-read,
+    the Filesystem tools classified, /tmp/polarizer-manual the root. So the manual check holds
+    fs__write_file outside the directory and fs__move_file always, and nothing of the probe."""
+    import os
+
+    from polarizer import policy
+
+    example = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
+    cfg = load(write(tmp_path, example.replace("/home/<you>", fake_home.as_posix())))
+    assert cfg.policy.workspace_roots == (Path("/tmp/polarizer-manual"),)
+    assert cfg.policy.hold_timeout_seconds == 300
+    probe, fs = cfg.upstreams
+    assert sorted(probe.tools) == sorted(
+        ["wait", "crash", "env", "fail", "rich", "invalid", "change"]
+    )
+    assert {rule.cls for rule in probe.tools.values()} == {"local-read"}
+    assert len(fs.tools) == 13 and fs.tools["move_file"].cls == "destructive"
+    root = tmp_path / "manual"
+    root.mkdir()
+    built = policy.Policy(
+        workspace_roots=(os.path.realpath(root),),
+        upstreams={
+            u.prefix: policy.UpstreamPolicy(u.trust_annotations, u.tools) for u in cfg.upstreams
+        },
+    )
+    inside, outside = str(root / "notes.txt"), str(tmp_path / "elsewhere.txt")
+    verdicts = {
+        "probe wait": policy.evaluate(built, "probe", "wait", {"seconds": 1}, {}),
+        "write inside": policy.evaluate(built, "fs", "write_file", {"path": inside}, {}),
+        "write outside": policy.evaluate(built, "fs", "write_file", {"path": outside}, {}),
+        "write hook": policy.evaluate(
+            built, "fs", "write_file", {"path": str(root / ".git" / "hooks" / "x")}, {}
+        ),
+        "move": policy.evaluate(
+            built, "fs", "move_file", {"source": inside, "destination": inside}, {}
+        ),
+        "read": policy.evaluate(built, "fs", "read_text_file", {"path": outside}, {}),
+    }
+    assert {k: (v.action, v.rule) for k, v in verdicts.items()} == {
+        "probe wait": ("allow", "local-read"),
+        "write inside": ("allow", "inside-roots"),
+        "write outside": ("hold", "outside-roots"),
+        "write hook": ("hold", "write-pattern"),
+        "move": ("hold", "destructive"),
+        "read": ("allow", "local-read"),
+    }
+
+
 def test_verify_and_repair_do_not_need_upstream_secrets(tmp_path, fake_home):
     cfg = load(good(tmp_path), require_env=False, environ={})
     assert cfg.upstreams[1].env["NOTES_TOKEN"] == "${NOTES_TOKEN}"

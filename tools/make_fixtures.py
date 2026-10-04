@@ -154,6 +154,84 @@ def pins_chain():
     )  # fmt: skip
 
 
+HOLDS = ["1111222233334444", "5555666677778888", "9999aaaabbbbcccc", "ddddeeeeffff0000"]
+OTHER_SESSION = "3e7a9c1b5d2f8064"
+
+
+def holds_chain():
+    """Every kind M2a adds and every optional field it adds (docs/HOLD-SPEC.md, section 5): a
+    hold allowed and forwarded, one denied, one expired, one abandoned by a later start, an
+    unheld call with its allowed_by, and a refusal for too many holds."""
+    started = {"session": SESSION, "polarizer_version": "0.1.0", "config_sha256": "7" * 64}
+
+    def created(hold, tool, commit, cls, class_from, rule, reason):
+        return (
+            "hold.created",
+            {
+                "session": SESSION,
+                "hold": hold,
+                "tool": tool,
+                "args_commit": commit,
+                "class": cls,
+                "class_from": class_from,
+                "rule": rule,
+                "reason": reason,
+                "timeout_seconds": 300,
+            },
+        )
+
+    def decided(hold, commit, decision, reason):
+        return (
+            "hold.decided",
+            {
+                "hold": hold,
+                "args_commit": commit,
+                "decision": decision,
+                "actor": "person",
+                "reason": reason,
+            },
+        )
+
+    def refused(tool, reason, **hold):
+        return ("call.refused", {"session": SESSION, "tool": tool, "reason": reason, **hold})
+
+    sent = {"session": SESSION, "meta_dropped": [], "client_call_id": None}
+    return build(
+        [
+            ("session.started", started),
+            ("policy.loaded", {"session": SESSION, "holds": "on", "policy_sha256": "8" * 64,
+                               "classified": 13, "workspace_roots": ["/home/me/code/proj"],
+                               "hold_timeout_seconds": 300}),
+            created(HOLDS[0], "fs__move_file", ARGS[0], "destructive", "config", "destructive",
+                    "class destructive is held on every call"),
+            decided(HOLDS[0], ARGS[0], "allow", None),
+            ("call.sent", {**sent, "tool": "fs__move_file", "args_commit": ARGS[0],
+                           "hold": HOLDS[0], "allowed_by": "hold"}),
+            ("call.returned", {"call_seq": 5, "outcome": "ok", "latency_ms": 4,
+                               "result_bytes": 70}),
+            created(HOLDS[1], "fs__write_file", ARGS[1], None, None, "unclassified",
+                    "fs__write_file has no class in polarizer.toml"),
+            decided(HOLDS[1], ARGS[1], "deny", "not in this repo"),
+            refused("fs__write_file", f"hold {HOLDS[1]} was denied", hold=HOLDS[1]),
+            created(HOLDS[2], "web__post", ARGS[2], "egress", "annotations", "egress",
+                    "class egress is held on every call (class from annotations)"),
+            ("hold.expired", {"session": SESSION, "hold": HOLDS[2],
+                              "reason": "timeout after 300 s"}),
+            refused("web__post", f"hold {HOLDS[2]} expired: timeout after 300 s", hold=HOLDS[2]),
+            created(HOLDS[3], "fs__edit_file", ARGS[3], "local-write", "config", "outside-roots",
+                    'argument "path": /etc/hosts is outside every workspace root'),
+            ("session.started", {**started, "session": OTHER_SESSION}),
+            ("policy.loaded", {"session": OTHER_SESSION, "holds": "off",
+                               "policy_sha256": "8" * 64, "classified": 13,
+                               "workspace_roots": [], "hold_timeout_seconds": 300}),
+            ("hold.abandoned", {"session": OTHER_SESSION, "hold": HOLDS[3], "held_by": SESSION}),
+            ("call.sent", {**sent, "session": OTHER_SESSION, "tool": "fs__read_text_file",
+                           "args_commit": ARGS[2], "allowed_by": "holds-off"}),
+            refused("fs__delete", "too many held calls: 16 already wait in this session"),
+        ]
+    )  # fmt: skip
+
+
 def unicode_chain():
     values = {
         "controls": "".join(chr(c) for c in range(32)) + "\x7f",
@@ -356,6 +434,7 @@ def fixtures(v0_data):
     n = len(s)  # 13 entries, seq 0 to 12
     u = unicode_chain()
     p = pins_chain()
+    h = holds_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -368,6 +447,7 @@ def fixtures(v0_data):
         "valid/head_at_last": (text(s), head_of(s[-1]), expect("intact", n, n - 1)),
         "valid/no_head": (text(s), None, expect("intact", n, n - 1)),
         "valid/pins": (text(p), head_of(p[10]), expect("intact", len(p), len(p) - 1)),
+        "valid/holds": (text(h), head_of(h[15]), expect("intact", len(h), len(h) - 1)),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (
@@ -390,6 +470,18 @@ def fixtures(v0_data):
             change_data(p, 10, {"def_hash": "a" * 64}),
             head_of(p[10]),
             expect("tampered", None, 10, "head"),
+        ),
+        # A deny edited into an allow, as is and re-hashed: the chain and ledger.head each
+        # catch it (ledger.head names policy.loaded, the security entry after the deny).
+        "broken/holds_edit_decision": (
+            change_data(h, 8, {"decision": "allow"}, rehash=False),
+            None,
+            expect("tampered", 9, 8, "hash"),
+        ),
+        "broken/holds_rehashed_decision": (
+            change_data(h, 8, {"decision": "allow"}),
+            head_of(h[15]),
+            expect("tampered", None, 15, "head"),
         ),
         "broken/bad_seq": (bad_seq(s, 5), None, expect("tampered", 6, 15, "seq")),
         # Invalid lines.

@@ -27,7 +27,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from live_check import _messages
+from live_check import _messages, probe_classes
 from live_check import prime as prime_ledger
 from m1a_check import printable
 
@@ -46,7 +46,7 @@ def setup(directory: Path, repo: Path) -> None:
         f"command = {json.dumps(str(python))}\n"
         f"args = [{json.dumps(str(repo / 'tests' / 'helpers' / 'probe_server.py'))}]\n"
         f"env = {{ PROBE_LOG = {json.dumps(str(directory / 'probe.log'))}, "
-        'PROBE_PHASE = "${PROBE_PHASE}" }\n'
+        'PROBE_PHASE = "${PROBE_PHASE}" }\n' + probe_classes()
     )
     (directory / "polarizer.toml").write_text(toml, encoding="utf-8")
     serve = ["-m", "polarizer", "serve", "--config", str(directory / "polarizer.toml")]

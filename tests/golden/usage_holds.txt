@@ -1,0 +1,15 @@
+polarizer: holds needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: holds needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: --ledger-dir must be an absolute path, got relative
+polarizer: unrecognized arguments: extra
+polarizer: allow needs <hold id>
+polarizer: allow needs <hold id>
+polarizer: unrecognized arguments: --reason r
+polarizer: deny needs <hold id>
+polarizer: --reason is empty; leave it out or give a reason
+polarizer: deny needs a terminal; pass --allow-no-terminal if this is a script
+polarizer: --config must be an absolute path, got polarizer.toml
+polarizer: --no-holds goes with serve
+polarizer: --no-holds goes with serve
+polarizer: --no-holds goes with serve
+polarizer: serve needs --config <absolute path to polarizer.toml>

@@ -4,6 +4,7 @@ fcntl.flock on Unix, msvcrt.locking on byte 0 on Windows. Waiting is a loop of n
 attempts every 50 ms, because msvcrt.locking has no timed wait.
 """
 
+import errno
 import os
 import sys
 import time
@@ -27,6 +28,16 @@ if sys.platform == "win32":
         os.lseek(fd, 0, os.SEEK_SET)
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
+    def _try_shared(fd: int) -> bool | None:
+        """A non-blocking lock for probing: True if taken, False if another process holds
+        it, None for any other failure. msvcrt has no shared lock; LK_NBRLCK is exclusive."""
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBRLCK, 1)
+        except OSError as e:
+            return False if e.errno in (errno.EACCES, errno.EDEADLOCK) else None
+        return True
+
 else:
     import fcntl
 
@@ -39,6 +50,44 @@ else:
 
     def _unlock(fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
+
+    def _try_shared(fd: int) -> bool | None:
+        """A non-blocking shared lock for probing: True if taken, False if another process
+        holds an exclusive one, None for any other failure."""
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        except OSError:
+            return None
+        return True
+
+
+RUNNING = "running"
+ENDED = "ended"
+UNKNOWN = "unknown"
+
+
+def probe(path: Path) -> str:
+    """Whether the process holding a lock file's exclusive lock still runs, without process
+    ids (docs/HOLD-SPEC.md, section 7): RUNNING if the lock is held, ENDED if a non-blocking
+    attempt takes it (released at once), UNKNOWN if the file is missing or can't be opened or
+    locked for any other reason. Opens the file read-only and writes nothing."""
+    try:
+        fd = os.open(path, os.O_RDONLY | _BINARY)
+    except OSError:
+        return UNKNOWN
+    try:
+        taken = _try_shared(fd)
+        if taken:
+            try:
+                _unlock(fd)
+            except OSError:
+                pass
+            return ENDED
+        return RUNNING if taken is False else UNKNOWN
+    finally:
+        os.close(fd)
 
 
 class LedgerLock:

@@ -14,6 +14,14 @@ ledger_forbidden_paths = [
     "~/code/isr",
 ]
 
+# Which calls are held for a person (docs/HOLD-SPEC.md, section 2). A local-write call runs
+# without a hold only when every path it names resolves inside a workspace root and matches no
+# hold pattern; destructive and egress calls, and calls to tools with no class, are always
+# held. Each root must exist when serve starts.
+[policy]
+workspace_roots = ["/tmp/polarizer-manual"]
+hold_timeout_seconds = 300
+
 # The stdlib test probe: wait(seconds), crash, env, fail, rich, invalid, change.
 [upstream.probe]
 command = "/home/<you>/code/polarizer/.venv/bin/python"
@@ -21,9 +29,37 @@ args = ["/home/<you>/code/polarizer/tests/helpers/probe_server.py"]
 env = { PROBE_LOG = "/tmp/polarizer-probe.log" }
 connect_timeout_seconds = 5
 
+# All seven are harmless test tools, so none is held.
+[upstream.probe.tools]
+wait = { class = "local-read" }
+crash = { class = "local-read" }
+env = { class = "local-read" }
+fail = { class = "local-read" }
+rich = { class = "local-read" }
+invalid = { class = "local-read" }
+change = { class = "local-read" }
+
 # The reference Filesystem server, pinned, confined to one directory. Pre-warm it once first
 # (docs/MANUAL-CHECK.md, step 1).
 [upstream.fs]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/tmp/polarizer-manual"]
 connect_timeout_seconds = 20
+
+# Reads run; writes outside /tmp/polarizer-manual, or into .git/hooks and the other built-in
+# patterns, are held; move_file is held on every call. The tool names are checked against the
+# pinned server in stage 7 (docs/HOLD-SPEC.md, section 13).
+[upstream.fs.tools]
+read_text_file = { class = "local-read", path_args = ["path"] }
+read_media_file = { class = "local-read", path_args = ["path"] }
+read_multiple_files = { class = "local-read", path_args = ["paths"] }
+list_directory = { class = "local-read", path_args = ["path"] }
+list_directory_with_sizes = { class = "local-read", path_args = ["path"] }
+directory_tree = { class = "local-read", path_args = ["path"] }
+search_files = { class = "local-read", path_args = ["path"] }
+get_file_info = { class = "local-read", path_args = ["path"] }
+list_allowed_directories = { class = "local-read" }
+write_file = { class = "local-write", path_args = ["path"] }
+edit_file = { class = "local-write", path_args = ["path"] }
+create_directory = { class = "local-write", path_args = ["path"] }
+move_file = { class = "destructive", path_args = ["source", "destination"] }

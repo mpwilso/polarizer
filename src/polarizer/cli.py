@@ -1,5 +1,6 @@
-"""The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md), and
-pending, approve and reject (docs/PIN-SPEC.md, section 7).
+"""The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md),
+pending, approve and reject (docs/PIN-SPEC.md, section 7), and holds, allow and deny
+(docs/HOLD-SPEC.md, section 8).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
 The other commands print results to stdout. Usage errors, config errors, unreadable files,
@@ -9,17 +10,19 @@ error among them exits 2, and ledger statuses keep their own codes.
 
 import argparse
 import os
+import re
 import signal
 import sys
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import anyio
 import anyio.from_thread
 import anyio.lowlevel
 
-from polarizer import config, defhash, ledgerdir, pins, sidefiles, writer
-from polarizer.decisions import Decider, Refusal, fold_reason
+from polarizer import config, defhash, holds, ledgerdir, pins, sidefiles, writer
+from polarizer.decisions import Decider, HoldDecider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 
 
@@ -38,20 +41,31 @@ def _parser() -> argparse.ArgumentParser:
     text = "run the proxy over stdio (started by the MCP client)"
     serve = commands.add_parser("serve", help=text, description=text)
     serve.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
+    serve.add_argument(
+        "--no-holds",
+        action="store_true",
+        help="run with the hold rules off; recorded in the ledger at every start",
+    )
     for name, text in [
         ("verify", "check the ledger and report its status"),
         ("repair", "remove a torn tail, and nothing else"),
         ("pending", "list the tool definitions that wait for a decision"),
         ("approve", "approve one tool definition, or a group that pending printed"),
         ("reject", "reject one tool definition, with a reason"),
+        ("holds", "list the calls held for a decision"),
+        ("allow", "allow one held call"),
+        ("deny", "deny one held call"),
     ]:
         sub = commands.add_parser(name, help=text, description=text)
         sub.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
         sub.add_argument("--ledger-dir", metavar="DIR", help="absolute path to the ledger dir")
+        # Accepted only to refuse it with its own line: it goes with serve.
+        sub.add_argument("--no-holds", action="store_true", help=argparse.SUPPRESS)
         if name == "verify":
             sub.add_argument("--args", action="store_true", help="also check side files")
-        if name in ("approve", "reject"):
-            sub.add_argument("names", nargs="*", metavar="PREFIX TOOL DEF_HASH")
+        if name in ("approve", "reject", "allow", "deny"):
+            meta = "HOLD_ID" if name in ("allow", "deny") else "PREFIX TOOL DEF_HASH"
+            sub.add_argument("names", nargs="*", metavar=meta)
             sub.add_argument(
                 "--allow-no-terminal",
                 action="store_true",
@@ -63,6 +77,8 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--upstream", metavar="PREFIX", help="only this upstream")
         if name == "reject":
             sub.add_argument("--reason", metavar="TEXT", help="why (required)")
+        if name == "deny":
+            sub.add_argument("--reason", metavar="TEXT", help="why (optional)")
     return parser
 
 
@@ -88,8 +104,14 @@ def _stdin_is_terminal() -> bool:
 
 
 def _check_decision_args(args) -> None:
-    """approve's and reject's own argument rules, then the terminal check. Raises UsageError."""
-    if args.command == "approve":
+    """approve's, reject's, allow's and deny's own argument rules, then the terminal check.
+    Raises UsageError."""
+    if args.command in ("allow", "deny"):
+        if len(args.names) != 1:
+            raise UsageError(f"{args.command} needs <hold id>")
+        if args.command == "deny" and args.reason is not None and not fold_reason(args.reason):
+            raise UsageError("--reason is empty; leave it out or give a reason")
+    elif args.command == "approve":
         if args.group is not None and args.names or args.group is None and len(args.names) != 3:
             raise UsageError("approve needs <prefix> <tool> <def_hash>, or --group <group id>")
         if args.group is None and args.upstream is not None:
@@ -116,7 +138,9 @@ def main(argv=None) -> int:
                 raise UsageError("serve needs --config <absolute path to polarizer.toml>")
             if not os.path.isabs(args.config):
                 raise UsageError(f"--config must be an absolute path, got {args.config}")
-            return serve(Path(args.config))
+            return serve(Path(args.config), no_holds=args.no_holds)
+        if args.no_holds:
+            raise UsageError("--no-holds goes with serve")
         if (args.config is None) == (args.ledger_dir is None):
             raise UsageError(
                 f"{args.command} needs exactly one of --config <absolute path> "
@@ -126,7 +150,7 @@ def main(argv=None) -> int:
         if not os.path.isabs(given):
             flag = "--config" if args.config is not None else "--ledger-dir"
             raise UsageError(f"{flag} must be an absolute path, got {given}")
-        if args.command in ("approve", "reject"):
+        if args.command in ("approve", "reject", "allow", "deny"):
             _check_decision_args(args)
     except UsageError as e:
         return _err(f"polarizer: {e}")
@@ -144,6 +168,10 @@ def main(argv=None) -> int:
         return pending(ledger_dir, args.upstream)
     if args.command in ("approve", "reject"):
         return decide(args, ledger_dir, forbidden)
+    if args.command == "holds":
+        return list_holds(ledger_dir)
+    if args.command in ("allow", "deny"):
+        return decide_hold(args, ledger_dir, forbidden)
     return repair(ledger_dir, forbidden)
 
 
@@ -196,6 +224,75 @@ def pending(ledger_dir: Path, upstream: str | None) -> int:
     for line in pins.render(pins.blocks(state, ledger_dir, upstream)):
         print(line)
     return 0
+
+
+def _now() -> datetime:
+    """The clock `holds`, `allow` and `deny` show ages by; tests replace it."""
+    return datetime.now(UTC)
+
+
+def list_holds(ledger_dir: Path) -> int:
+    """Read-only, like verify and pending: every open hold, with its arguments."""
+    try:
+        data, head = read_files(ledger_dir)
+    except Locked:
+        print(LOCKED_LINE)
+        return 7
+    except OSError as e:
+        return _err(f"polarizer: cannot read {e.filename or ledger_dir / LEDGER}: {e.strerror}")
+    if not data:
+        print(f"no ledger at {ledger_dir}")
+        return 2
+    state = holds.HoldState()
+    result = verify_bytes(data, head, state.apply)
+    if result.status != "intact":
+        for line in result.output_lines():
+            print(line)
+        return result.exit_code
+    for line in holds.listing(state, ledger_dir, _now()):
+        print(line)
+    return 0
+
+
+_HOLD_ID = re.compile("[0-9a-f]{16}")
+
+
+def decide_hold(args, ledger_dir: Path, forbidden: list[Path]) -> int:
+    """allow and deny, after their argument checks."""
+    try:
+        warning = ledgerdir.check_location(ledger_dir, forbidden)
+    except ledgerdir.ForbiddenPath as e:
+        return _err(str(e))
+    if warning:
+        print(warning, file=sys.stderr)
+    hold_id = args.names[0]
+    if not _HOLD_ID.fullmatch(hold_id):
+        return _err(f"polarizer: {hold_id} is not a hold id (16 lowercase hex characters)")
+    try:
+        decider = HoldDecider.open(ledger_dir)
+    except Refusal as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except OSError as e:
+        return _err(f"polarizer: cannot open {e.filename or ledger_dir}: {e.strerror}")
+    decision = "allow" if args.command == "allow" else "deny"
+    reason = fold_reason(args.reason) if decision == "deny" and args.reason is not None else None
+    try:
+        decider.decide(
+            hold_id, decision, reason, print, lambda line: print(line, file=sys.stderr), _now()
+        )
+        return 0
+    except Refusal as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except writer.LedgerError as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except OSError as e:
+        print(f"polarizer: could not record the decision: {e.strerror or e}", file=sys.stderr)
+        return 1
+    finally:
+        decider.close()
 
 
 def decide(args, ledger_dir: Path, forbidden: list[Path]) -> int:
@@ -261,12 +358,17 @@ def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
     return outcome.exit_code
 
 
-def serve(config_path: Path) -> int:
-    """polarizer serve (PROXY-SPEC.md, Startup): read the config, check ledger_dir's location,
-    open the ledger, then serve MCP over stdio until end of input or a signal, and shut down
-    (PIN-SPEC.md, section 8). Exits 0 after a shutdown."""
+def serve(config_path: Path, no_holds: bool = False) -> int:
+    """polarizer serve (PROXY-SPEC.md, Startup): read the config and build the policy (a
+    missing workspace root is a config error), check ledger_dir's location, open the ledger,
+    then serve MCP over stdio until end of input or a signal, and shut down (PIN-SPEC.md,
+    section 8). Exits 0 after a shutdown. `no_holds` turns the hold rules off for this
+    process; it is recorded in policy.loaded (HOLD-SPEC.md, section 2)."""
+    from polarizer import policy as policy_mod
+
     try:
         cfg = config.load(config_path)
+        policy = policy_mod.build(cfg, holds=not no_holds)
     except config.ConfigError as e:
         return _err(str(e))
     try:
@@ -275,9 +377,11 @@ def serve(config_path: Path) -> int:
         return _err(str(e))
     if warning:
         print(warning, file=sys.stderr)
-    state = pins.PinState()
+    state, held = pins.PinState(), holds.HoldState()
     try:
-        ledger = writer.LedgerWriter.open(cfg.ledger_dir, on_entry=state.apply)
+        ledger = writer.LedgerWriter.open(
+            cfg.ledger_dir, on_entry=holds.listener(state.apply, held.apply)
+        )
     except writer.LedgerError as e:
         print(e.line, file=sys.stderr)
         return e.exit_code
@@ -286,8 +390,10 @@ def serve(config_path: Path) -> int:
     from polarizer.upstream import install_log_handler
 
     install_log_handler()  # the SDK's log records, through safe(), never raw upstream text
+    if no_holds:
+        print("polarizer: warning: started with --no-holds; no call is held", file=sys.stderr)
     try:
-        anyio.run(_serve, cfg, ledger, state)
+        anyio.run(_serve, cfg, ledger, state, held, policy)
     finally:
         ledger.close()
     return 0
@@ -394,7 +500,9 @@ class _StdinLines:
         self._send.close()
 
 
-async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.PinState) -> None:
+async def _serve(
+    cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.PinState, held, policy
+) -> None:
     """Startup, serving, then the shutdown path of PIN-SPEC.md, section 8: cancel the calls in
     flight (each records call.returned), close the upstream clients in parallel within
     CLOSE_UPSTREAMS_BOUND, and close the writer. End of input during startup doesn't cancel
@@ -413,7 +521,9 @@ async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.
         )
         for u in cfg.upstreams
     ]
-    gateway = Gateway(specs, ledger, config_sha256=cfg.sha256, pins=state)
+    gateway = Gateway(
+        specs, ledger, config_sha256=cfg.sha256, pins=state, holds=held, policy=policy
+    )
     stop = _Shutdown(gateway)
     async with anyio.create_task_group() as tasks:
         tasks.start_soon(_signals, stop)

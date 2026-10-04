@@ -374,3 +374,100 @@ def test_close_racing_appenders_leaves_no_future_pending(tmp_path, monkeypatch, 
     result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
     assert result.status == "intact"
     assert sorted(written) == list(range(1, result.state.lines))
+
+
+# The conditional append (docs/HOLD-SPEC.md, section 6) ------------------------------------
+
+CLAIM_WORKER = Path(__file__).parent / "helpers" / "claim_worker.py"
+
+
+class _Refused(Exception):
+    pass
+
+
+def test_conditional_append_refuses_and_writes_nothing(tmp_path):
+    """A check that raises: nothing is written, the future raises that, and the writer goes
+    on. A check that passes: the entry is written as usual, fsynced if its kind requires."""
+    directory = tmp_path / "l"
+    build_chain(directory, [], head_at=0)
+    seen = []
+    writer = LedgerWriter.open(directory, on_entry=lambda e: seen.append(e["kind"]))
+    try:
+        before = (directory / LEDGER).read_bytes()
+
+        def refuse():
+            raise _Refused("no")
+
+        with pytest.raises(_Refused):
+            writer.append("note", {"n": 1}, check=refuse).result()
+        assert (directory / LEDGER).read_bytes() == before
+        calls = []
+        done = writer.append("hold.decided", {"n": 2}, check=lambda: calls.append(1)).result()
+        assert calls == [1] and done.seq == 1
+        head = json.loads((directory / "ledger.head").read_text())
+        assert head["seq"] == 1  # hold.decided is a security kind: fsynced, head moved
+        assert writer.append("note", {"n": 3}).result().seq == 2
+    finally:
+        writer.close()
+    assert seen == ["ledger.genesis", "hold.decided", "note"]
+
+
+def test_conditional_append_sees_what_another_process_wrote(tmp_path):
+    """The check runs after the catch-up, so it sees an entry another writer appended after
+    this one opened."""
+    directory = tmp_path / "l"
+    build_chain(directory, [], head_at=0)
+    folded = []
+    first = LedgerWriter.open(directory, on_entry=lambda e: folded.append(e["kind"]))
+    second = LedgerWriter.open(directory)
+    try:
+        second.append("claim", {"w": 2}).result()
+
+        def check():
+            if "claim" in folded:
+                raise _Refused("taken")
+
+        with pytest.raises(_Refused):
+            first.append("claim", {"w": 1}, check=check).result()
+    finally:
+        first.close()
+        second.close()
+    kinds = [json.loads(line)["kind"] for line in (directory / LEDGER).read_bytes().splitlines()]
+    assert kinds.count("claim") == 1
+
+
+@pytest.mark.parametrize("workers", [2, 4])
+def test_conditional_append_two_processes_race(tmp_path, workers):
+    """Processes that each opened the ledger before any claim race to write one: exactly one
+    claim is written, and every other process names the winner's seq."""
+    directory = tmp_path / "l"
+    build_chain(directory, [], head_at=0)
+    go = tmp_path / "go"
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(CLAIM_WORKER), str(directory), str(go), str(k)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for k in range(workers)
+    ]
+    deadline = time.monotonic() + 60
+    while not all(Path(f"{go}.ready-{k}").exists() for k in range(workers)):
+        assert time.monotonic() < deadline, "the workers never opened the ledger"
+        time.sleep(0.01)
+    go.write_text("go")
+    lines = []
+    for p in procs:
+        out, err = p.communicate(timeout=120)
+        assert p.returncode == 0, err.decode()
+        lines.append(out.decode().strip())
+    won = [line for line in lines if line.startswith("won ")]
+    assert len(won) == 1, lines
+    seq = won[0].split()[1]
+    assert sorted(lines) == sorted([won[0]] + [f"lost {seq}"] * (workers - 1))
+    entries = [json.loads(line) for line in (directory / LEDGER).read_bytes().splitlines()]
+    assert [e["kind"] for e in entries].count("claim") == 1
+    result = verify_bytes(
+        (directory / LEDGER).read_bytes(), (directory / "ledger.head").read_bytes()
+    )
+    assert result.status == "intact"

@@ -153,6 +153,7 @@ The exact messages are in PROXY-SPEC.md, Startup.
 | `args/` | argument side files (Part 3) |
 | `ledger.jsonl.torn-*` | bytes removed by repair |
 | `defs/` | approved tool definitions (M1a) |
+| `sessions/` | one empty lock file per `serve` process, held while it runs, so another process can tell whether a session's holds can still be decided (M2a; HOLD-SPEC.md, section 7; read from stage 6, created by `serve` from stage 7) |
 
 ### The lock
 
@@ -203,7 +204,7 @@ This weakens the lost-tail check. Anyone who can delete `ledger.head` can also r
 
 Measured on WSL2 ext4: a plain write took 0.3 µs at p50, and write plus fsync took 0.9 ms at p50 and 1.3 ms at p95. Windows and macOS are measured by the CI benchmark job.
 
-- **Security-state entries are fsynced before Polarizer acts on them:** `ledger.genesis`, `tool.approved`, `tool.rejected`, `tool.drift`, `ledger.repaired`, `ledger.head_rebuilt`, and later milestones' holds and decisions.
+- **Security-state entries are fsynced before Polarizer acts on them:** `ledger.genesis`, `tool.approved`, `tool.rejected`, `tool.drift`, `ledger.repaired`, `ledger.head_rebuilt`, and from M2a `hold.decided` and `policy.loaded`. `hold.created`, `hold.expired` and `hold.abandoned` only ever make Polarizer do less, so they are written like `call.sent`, fsynced when the writer's queue empties (HOLD-SPEC.md, section 5).
 - **`call.sent` is written before the call is forwarded, but not fsynced inline.** The write alone survives a Polarizer crash. An inline fsync would add about 1 ms to every call only to cover an operating-system crash. The writer fsyncs whenever its queue empties.
 - **A `call.sent` with no `call.returned`** means "outcome unknown", not a missing call.
 - **M1a (PIN-SPEC.md, section 3):** `tool.seen`, `tool.unservable` and `upstream.refresh_failed` are written like `call.sent`, without an inline fsync. `tool.approved` must be durable before anything acts on it: `approve` fsyncs it before reporting success, and `serve` fsyncs the ledger itself before acting on one another process wrote. `tool.rejected` is fsynced, and `ledger.head` updated, before `reject` reports success, because a rejection can revoke an approval and a lost one would bring the tool back. The startup head check catches such a lost tail only while `ledger.head` survives. `tool.drift` is fsynced, but it only ever hides a tool, so `serve` hides at once without waiting for the fsync, and it hides at once on a rejection it adopts too.

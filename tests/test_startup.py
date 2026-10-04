@@ -67,10 +67,11 @@ def test_parallel_connect_with_timeout(tmp_path):
     assert connected["hung"] == {"prefix": "hung", "error": "timeout after 3 s"}
     for prefix in ("a", "b", "c"):
         assert connected[prefix]["protocol_version"] == "2025-11-25"
-    # Entries come in config order, after session.started.
-    kinds = [(e["kind"], e["data"].get("prefix")) for e in rig.entries(tmp_path / "ledger")][1:6]
+    # Entries come in config order, after session.started and policy.loaded (M2a).
+    kinds = [(e["kind"], e["data"].get("prefix")) for e in rig.entries(tmp_path / "ledger")][1:7]
     assert kinds == [
         ("session.started", None),
+        ("policy.loaded", None),
         ("upstream.connected", "a"),
         ("upstream.connected", "b"),
         ("upstream.connected", "c"),

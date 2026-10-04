@@ -1,0 +1,407 @@
+"""The rule function (docs/HOLD-SPEC.md, section 4): every row of its table, the first-match
+order, the built-in patterns, and the classes annotations suggest."""
+
+import os
+from pathlib import Path
+
+import pytest
+
+from polarizer import config, paths, policy, proxy
+
+R = config.ToolRule
+HOME = (None, ("home", "me"))
+
+
+@pytest.fixture
+def where(tmp_path):
+    """A workspace root, a place outside it, a ledger_dir and a config file, all resolved."""
+    real = Path(os.path.realpath(tmp_path))
+    for name in ("root", "outside", "ledger"):
+        (real / name).mkdir()
+    (real / "polarizer.toml").write_text("", encoding="utf-8")
+    return real
+
+
+def make(where: Path, *, holds=True, roots=True, **tools) -> policy.Policy:
+    upstreams = {
+        "fs": policy.UpstreamPolicy(False, tools),
+        "t": policy.UpstreamPolicy(True, {}),
+    }
+    return policy.Policy(
+        holds=holds,
+        workspace_roots=(str(where / "root"),) if roots else (),
+        upstreams=upstreams,
+        ledger_dir=str(where / "ledger"),
+        config_path=str(where / "polarizer.toml"),
+        home=HOME,
+    )
+
+
+def rows(where: Path):
+    """(row, policy, prefix, tool, arguments, definition, action, rule, reason)."""
+    root, outside = where / "root", where / "outside"
+    w = R("local-write", ("path",))
+    rd = R("local-read", ("path",))
+    ow = R("open-world", ("url",))
+    a = 'argument "path"'
+    yield 1, make(where, holds=False), "fs", "x", {}, {}, "allow", "holds-off", None
+    yield (
+        2,
+        make(where),
+        "fs",
+        "x",
+        {},
+        {},
+        "hold",
+        "unclassified",
+        "fs__x has no class in polarizer.toml",
+    )
+    yield (
+        3,
+        make(where, x=R("destructive")),
+        "fs",
+        "x",
+        {},
+        {},
+        "hold",
+        "destructive",
+        "class destructive is held on every call",
+    )
+    yield (
+        4,
+        make(where, x=R("egress")),
+        "fs",
+        "x",
+        {},
+        {},
+        "hold",
+        "egress",
+        "class egress is held on every call",
+    )
+    yield (
+        5,
+        make(where, x=R("local-write")),
+        "fs",
+        "x",
+        {"path": str(root / "f")},
+        {},
+        "hold",
+        "write-unchecked",
+        "class local-write has no path_args, so its paths cannot be checked",
+    )
+    yield 6, make(where, x=w), "fs", "x", {}, {}, "hold", "path-missing", f"{a} is missing"
+    yield (
+        7,
+        make(where, x=rd),
+        "fs",
+        "x",
+        {"path": 7},
+        {},
+        "hold",
+        "path-not-string",
+        f"{a} is not a string or a list of strings",
+    )
+    yield (
+        8,
+        make(where, x=ow),
+        "fs",
+        "x",
+        {"url": "rel"},
+        {},
+        "hold",
+        "path-unresolvable",
+        'argument "url": not an absolute path',
+    )
+    yield (
+        9,
+        make(where, x=rd),
+        "fs",
+        "x",
+        {"path": str(where / "ledger" / "l")},
+        {},
+        "hold",
+        "polarizer-files",
+        f"{a}: {where / 'ledger' / 'l'} is inside Polarizer's ledger directory",
+    )
+    yield (
+        10,
+        make(where, x=w),
+        "fs",
+        "x",
+        {"path": str(where / "polarizer.toml")},
+        {},
+        "hold",
+        "polarizer-files",
+        f"{a}: {where / 'polarizer.toml'} is Polarizer's config file",
+    )
+    yield (
+        11,
+        make(where, x=w),
+        "fs",
+        "x",
+        {"path": str(root / ".env")},
+        {},
+        "hold",
+        "write-pattern",
+        f"{a}: {root / '.env'} matches .env*",
+    )
+    yield (
+        12,
+        make(where, x=w),
+        "fs",
+        "x",
+        {"path": str(outside / "f")},
+        {},
+        "hold",
+        "outside-roots",
+        f"{a}: {outside / 'f'} is outside every workspace root",
+    )
+    yield (
+        12,
+        make(where, roots=False, x=w),
+        "fs",
+        "x",
+        {"path": str(root / "f")},
+        {},
+        "hold",
+        "outside-roots",
+        f"{a}: {root / 'f'} is outside every workspace root",
+    )
+    yield (
+        13,
+        make(where, x=w),
+        "fs",
+        "x",
+        {"path": str(root / "f")},
+        {},
+        "allow",
+        "inside-roots",
+        None,
+    )
+    yield (
+        14,
+        make(where, x=rd),
+        "fs",
+        "x",
+        {"path": str(root / ".env.local")},
+        {},
+        "hold",
+        "read-pattern",
+        f"{a}: {root / '.env.local'} matches .env*",
+    )
+    yield (
+        14,
+        make(where, x=ow),
+        "fs",
+        "x",
+        {"url": "/home/me/.aws/credentials"},
+        {},
+        "hold",
+        "read-pattern",
+        'argument "url": /home/me/.aws/credentials matches ~/.aws/**',
+    )
+    yield (
+        15,
+        make(where, x=rd),
+        "fs",
+        "x",
+        {"path": str(outside / "f")},
+        {},
+        "allow",
+        "local-read",
+        None,
+    )
+    yield (
+        15,
+        make(where, x=rd),
+        "fs",
+        "x",
+        {"path": str(root / "f")},
+        {},
+        "allow",
+        "local-read",
+        None,
+    )
+    yield 16, make(where, x=R("local-read")), "fs", "x", {}, {}, "allow", "local-read", None
+    yield (
+        17,
+        make(where, x=ow),
+        "fs",
+        "x",
+        {"url": str(outside / "f")},
+        {},
+        "allow",
+        "open-world",
+        None,
+    )
+    yield (
+        18,
+        make(where, x=R("open-world")),
+        "fs",
+        "x",
+        {"url": "https://example.com"},
+        {},
+        "allow",
+        "open-world",
+        None,
+    )
+    yield (
+        19,
+        make(where),
+        "t",
+        "x",
+        {},
+        {},
+        "hold",
+        "destructive",
+        "class destructive is held on every call (class from annotations)",
+    )
+    ro = {"annotations": {"readOnlyHint": True, "openWorldHint": False}}
+    yield 19, make(where), "t", "x", {}, ro, "allow", "local-read", None
+    lw = {"annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False}}
+    yield 19, make(where), "t", "x", {}, lw, "hold", "write-unchecked", "class local-write has no path_args, so its paths cannot be checked (class from annotations)"  # fmt: skip
+
+
+def test_rule_table(where):
+    """One case per row of section 4's table, each with its action, rule and reason exactly.
+    Row 20 acts after the rule function, in the gateway (test_holds.py::test_too_many_holds),
+    and its reason is checked here."""
+    seen = set()
+    for row, pol, prefix, tool, arguments, definition, action, rule, reason in rows(where):
+        v = policy.evaluate(pol, prefix, tool, arguments, definition)
+        assert (v.action, v.rule, v.reason) == (action, rule, reason), row
+        seen.add(row)
+    assert proxy.TOO_MANY == "too many held calls: 16 already wait in this session"
+    assert proxy.MAX_OPEN_HOLDS == 16
+    seen.add(20)
+    assert seen == set(range(1, 21))
+
+
+def test_verdict_records_the_class(where):
+    pol = make(where, x=R("local-read"))
+    v = policy.evaluate(pol, "fs", "x", {}, {})
+    assert (v.cls, v.class_from) == ("local-read", "config")
+    v = policy.evaluate(pol, "t", "y", {}, {})
+    assert (v.cls, v.class_from) == ("destructive", "annotations")
+    v = policy.evaluate(pol, "fs", "none", {}, {})
+    assert (v.cls, v.class_from) == (None, None)
+
+
+def test_first_match_order(where):
+    """Two path arguments, the first outside the roots and the second on a pattern: the first
+    argument's rule; reversed config order reverses it."""
+    args = {"a": str(where / "outside" / "f"), "b": str(where / "root" / ".git" / "config")}
+    v = policy.evaluate(make(where, x=R("local-write", ("a", "b"))), "fs", "x", args, {})
+    assert (v.rule, v.reason.startswith('argument "a"')) == ("outside-roots", True)
+    v = policy.evaluate(make(where, x=R("local-write", ("b", "a"))), "fs", "x", args, {})
+    assert (v.rule, v.reason.startswith('argument "b"')) == ("write-pattern", True)
+
+
+WRITE_PATHS = {
+    ".git/hooks/**": "<root>/.git/hooks/pre-commit",
+    ".git/config": "<root>/.git/config",
+    ".github/workflows/**": "<root>/.github/workflows/ci.yml",
+    "~/.ssh/**": "/home/me/.ssh/authorized_keys",
+    ".env*": "<root>/.env",
+    "~/.bashrc": "/home/me/.bashrc",
+    "~/.bash_profile": "/home/me/.bash_profile",
+    "~/.bash_login": "/home/me/.bash_login",
+    "~/.bash_logout": "/home/me/.bash_logout",
+    "~/.profile": "/home/me/.profile",
+    "~/.zshrc": "/home/me/.zshrc",
+    "~/.zshenv": "/home/me/.zshenv",
+    "~/.zprofile": "/home/me/.zprofile",
+    "~/.zlogin": "/home/me/.zlogin",
+    "~/.config/fish/**": "/home/me/.config/fish/config.fish",
+    "~/Documents/PowerShell/**": "/home/me/Documents/PowerShell/profile.ps1",
+    "~/Documents/WindowsPowerShell/**": "/home/me/Documents/WindowsPowerShell/profile.ps1",
+    ".claude/**": "<root>/.claude/settings.json",
+    ".mcp.json": "<root>/.mcp.json",
+    "~/.claude.json": "/home/me/.claude.json",
+    "~/.claude/**": "/home/me/.claude/settings.json",
+}
+READ_PATHS = {
+    "~/.ssh/**": "/home/me/.ssh/id_ed25519",
+    "~/.gnupg/**": "/home/me/.gnupg/private-keys-v1.d/k.key",
+    "~/.aws/**": "/home/me/.aws/credentials",
+    "~/.config/gh/**": "/home/me/.config/gh/hosts.yml",
+    "~/.netrc": "/home/me/.netrc",
+    "~/.git-credentials": "/home/me/.git-credentials",
+    "~/.claude/.credentials.json": "/home/me/.claude/.credentials.json",
+    ".env*": "<root>/.env.production",
+}
+
+
+def test_builtin_patterns_cannot_be_removed(where):
+    """Each built-in pattern holds with a config whose own lists are empty, with no way to
+    take one out. The resolver is replaced, so the home directory's files are never touched."""
+    assert set(WRITE_PATHS) >= set(paths.BUILTIN_WRITE)
+    assert set(READ_PATHS) == set(paths.BUILTIN_READ)
+    for builtin, listing, cls, rule in [
+        (paths.BUILTIN_WRITE, WRITE_PATHS, "local-write", "write-pattern"),
+        (paths.BUILTIN_READ, READ_PATHS, "local-read", "read-pattern"),
+    ]:
+        pol = make(where, x=R(cls, ("path",)))
+        pol.resolver = lambda p: p  # already resolved, by construction
+        for pattern in builtin:
+            path = listing[pattern].replace("<root>", str(where / "root"))
+            assert paths.matches(paths.compile_pattern(pattern, HOME), path, False), path
+            # The reason names the first pattern that matches, in the built-in order:
+            # ".claude/**" floats, so it comes before "~/.claude/**" for a home path.
+            first = next(
+                b for b in builtin if paths.matches(paths.compile_pattern(b, HOME), path, False)
+            )
+            v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
+            assert (v.rule, v.reason) == (rule, f'argument "path": {path} matches {first}'), path
+
+
+SUGGESTIONS = [
+    ({"readOnlyHint": True, "openWorldHint": False}, "local-read"),
+    ({"readOnlyHint": True, "destructiveHint": True, "openWorldHint": False}, "local-read"),
+    ({"readOnlyHint": True, "openWorldHint": True}, "open-world"),
+    ({"readOnlyHint": True}, "open-world"),
+    ({"readOnlyHint": False, "destructiveHint": True}, "destructive"),
+    ({"readOnlyHint": False}, "destructive"),
+    ({}, "destructive"),
+    ({"destructiveHint": False, "openWorldHint": False}, "local-write"),
+    ({"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True}, "egress"),
+    ({"destructiveHint": False}, "egress"),
+    (None, "destructive"),
+    ({"readOnlyHint": "yes", "openWorldHint": False}, "destructive"),
+    ({"readOnlyHint": True, "openWorldHint": 0}, "open-world"),
+]
+
+
+@pytest.mark.parametrize("annotations, cls", SUGGESTIONS)
+def test_annotation_suggestions(annotations, cls):
+    assert policy.suggested_class(annotations) == cls
+
+
+def test_contradiction_rank():
+    assert policy.contradicts("local-read", "destructive")
+    assert not policy.contradicts("destructive", "local-read")
+    assert not policy.contradicts("local-read", "open-world")
+    assert not policy.contradicts("open-world", "local-read")
+    assert policy.contradicts("local-write", "egress")
+    assert not policy.contradicts("egress", "destructive")
+
+
+def test_trusted_annotations_classify(where):
+    """No class on a trust_annotations upstream: the suggested class, recorded as from
+    annotations; a configured class wins."""
+    readonly = {"annotations": {"readOnlyHint": True, "openWorldHint": False}}
+    pol = make(where)
+    pol.upstreams["t"] = policy.UpstreamPolicy(True, {"cfg": R("egress")})
+    v = policy.evaluate(pol, "t", "free", {}, readonly)
+    assert (v.action, v.rule, v.cls, v.class_from) == (
+        "allow",
+        "local-read",
+        "local-read",
+        "annotations",
+    )
+    v = policy.evaluate(pol, "t", "cfg", {}, readonly)
+    assert (v.action, v.rule, v.cls, v.class_from) == ("hold", "egress", "egress", "config")
+    assert v.reason == "class egress is held on every call"
+    untrusted = make(where)
+    v = policy.evaluate(untrusted, "fs", "free", {}, readonly)
+    assert (v.rule, v.cls) == ("unclassified", None)

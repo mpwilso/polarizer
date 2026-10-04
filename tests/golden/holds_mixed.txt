@@ -1,0 +1,30 @@
+holds: 3 open
+
+hold 1000000000000001 fs__write_file local-write
+held by write-pattern: argument "path": /home/me/proj/.git/hooks/pre-commit matches .git/hooks/**
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit 32a3285d2ddd82bf91c1601ebf588198b7c3912815031beb4ea494fca6b67974, 80 bytes of arguments
+{
+  "path": "/home/me/proj/.git/hooks/pre-commit",
+  "content": "caf\u00e9 \u001b[31m red\u007f"
+}
+
+hold 2000000000000002 probe__wait unclassified
+held by unclassified: probe__wait has no class in polarizer.toml
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit f27ce0de3050b6e0ceb15af6531490de3375dd86e02a705538ddf070fc0f62ba, 13 bytes of arguments
+{
+  "seconds": 5
+}
+
+hold 3000000000000003 web__post_comment egress (from annotations)
+held by egress: class egress is held on every call (class from annotations)
+waiting about 7m30s; times out after 300 s
+session e2e2e2e2e2e2e2e2 started 2026-10-02T15:00:00.002Z, ended; no process will act on a decision
+args_commit 26e5cf221a3987f8183aeb410ebcab115cd71e4a4d5f3c1dcb197b7b38fbdc7a, 32 bytes of arguments
+{
+  "issue": 7,
+  "body": "Looks good."
+}

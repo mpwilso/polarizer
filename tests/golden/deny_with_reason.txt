@@ -1,0 +1,9 @@
+hold 2000000000000002 probe__wait unclassified
+held by unclassified: probe__wait has no class in polarizer.toml
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit f27ce0de3050b6e0ceb15af6531490de3375dd86e02a705538ddf070fc0f62ba, 13 bytes of arguments
+{
+  "seconds": 5
+}
+denied hold 2000000000000002 at seq 12

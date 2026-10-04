@@ -25,6 +25,7 @@ PROBE = ROOT / "tests" / "helpers" / "probe_server.py"
 STUB = ROOT / "tests" / "helpers" / "fake_claude.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 import rugpull_check  # noqa: E402
+from live_check import PROBE_TOOLS  # noqa: E402
 
 ORIGINAL = "Wait for a number of seconds."
 CHANGED = "Wait for a number of seconds. Changed after approval."
@@ -97,6 +98,8 @@ def test_setup_configs_differ_only_in_phase(tmp_path):
     assert list(toml["upstream"]) == ["probe"]
     env = toml["upstream"]["probe"]["env"]
     assert env == {"PROBE_LOG": str(tmp_path / "probe.log"), "PROBE_PHASE": "${PROBE_PHASE}"}
+    tools = toml["upstream"]["probe"]["tools"]
+    assert tools == {name: {"class": "local-read"} for name in PROBE_TOOLS} and len(tools) == 7
     configs = {
         phase: json.loads((tmp_path / f"mcp-{phase}.json").read_text(encoding="utf-8"))
         for phase in ("original", "changed")

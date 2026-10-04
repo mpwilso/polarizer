@@ -141,6 +141,20 @@
    "seq": 10,
    "status": "invalid"
   },
+  "broken/holds_edit_decision": {
+   "check": "hash",
+   "head": false,
+   "line": 9,
+   "seq": 8,
+   "status": "tampered"
+  },
+  "broken/holds_rehashed_decision": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 15,
+   "status": "tampered"
+  },
   "broken/insert_float": {
    "check": "structure",
    "head": false,
@@ -314,6 +328,13 @@
    "head": true,
    "line": 13,
    "seq": 12,
+   "status": "intact"
+  },
+  "valid/holds": {
+   "check": null,
+   "head": true,
+   "line": 19,
+   "seq": 18,
    "status": "intact"
   },
   "valid/minimal": {

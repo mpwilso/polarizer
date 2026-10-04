@@ -81,6 +81,10 @@ def test_setup_writes_both_configs(tmp_path):
     config = tomllib.loads((tmp_path / "polarizer.toml").read_text(encoding="utf-8"))
     assert config["ledger_dir"] == (tmp_path / "ledger").as_posix()
     assert config["upstream"]["probe"]["env"] == {"PROBE_LOG": str(tmp_path / "probe.log")}
+    # Every probe tool local-read, so the 14 s wait is never held (docs/HOLD-SPEC.md, 11).
+    tools = config["upstream"]["probe"]["tools"]
+    assert tools == {name: {"class": "local-read"} for name in live_check.PROBE_TOOLS}
+    assert len(tools) == 7
     server = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]["pz"]
     assert server["args"][:2] == [str(repo / "scripts" / "wiretap.py"), str(tmp_path / "wire.log")]
     assert server["args"][-2:] == ["--config", str(tmp_path / "polarizer.toml")]

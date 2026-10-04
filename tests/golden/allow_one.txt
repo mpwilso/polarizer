@@ -1,0 +1,10 @@
+hold 1000000000000001 fs__write_file local-write
+held by write-pattern: argument "path": /home/me/proj/.git/hooks/pre-commit matches .git/hooks/**
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit 32a3285d2ddd82bf91c1601ebf588198b7c3912815031beb4ea494fca6b67974, 80 bytes of arguments
+{
+  "path": "/home/me/proj/.git/hooks/pre-commit",
+  "content": "caf\u00e9 \u001b[31m red\u007f"
+}
+allowed hold 1000000000000001 at seq 12
