@@ -24,8 +24,8 @@
 #   0  snapshot: recorded, last line "snapshot <file>".  check: nothing changed.
 #   1  check: a change, each one printed.  Either command: the root .mcp.json warning (a snapshot
 #      is still recorded).
-#   2  usage error, no snapshot, or the state could not be read completely (find, git or python
-#      failed): a "guard: stopped" line on stderr says so. A snapshot that stops is left as
+#   2  usage error, no snapshot, or the state could not be read completely (git or python failed,
+#      or an entry was unreadable): a "guard: stopped" line on stderr says so. A snapshot that stops is left as
 #      .guard/partial-<UTC timestamp>.txt, never as snapshot-*.txt, so check can't use it.
 # guard.sh's exit code is its own. Chained after other commands (guard.sh snapshot && wc ...),
 # the shell reports the last command's code: on 2026-10-04 an exit 1 that looked like the
@@ -33,8 +33,11 @@
 #
 # Snapshots are never deleted. check also reads the older format, where the summarized directory
 # was stored line by line, by summarizing those lines the same way.
+#
+# It runs on macOS's bash 3.2 and BSD tools as well as on Linux: no bash 4 features, and the
+# metadata (path, size, mtime) comes from Python's lstat rather than GNU find -printf, stat -c or
+# date -d, in exactly the format GNU find printed it, so older snapshots still compare.
 set -euo pipefail
-shopt -s inherit_errexit  # a failure inside $(state) stops check too, not just snapshot
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 paths_file="$root/.guard-paths"
@@ -45,6 +48,7 @@ summary_paths=("$HOME/.local/share/parallax")
 meta_paths=("$HOME/.config/parallax" "$HOME/isr-notes" "$HOME/.claude/settings.json")
 claude_json="$HOME/.claude.json"
 shown=40
+tab=$'\t'  # a literal tab for sed: BSD sed has no escape for it
 
 repos() {
   [ -f "$paths_file" ] || { echo "no .guard-paths in $root" >&2; exit 2; }
@@ -79,8 +83,66 @@ for p in wanted:
 EOF
 }
 
+# Metadata only, from lstat; never opens a file. Symlinks are not followed. An entry it can't read
+# is reported on stderr and makes it exit 1, after the rest is listed (as find did).
+#   meta list PATH          "<path><TAB><size><TAB><mtime>" for PATH ("" as its path) and every
+#                           entry under it, as GNU find -printf "%P\t%s\t%T@\n" printed them
+#   meta info PATH          "<size> bytes, mtime <UTC time, whole seconds>"
+#   meta newer DIR EPOCH    every entry under DIR that is not a directory and is newer than EPOCH,
+#                           skipping anything named .git (find -name .git -prune -o ...)
+meta() {
+  python3 - "$@" <<'EOF'
+import os, stat, sys, time
+mode, top = sys.argv[1], os.fsencode(sys.argv[2])
+out, failed = sys.stdout.buffer, False
+
+def fail(path, e):
+    global failed
+    failed = True
+    print(f"guard: cannot read {os.fsdecode(path)}: {e.strerror}", file=sys.stderr)
+
+def visit(path, rel, st, emit, skip=lambda name: False):  # depth first, as find lists
+    emit(path, rel, st)
+    if not stat.S_ISDIR(st.st_mode):
+        return
+    try:
+        with os.scandir(path) as it:
+            children = list(it)
+    except OSError as e:
+        return fail(path, e)
+    for c in children:
+        if skip(c.name):
+            continue
+        try:
+            cst = c.stat(follow_symlinks=False)
+        except OSError as e:
+            fail(c.path, e)
+            continue
+        visit(c.path, rel + b"/" + c.name if rel else c.name, cst, emit, skip)
+
+def listed(path, rel, st):
+    ns = st.st_mtime_ns
+    out.write(b"%s\t%d\t%d.%09d0\n" % (rel, st.st_size, ns // 10**9, ns % 10**9))
+
+if mode == "list":
+    visit(top, b"", os.lstat(top), listed)
+elif mode == "info":
+    st = os.lstat(top)
+    when = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime_ns // 10**9))
+    print(f"{st.st_size} bytes, mtime {when}")
+elif mode == "newer":
+    since = int(sys.argv[3]) * 10**9
+    def newer(path, rel, st):
+        if not stat.S_ISDIR(st.st_mode) and st.st_mtime_ns > since:
+            out.write(path + b"\n")
+    if os.path.basename(top) != b".git":
+        visit(top, b"", os.lstat(top), newer, skip=lambda name: name == b".git")
+sys.exit(1 if failed else 0)
+EOF
+}
+
 listing() {  # "<path><TAB><size><TAB><mtime>" for every entry under $1, sorted; never contents
-  find "$1" -printf "%P\t%s\t%T@\n" | LC_ALL=C sort  # an unreadable entry stops the guard
+  meta list "$1" | LC_ALL=C sort  # an unreadable entry stops the guard
 }
 
 summarize() {  # stdin: listing lines; stdout: one summary line
@@ -97,25 +159,30 @@ print(f"files {len(lines)}, bytes {size}, newest {newest}, sha256 {digest}")'
 
 info_of() {
   [ -e "$1" ] || { echo "absent"; return; }
-  echo "$(stat -c %s "$1") bytes, mtime $(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)"
+  meta info "$1"
 }
 
-state() {  # the full state, one tab-separated line per item
+# The full state, one tab-separated line per item. A failing step must stop it, also when it runs
+# inside $(...), where bash turns -e off: callers use $(set -e; state). Every command substitution
+# in it is an assignment of its own, so its failure stops it too.
+state() {
+  local repo head p s info
   while IFS= read -r repo; do
-    printf 'repo:%s\thead\t%s\n' "$repo" "$(git -C "$repo" rev-parse HEAD)"
-    git -C "$repo" --no-optional-locks status --porcelain --ignored | sed "s#^#repo:$repo\tstatus\t#"
+    head=$(git -C "$repo" rev-parse HEAD)
+    printf 'repo:%s\thead\t%s\n' "$repo" "$head"
+    git -C "$repo" --no-optional-locks status --porcelain --ignored | sed "s#^#repo:$repo${tab}status${tab}#"
   done < <(repos)
-  local p s
   for p in "${summary_paths[@]}"; do
     if [ -e "$p" ]; then s=$(listing "$p" | summarize); printf 'sum:%s\t%s\n' "$p" "$s"
     else printf 'sum:%s\tabsent\n' "$p"; fi
   done
   for p in "${meta_paths[@]}"; do
-    if [ -e "$p" ]; then listing "$p" | sed "s#^#meta:$p\t#"
+    if [ -e "$p" ]; then listing "$p" | sed "s#^#meta:$p${tab}#"
     else printf 'meta:%s\tabsent\n' "$p"; fi
   done
   mcp_hashes | sed 's#^#hash:#'
-  printf 'info:%s\t%s\n' "$claude_json" "$(info_of "$claude_json")"
+  info=$(info_of "$claude_json")
+  printf 'info:%s\t%s\n' "$claude_json" "$info"
 }
 
 sections() {
@@ -146,8 +213,9 @@ old_summary() {
 
 snapshot() {
   mkdir -p "$state_dir"
-  local epoch at file partial
-  epoch=$(date -u +%s); at=$(date -u -d "@$epoch" +%Y%m%dT%H%M%SZ)
+  local stamp epoch at file partial
+  stamp=$(date -u +%s.%Y%m%dT%H%M%SZ)  # one call, so both name the same second
+  epoch=${stamp%%.*}; at=${stamp#*.}
   file="$state_dir/snapshot-$at.txt"; partial="$state_dir/partial-$at.txt"
   [ -e "$file" ] && { echo "snapshot $file already exists; wait a second" >&2; exit 2; }
   trap "stopped \$? 'no snapshot recorded; what was read is in $partial'" EXIT
@@ -183,7 +251,7 @@ check() {
   epoch=$(grep '^#epoch' "$file" | cut -f2)
   echo "since $(basename "$file")"
   trap 'stopped $? "nothing was compared"' EXIT
-  now=$(state)
+  now=$(set -e; state)
   trap - EXIT
   # Summarized directories are compared on their own below, in either snapshot format.
   local skip=()
@@ -204,16 +272,16 @@ check() {
     esac
     d=$(grep -F "$sec	" <<< "$diffs" || true)
     newer=""
-    case "$sec" in repo:*) newer=$(find "${sec#repo:}" -name .git -prune -o ! -type d -newermt "@$epoch" -print);; esac
+    case "$sec" in repo:*) newer=$(meta newer "${sec#repo:}" "$epoch");; esac
     if [ -z "$d" ] && [ -z "$newer" ]; then echo "${sec/:/ }: no changes"; continue; fi
     changed=1
-    if [ -n "$d" ]; then echo "${sec/:/ }: changed"; sed "s#$sec\t##; s#\t# #g" <<< "$d" | show; fi
+    if [ -n "$d" ]; then echo "${sec/:/ }: changed"; sed "s#$sec${tab}##; s#${tab}# #g" <<< "$d" | show; fi
     if [ -n "$newer" ]; then echo "${sec/:/ }: files modified since the snapshot"; show <<< "$newer"; fi
   done < <(sections)
   h=$(grep '^[<>] hash:' <<< "$diffs" || true)
   if [ -n "$h" ]; then
     echo "hash: MCP config in $claude_json changed"; changed=1
-    sed 's#hash:##' <<< "$h" | awk -F'\t' '{print "    " $1 ": " substr($2, 1, 16)}'
+    sed 's#hash:##' <<< "$h" | awk -F "$tab" '{print "    " $1 ": " substr($2, 1, 16)}'
   else
     echo "hash: MCP config in $claude_json unchanged ($(grep -c '^hash:' <<< "$now") locations)"
   fi

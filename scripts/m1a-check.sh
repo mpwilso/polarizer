@@ -251,7 +251,7 @@ cmd_reset() {
   echo "removed $RUGPULL and $LEDGER"
 
   write_toml m1a
-  grep -n 'ledger_dir\|PROBE_RUGPULL' "$TOML"
+  grep -n -e ledger_dir -e PROBE_RUGPULL "$TOML"
   toml_ready || stop "the M1a lines did not apply to $TOML; compare it with $EXAMPLE"
   printf -- '-- reset: complete\n\n%s\n' "$START"
 }

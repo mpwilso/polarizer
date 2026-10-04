@@ -443,7 +443,10 @@ def test_reset_refusals(check):
         for command in ("reset", "finish"):
             code, out = drive(env, command)
             assert code == 1
-            assert f"{probe.pid} {sys.executable} {base}/probe_server.py" in out
+            # The pid and the script path only: on macOS, ps shows the framework Python.app
+            # binary that a venv's python execs, not sys.executable.
+            listed = rf"^\s*{probe.pid} .+ {re.escape(str(base))}/probe_server\.py$"
+            assert re.search(listed, out, re.MULTILINE), out
             assert (
                 f"stop them with: kill {probe.pid}. Then run: scripts/m1a-check.sh {command}" in out
             )
