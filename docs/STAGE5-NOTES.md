@@ -203,7 +203,8 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 - **Tests:** a stub claude (`tests/helpers/fake_claude.py`, named by `CLAUDE_BIN` only under `POLARIZER_CHECK_TESTING=1`) starts the Polarizer its config names and calls `probe__wait` only if it is listed. Its modes make B reach the probe (it approves the new definition mid-run, standing in for a Polarizer that lets it through), stop the drift (the probe kept in its original phase), tamper with the ledger after run C, and exit 1 in run B.
 - **Repeated runs:** `tests/test_rugpull_check.py`, five times in a row: 12 passed each time, in 32.4 to 32.6 s, with no probe or serve process left running after any of them.
 - **Pre-push scan:** every tracked file in the commit (`git grep --cached`), and the commit's message, author and committer, searched case-insensitively for the eight private strings the owner listed. Counts only: all 0.
-- **Not run:** the script with real Claude Code (the owner runs it), CI, and shellcheck (not installed; `bash -n` passed).
+- **Run once with real Claude Code** by the owner, after the commit: all nine checks passed (verified-facts.md, Rug-pull check).
+- **Not run:** CI, and shellcheck (not installed; `bash -n` passed).
 
 ## Claims
 
@@ -268,4 +269,4 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 | The new test file passes five times in a row and leaves no process running | `pytest tests/test_rugpull_check.py`, five times | yes, 5 of 5 |
 | The whole suite, ruff and the docs check, with the rug-pull check | `scripts/test.sh` | yes: 536 passed, 7 skipped, in 148.1 s |
 | shellcheck on `scripts/rugpull-check.sh` | `shellcheck scripts/rugpull-check.sh` | no: not installed; `bash -n` passed |
-| The rug pull end to end with real headless Claude Code | `scripts/rugpull-check.sh` | no: for the owner |
+| The rug pull end to end with real headless Claude Code | `scripts/rugpull-check.sh` | yes, by the owner, once, on 2026-10-04 with Claude Code 2.1.289: all nine checks passed, 0.045 USD, started from inside a Claude Code session (verified-facts.md, Rug-pull check) |

@@ -621,6 +621,27 @@ Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts
 
 So for Claude Code 2.1.289, interactive Claude Code lists the tools again after Polarizer's change notice, without a reconnect, for both a first approval and an approval of a changed definition (PIN-SPEC.md, decision 9).
 
+## Rug-pull check (Oct 4, 2026, headless, Claude Code 2.1.289)
+
+`scripts/rugpull-check.sh`, run once by the owner, at commit a46cbc8. Three `claude -p` runs with `--model haiku`, `--strict-mcp-config`, a generated `--mcp-config` (one per phase, differing only in `PROBE_PHASE`), `--allowedTools=mcp__pz__probe__wait`, `--permission-mode default`, `--no-session-persistence` and `--output-format json`, stdin from `/dev/null`, `MCP_TOOL_TIMEOUT` unset (it was unset before too). Auto mode was not set by the script; user-scope settings were not read. The owner started it with `!` from inside a Claude Code session, not from a plain terminal, so that session's `CLAUDE_CODE_*` variables (names only, listed by the script) were set for the three runs. The results come from the script's output, which the owner pasted into that session.
+
+| Check | Result |
+|---|---|
+| A: the probe received `tools/call wait` | PASS: 1 during run A |
+| A: `call.sent` and `call.returned` outcome `ok` for `probe__wait` | PASS: seq 20 and 21 |
+| B: `tool.drift` for probe wait, with different `approved_hash` and `live_hash` | PASS: seq 24, approved `ac0778cf2bd27c6f...`, live `9214f449513a1334...` |
+| B: the probe received no `tools/call wait` | PASS: 0 |
+| B: no `call.sent` for `probe__wait` in B's session | PASS: 0 `call.sent`, 0 `call.refused` |
+| The approval: `tool.approved` for the new hash | PASS: seq 26 |
+| C: the probe received `tools/call wait` | PASS: 1 during run C |
+| C: `call.sent` and `call.returned` outcome `ok` for `probe__wait` | PASS: seq 30 and 31 |
+| The ledger verifies as intact | PASS: 32 entries, 4 sessions, 2 calls |
+
+- **The model replied** (information only, not used for pass or fail): A, "The tool waited for 1 second as requested."; B, "The tool `mcp__pz__probe__wait` is not available."; C, "The tool executed successfully and waited for 1 second as requested."
+- **Cost,** from Claude Code's own `total_cost_usd`: A 0.0237063, B 0.0111517 and C 0.0103563 USD, 0.045214 USD in total.
+- **No serve process** for the check's config was left running after any run. Every check passed, so the temp directory and its ledger were removed.
+- **Bookkeeping:** `~/.claude.json` went from 91,602 bytes (mtime 16:40:49Z) to 89,343 bytes (16:42:34Z) during the runs. `scripts/guard.sh check` afterwards found its MCP config unchanged in all 6 locations, and nothing else changed.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
