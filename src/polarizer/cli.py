@@ -9,10 +9,14 @@ error among them exits 2, and ledger statuses keep their own codes.
 
 import argparse
 import os
+import signal
 import sys
+import threading
 from pathlib import Path
 
 import anyio
+import anyio.from_thread
+import anyio.lowlevel
 
 from polarizer import config, defhash, ledgerdir, pins, sidefiles, writer
 from polarizer.decisions import Decider, Refusal, fold_reason
@@ -256,7 +260,8 @@ def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
 
 def serve(config_path: Path) -> int:
     """polarizer serve (PROXY-SPEC.md, Startup): read the config, check ledger_dir's location,
-    open the ledger, then serve MCP over stdio until the client closes stdin."""
+    open the ledger, then serve MCP over stdio until end of input or a signal, and shut down
+    (PIN-SPEC.md, section 8). Exits 0 after a shutdown."""
     try:
         cfg = config.load(config_path)
     except config.ConfigError as e:
@@ -282,7 +287,112 @@ def serve(config_path: Path) -> int:
     return 0
 
 
+# Upstream clients get this long, in total, to close at shutdown (PIN-SPEC.md, section 8).
+CLOSE_UPSTREAMS_BOUND = 1.0
+
+
+class _Shutdown:
+    """serve's one shutdown path. SIGINT, SIGTERM (POSIX) and end of input all start it; a
+    signal while it runs skips the wait for upstream clients."""
+
+    def __init__(self, gateway):
+        self.gateway = gateway
+        self.requested = False
+        self.hurry = False
+        self.phase = None  # the cancel scope of what runs now: startup, serving or step 2
+
+    def request(self) -> None:
+        if self.requested:
+            return
+        self.requested = True
+        self.gateway.begin_shutdown()  # before anything is cancelled: calls see the flag
+        if self.phase is not None:
+            self.phase.cancel()
+
+    def signal(self) -> None:
+        if not self.requested:
+            self.request()
+            return
+        self.hurry = True
+        if self.phase is not None:
+            self.phase.cancel()
+
+
+async def _signals(stop: _Shutdown) -> None:
+    """Deliver SIGINT and SIGTERM to the shutdown path. On Windows only Ctrl+C (SIGINT)
+    applies; anyio has no signal receiver there."""
+    if sys.platform == "win32":
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(stop.signal))
+        await anyio.sleep_forever()
+    with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as received:
+        async for _ in received:
+            stop.signal()
+
+
+class _StdinLines:
+    """serve's stdin for the SDK's stdio_server, one line at a time.
+
+    The SDK reads stdin on an anyio worker thread, which a cancel can't interrupt and which
+    isn't a daemon thread, so a signal while the client keeps stdin open would hang shutdown
+    until stdin closed. This reads file descriptor 0 with os.read on a daemon thread instead
+    (no buffered reader, whose lock a blocked daemon thread would hold), hands each line over,
+    and calls `on_end` at end of input before the stream ends, so the shutdown flag is set
+    before the SDK cancels the calls in flight."""
+
+    def __init__(self, on_end):
+        self._on_end = on_end
+        self._send, self._receive = anyio.create_memory_object_stream[str](1)
+        self._thread = None
+
+    def __aiter__(self):
+        if self._thread is None:
+            token = anyio.lowlevel.current_token()
+            self._thread = threading.Thread(
+                target=self._read, args=(token,), name="polarizer-stdin", daemon=True
+            )
+            self._thread.start()
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            return await self._receive.receive()
+        except (anyio.EndOfStream, anyio.ClosedResourceError):
+            raise StopAsyncIteration from None
+
+    def _read(self, token) -> None:
+        try:
+            pending = b""
+            while True:
+                try:
+                    chunk = os.read(0, 65536)
+                except OSError:
+                    chunk = b""  # a broken pipe (how Windows may report it) is end of input too
+                if not chunk:
+                    break
+                *lines, pending = (pending + chunk).split(b"\n")
+                for raw in lines:
+                    line = raw.decode("utf-8", "replace") + "\n"
+                    anyio.from_thread.run(self._send.send, line, token=token)
+            if pending:
+                line = pending.decode("utf-8", "replace")
+                anyio.from_thread.run(self._send.send, line, token=token)
+            anyio.from_thread.run_sync(self._end, token=token)
+        except (RuntimeError, anyio.BrokenResourceError, anyio.ClosedResourceError):
+            pass  # the event loop or the receiver is gone: serve is already shutting down
+
+    def _end(self) -> None:
+        self._on_end()
+        self._send.close()
+
+
 async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.PinState) -> None:
+    """Startup, serving, then the shutdown path of PIN-SPEC.md, section 8: cancel the calls in
+    flight (each records call.returned), close the upstream clients in parallel within
+    CLOSE_UPSTREAMS_BOUND, and close the writer. End of input during startup doesn't cancel
+    it, since stdin is read only once serving begins; a signal does."""
     from mcp import StdioServerParameters
     from mcp.server.stdio import stdio_server
 
@@ -298,8 +408,34 @@ async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.
         for u in cfg.upstreams
     ]
     gateway = Gateway(specs, ledger, config_sha256=cfg.sha256, pins=state)
-    async with gateway.running():
-        async with stdio_server() as (read_stream, write_stream):
-            await gateway.server.run(
-                read_stream, write_stream, gateway.server.create_initialization_options()
-            )
+    stop = _Shutdown(gateway)
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(_signals, stop)
+        with anyio.CancelScope() as stop.phase:
+            await gateway.start(tasks)
+        if not stop.requested:
+            with anyio.CancelScope() as stop.phase:
+                async with stdio_server(stdin=_StdinLines(stop.request)) as (read, write):
+                    options = gateway.server.create_initialization_options()
+                    await gateway.server.run(read, write, options)
+        stop.request()  # step 1: the calls in flight were cancelled with serving
+        if not stop.hurry:
+            with anyio.CancelScope() as stop.phase:  # step 2; a second signal cancels it
+                await gateway.close_upstreams(CLOSE_UPSTREAMS_BOUND)
+        with anyio.CancelScope(shield=True):  # step 3
+            await anyio.to_thread.run_sync(ledger.close)
+        _exit_now()
+
+
+def _exit_now() -> None:
+    """End serve with 0 once its writer is closed. Nothing is left to do, and a normal exit
+    would still tear down: an upstream still in the SDK's shielded shutdown (which anyio can't
+    abandon) would hold the process, and a signal arriving after the receiver closes would get
+    the operating system's default action. An upstream left running sees end of input when
+    Polarizer's pipes close."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            pass
+    os._exit(0)

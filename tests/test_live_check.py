@@ -84,3 +84,31 @@ def test_setup_writes_both_configs(tmp_path):
     server = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]["pz"]
     assert server["args"][:2] == [str(repo / "scripts" / "wiretap.py"), str(tmp_path / "wire.log")]
     assert server["args"][-2:] == ["--config", str(tmp_path / "polarizer.toml")]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="live-check.sh is POSIX only: its config names .venv/bin/python"
+)
+def test_prime_exposes_the_probe_tool(tmp_path, capsys):
+    """live_check.py prime, with no Claude Code and no model: a serve run with stdin closed
+    records the probe's definitions, and the group approval approves every one, so the next
+    serve exposes probe__wait."""
+    from polarizer.decisions import Decider
+
+    repo = Path(__file__).resolve().parent.parent
+    live_check.setup(tmp_path, repo)
+    assert live_check.prime(tmp_path) == 0
+    assert capsys.readouterr().out.startswith("prime: approved 7 definitions as group ")
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / "ledger" / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    approved = {e["data"]["tool"] for e in entries if e["kind"] == "tool.approved"}
+    assert "wait" in approved and len(approved) == 7
+    assert not [e for e in entries if e["kind"].startswith("call.")]  # nothing was called
+    decider = Decider.open(tmp_path / "ledger")
+    try:
+        assert decider.pending_group() == ([], None)
+    finally:
+        decider.close()
+    assert "tools/call" not in (tmp_path / "probe.log").read_text(encoding="utf-8")

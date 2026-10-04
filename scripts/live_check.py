@@ -1,8 +1,15 @@
 """The parts of scripts/live-check.sh that are easier in Python: writing its two config files,
-and deciding pass or fail from the logs. Standard library only.
+priming its ledger, and deciding pass or fail from the logs. Standard library only, apart from
+`prime`, which imports Polarizer (live-check.sh runs this with the repo's .venv python).
 
     live_check.py setup <dir> <repo>   writes <dir>/polarizer.toml and <dir>/mcp.json
+    live_check.py prime <dir>          records and approves the probe's tools (no model)
     live_check.py check <dir>          reads <dir>/wire.log, probe.log, ledger/ and claude.json
+
+From M1a no tool is exposed until a person approves it, so the probe's wait would be hidden
+from the model. `prime` does what a new user does once (docs/PIN-SPEC.md, section 7, First run):
+`polarizer serve` with stdin closed, which lists the probe and records its definitions, then
+the group approval `polarizer approve --group` would make, through the same library code.
 
 The check passes only if both hold (docs/m0-plan.md, build step 7):
 - the probe's log shows notifications/cancelled within 2 seconds of Claude Code's own cancel
@@ -45,6 +52,36 @@ def setup(directory: Path, repo: Path) -> None:
         }
     }
     (directory / "mcp.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+
+def prime(directory: Path) -> int:
+    """Prime <dir>/ledger: a serve run with stdin closed, then approve the pending group.
+    Prints one line and returns the exit code."""
+    import subprocess
+
+    from polarizer.decisions import Decider
+
+    config = directory / "polarizer.toml"
+    serve = [sys.executable, "-m", "polarizer", "serve", "--config", str(config)]
+    done = subprocess.run(serve, stdin=subprocess.DEVNULL, capture_output=True, timeout=120)
+    if done.returncode != 0:
+        print(f"prime: serve exited {done.returncode}: {done.stderr.decode('utf-8', 'replace')}")
+        return 1
+    decider = Decider.open(directory / "ledger")
+    try:
+        members, group_id = decider.pending_group()
+        if group_id is None:
+            print("prime: nothing to approve")
+            return 1
+        errors: list[str] = []
+        code = decider.approve_group(group_id, None, lambda line: None, errors.append)
+    finally:
+        decider.close()
+    if code != 0:
+        print(f"prime: approving failed: {'; '.join(errors)}")
+        return 1
+    print(f"prime: approved {len(members)} definitions as group {group_id}")
+    return 0
 
 
 def _messages(lines: list[str], direction: str | None = None) -> list[tuple[float, dict]]:
@@ -141,6 +178,8 @@ def main(argv: list[str]) -> int:
     if len(argv) == 4 and argv[1] == "setup":
         setup(Path(argv[2]), Path(argv[3]))
         return 0
+    if len(argv) == 3 and argv[1] == "prime":
+        return prime(Path(argv[2]))
     if len(argv) == 3 and argv[1] == "check":
         return check(Path(argv[2]))
     print(__doc__, file=sys.stderr)

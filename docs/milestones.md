@@ -20,6 +20,11 @@ The order puts M2b before the practice range, because the range's exfiltration c
 | Stretch | Anchoring and signatures | A signed checkpoint (chain id, size, head hash) is anchored in a commit trailer, and verify reports the last anchored position. | medium |
 | Stretch | Parallax and ISR adoption | Parallax gets a dual-version verifier and the identical `conformance/` folder. One Parallax task routes its MCP calls through Polarizer, and ISR names what the agents touched. This needs a separate, explicit prompt, run in its own session and branch with that project's tests. | large |
 
+## Status
+
+- **M0:** built in stages 1 to 3. The owner ran parts of its manual check interactively: Esc to cancel and the `/mcp` names (docs/verified-facts.md, Interactive and Manual check follow-up). The hung upstream and closing a session during a call are still unverified.
+- **M1a:** built in stages 4 and 5 (docs/STAGE4-NOTES.md, docs/STAGE5-NOTES.md). It pins definitions only: no scanning, no policy, no holds. It is done when the owner's M1a manual check (docs/MANUAL-CHECK.md, M1a section) and CI on all three platforms pass.
+
 ## Carry-forward notes
 
 From the M1a spec round (docs/PIN-SPEC.md, section 8). They change no size or done-when.

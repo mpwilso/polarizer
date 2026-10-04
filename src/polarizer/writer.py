@@ -215,6 +215,7 @@ class LedgerWriter:
         self._idle_fsync = idle_fsync
         self._dirty = False
         self._stopped: str | None = None
+        self._closed = False
         self._queue: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._run, name="polarizer-ledger", daemon=True)
         self._thread.start()
@@ -308,6 +309,9 @@ class LedgerWriter:
         future: Future = Future()
         if durable is None:
             durable = kind in SECURITY_KINDS
+        if self._closed:
+            future.set_exception(Stopped("polarizer: the ledger writer is closed", 1))
+            return future
         self._queue.put((kind, data, durable, future))
         return future
 
@@ -319,6 +323,9 @@ class LedgerWriter:
         on_entry. The future resolves to the number of entries adopted, or raises Stopped.
         If the file hasn't grown, nothing is read and the lock isn't taken."""
         future: Future = Future()
+        if self._closed:
+            future.set_exception(Stopped("polarizer: the ledger writer is closed", 1))
+            return future
         self._queue.put((_CATCH_UP, None, False, future))
         return future
 
@@ -331,6 +338,11 @@ class LedgerWriter:
         return self._stopped
 
     def close(self) -> None:
+        """Write what is queued, fsync if anything is unsynced, and release the files. A second
+        call does nothing; an append after it fails at once with Stopped."""
+        if self._closed:
+            return
+        self._closed = True
         self._queue.put(None)
         self._thread.join()
         if self._dirty:
@@ -353,9 +365,17 @@ class LedgerWriter:
                         future.set_result(self._append(kind, data, durable))
                 except BaseException as e:
                     future.set_exception(e)
-            if self._queue.empty() and self._dirty and self._idle_fsync:
-                self._ops.fsync(self._fd)
-                self._dirty = False
+            if self._queue.empty() and self._dirty and self._idle_fsync and not self._stopped:
+                try:
+                    self._ops.fsync(self._fd)
+                    self._dirty = False
+                except OSError as e:
+                    # An exception here would end this thread and leave every later append
+                    # waiting forever; stop writing instead, as for a ledger that changed.
+                    try:
+                        self._stop(f"could not fsync the ledger: {e}")
+                    except Stopped:
+                        pass
 
     def _append(self, kind: str, data: dict, durable: bool) -> Appended:
         if self._stopped:

@@ -4,6 +4,7 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## Changes from the last version
 
+- **M1a (stages 4 and 5, Oct 3 and 4, 2026):** pins are built to docs/PIN-SPEC.md, which is their contract; this plan's appendix is history. M0's behavior, every listed tool exposed at once, is the code at commit 4eaa61a, and docs/MANUAL-CHECK.md's steps 1 to 8 describe that commit; its M1a section covers the current code. The probe gained a `change` tool and `PROBE_RUGPULL` (build step 6), and the live check primes its ledger (build step 7).
 - **Stage 3:** results are compared with direct calls, and the SDK's own changes to them are stated limits (PROXY-SPEC.md, Results); the reference Filesystem server is pinned for the manual check and the local reference tests; the live check generates its config in a temp directory and makes one 14 s call; the quickstart draft is `docs/QUICKSTART-DRAFT.md`; M1a must record a failed refresh and never read it as "unchanged".
 - **Stage 1 review:** `protected_paths` renamed `ledger_forbidden_paths` ("protected paths" is kept for M2a), a differential fuzz test, `mcp` pinned to 2.2.0, CI actions pinned by commit SHA, and `docs/PUSHING.md`.
 - **Revision 7** (the implementation session's step 0, second round):
@@ -48,7 +49,7 @@ Read after CLAUDE.md, and with docs/LEDGER-SPEC.md (the ledger format), docs/PRO
 
 ## What M0 is and when it's done
 
-`polarizer serve` is a stdio MCP server that Claude Code starts from an MCP config file (in this repository, only one passed with `--mcp-config`; CLAUDE.md rule 13). It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope). The few ways the MCP SDK itself changes results and tool definitions are stated limits (PROXY-SPEC.md, Results).
+`polarizer serve` is a stdio MCP server that Claude Code starts from an MCP config file (in this repository, only one passed with `--mcp-config`; CLAUDE.md rule 13). It connects to the upstreams in `polarizer.toml`, lists their tools as `<prefix>__<tool>`, forwards calls, and records each call in the ledger. From M1a it lists only tools whose definitions a person approved (docs/PIN-SPEC.md). "Unchanged" means every upstream tool works with the same arguments and gives the same results; only the names gain a prefix. M0 is tools only (PROXY-SPEC.md, Scope). The few ways the MCP SDK itself changes results and tool definitions are stated limits (PROXY-SPEC.md, Results).
 
 M0 is done when all of these hold, and you've confirmed the manual checklist:
 
@@ -85,7 +86,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - The file is stdlib-only at `22ef600`. The Parallax package is never imported.
 5. **The proxy**, as in PROXY-SPEC.md: `upstream.py`, `proxy.py`, and `serve` added to `cli.py`. Steps 5 and 6 are implementation stage 2.
 6. **Test servers.**
-   - `tests/helpers/probe_server.py`: a stdlib MCP server that reads stdin on its own thread and runs each call on a worker. Its main tool is `wait(seconds)` (stage 2 added `crash`, `env` and `fail` for tests). It sends progress every second when given a token, logs every inbound message with a timestamp, and can delay its handshake (`PROBE_DELAY`).
+   - `tests/helpers/probe_server.py`: a stdlib MCP server that reads stdin on its own thread and runs each call on a worker. Its main tool is `wait(seconds)` (stage 2 added `crash`, `env` and `fail` for tests, stage 3 `rich` and `invalid`, and stage 5 `change`, which changes `wait`'s definition mid-session, and `PROBE_RUGPULL`, which changes it on every start after the first). It sends progress every second when given a token, logs every inbound message with a timestamp, and can delay its handshake (`PROBE_DELAY`).
    - In-memory fake upstreams built on the SDK's low-level `Server`, covering:
      - both protocol eras, with a TTL cache hint and a listen bus;
      - errors of each outcome type;
@@ -102,6 +103,8 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
      - the probe's log shows `notifications/cancelled` within 2 seconds of Claude Code's cancel;
      - the ledger has a `call.returned` with outcome `cancelled` for that call.
    - **Otherwise** it exits 1 and names the failed check.
+
+   - **(M1a)** Before it runs `claude`, it primes its temp ledger with no model call: a `serve` run with stdin closed, then the group approval through the library (`live_check.py prime`), so the probe's tools are exposed.
 
    It is manual only: it calls a model, so it's a script, never a CI test. It reports `~/.claude.json` bookkeeping. Steps 7 and 8 are implementation stage 3, with `docs/MANUAL-CHECK.md` (the checklist below) and the claims table.
 8. **Manual-check files:** `manual/mcp.json.example` (the filled-in `manual/mcp.json` is gitignored and passed with `--mcp-config`; there is no `.mcp.json` at the repo root) and `polarizer.example.toml`, with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
@@ -159,12 +162,13 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 | Results through the proxy equal direct results, apart from the SDK's stated limits, which are pinned exactly; an unreadable result gives a fixed line and no result data in the ledger | `pytest tests/test_fidelity.py` | yes, Linux (stage 3) |
 | The pinned Everything and Filesystem servers list the same tools and give the same results through the proxy, apart from the stated limits | `POLARIZER_REFERENCE=1 pytest tests/test_reference.py` (local only, never in CI) | yes, Linux (stage 3) |
 | live-check's pass and fail decision, on made-up logs | `pytest tests/test_live_check.py` | yes, Linux (stage 3) |
-| End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | yes, once, headless: Claude Code 2.1.288, haiku, Linux (stage 3) |
+| End to end with Claude Code: the upstream gets `notifications/cancelled` within 2 s of Claude Code's cancel, and the ledger records `cancelled` | `scripts/live-check.sh` (manual) | yes, once, headless: Claude Code 2.1.288, haiku, Linux (stage 3); not run since stage 5 primed it |
+| M1a: pins at rest, in motion, and shutdown | the claims tables in docs/STAGE4-NOTES.md and docs/STAGE5-NOTES.md | see those tables |
 
 ## Manual checklist (M0 isn't done until you confirm)
 
 1. **Forbidden paths.** Before the first real run, confirm that the gitignored `~/code/polarizer/polarizer.toml` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr` in `ledger_forbidden_paths`.
-2. **A real session.** Use `manual/mcp.json` in `~/code/polarizer`, passed with `--mcp-config`, never project or user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Filesystem server. Pre-warm the pinned Filesystem server once first. docs/MANUAL-CHECK.md has the exact commands for this checklist. From a terminal in `~/code/polarizer`, never from inside another Claude Code session, start `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config` and use both servers' tools. The ledger is `~/.local/share/polarizer-manual`, from `polarizer.example.toml`. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
+2. **A real session.** These steps describe M0 at commit 4eaa61a; from M1a, docs/MANUAL-CHECK.md's M1a section adds the first run and the approvals. Use `manual/mcp.json` in `~/code/polarizer`, passed with `--mcp-config`, never project or user scope. It starts `polarizer serve --config /home/<you>/code/polarizer/polarizer.toml` (an absolute path) in front of the probe and the Filesystem server. Pre-warm the pinned Filesystem server once first. docs/MANUAL-CHECK.md has the exact commands for this checklist. From a terminal in `~/code/polarizer`, never from inside another Claude Code session, start `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config` and use both servers' tools. The ledger is `~/.local/share/polarizer-manual`, from `polarizer.example.toml`. Then run `polarizer verify --config /home/<you>/code/polarizer/polarizer.toml` and expect output in this form:
 
    ```
    intact: 31 entries, 2 sessions, 12 calls

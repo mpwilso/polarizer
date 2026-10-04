@@ -13,7 +13,8 @@ from helpers.fakes import FakeUpstream
 from mcp import Client
 
 
-async def _next_event(subscription, seconds=2):
+async def _next_event(subscription, seconds=10):
+    # Up to about 1 s since stage 5: change notices are sent at most once a second.
     with anyio.fail_after(seconds):
         return await subscription.__anext__()
 
@@ -190,7 +191,7 @@ def test_eras(tmp_path):
                 async with modern.listen(tools_list_changed=True) as subscription:
                     await modern.call_tool("f__change", {})
                     await _next_event(subscription)
-                with anyio.fail_after(2):
+                with anyio.fail_after(10):  # at most one notice a second, as above
                     while not notices:
                         await anyio.sleep(0.01)
 

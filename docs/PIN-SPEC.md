@@ -194,7 +194,7 @@ Pin state is the latest decision per tool, so losing the end of the ledger could
 ### Triggers
 
 - **Startup:** the listing that connects each upstream (PROXY-SPEC.md, Startup step 5).
-- **An upstream's change notice:** a listen event from a 2026-07-28 upstream, or `notifications/tools/list_changed` from an older-era one. That upstream is listed again. At most one refresh per upstream runs at a time, and notices that arrive during one cause exactly one more afterwards.
+- **An upstream's change notice:** a listen event from a 2026-07-28 upstream, or `notifications/tools/list_changed` from an older-era one. That upstream is listed again. At most one refresh per upstream runs at a time, and notices that arrive during one cause exactly one more afterwards. "One at a time" holds across triggers: a listing waits for any other listing of the same upstream (a client's, a notice's or the retry timer's) to finish, so results are applied in the order the listings started. A notice that arrives during startup is acted on once startup is done.
 - **Every client `tools/list`:** every connected upstream is listed again, each bounded by its `connect_timeout_seconds`, as in M0.
 - **A new entry from another process** (section 8): pin state is updated and exposure recomputed, with no upstream listing.
 - **A lost connection:** the upstream's tools are hidden at once.
@@ -236,7 +236,7 @@ A tool hides as soon as a trigger puts it in any state but approved. It comes ba
 
 ### Telling the client
 
-After each trigger, `serve` compares the exposed list (the exact served definitions, in order) with the list it last announced or returned. If it differs, it publishes `ToolsListChanged()` on its listen bus for 2026-07-28 clients and calls `send_tool_list_changed()` on each older-era session, as M0 does for upstream notices. Notices are sent at most once per second; a change inside that second is folded into one notice at its end. An upstream notice that changes nothing in the exposed list is no longer passed on. A client's own `tools/list` gets the new list in its response, which counts as announced.
+After each trigger, `serve` compares the exposed list (the exact served definitions, in order) with the list it last announced or returned. If it differs, it publishes `ToolsListChanged()` on its listen bus for 2026-07-28 clients and calls `send_tool_list_changed()` on each older-era session, as M0 does for upstream notices. Notices are sent at most once per second; a change inside that second is folded into one notice at its end. An upstream notice that changes nothing in the exposed list is no longer passed on. A client's own `tools/list` gets the new list in its response, which counts as announced. There is one "last announced" list per process, not one per client: Claude Code is one client.
 
 ### Calls
 
@@ -371,7 +371,7 @@ Every row gets a file under `tests/golden/`, run on a ledger built by a determin
 
 - **In-memory tests.** `tests/helpers/rig.py` gains `approve_all(ledger_dir)`. It runs the same library code as `approve --group` on whatever is pending, with `actor: "person"`. `rig.gateway()` and `rig.proxied()` gain `approve=True` by default: once the gateway has started and recorded its `tool.seen` entries, they approve all, ask the gateway to catch up with the ledger (section 8), and wait until the exposed list is complete. M0 tests then see M0's tools. Their entry counts grow by the `tool.seen` and `tool.approved` entries, and tests that count all entries are updated to count by kind. Pin tests pass `approve=False`. Every test that runs `approve` or `reject` in a subprocess, or through `cli.main`, passes `--allow-no-terminal`, except the tests of the terminal check itself.
 - **Stdio tests** (`test_stdout`, `test_fidelity`'s raw tests, `test_reference`) use `rig.prime(config)`, which runs `polarizer serve --config <config>` with stdin closed and then `approve_all`. Their `serve` then starts with every tool approved. The expected bytes change only where `_meta` or `execution` was served to an older-era client.
-- **`scripts/live-check.sh`** primes its generated temp ledger the same way before it runs `claude`. That is a `serve` run and an `approve`, with no model call. Its pass criteria don't change.
+- **`scripts/live-check.sh`** primes its generated temp ledger the same way before it runs `claude`: `live_check.py prime`, a `serve` run with stdin closed and the group approval through the library, with no model call. `tests/test_live_check.py::test_prime_exposes_the_probe_tool` runs the priming without Claude Code. Its pass criteria don't change.
 - **docs/MANUAL-CHECK.md** gains the first-run steps above after "Start Claude Code", and an M1a section for the rug-pull check (section 9). From stage 4 it says that its M0 steps describe the code at commit 4eaa61a, and that no flag brings M0's behavior back. QUICKSTART-DRAFT.md says the same.
 
 ## 8. Approving while serve runs, and process lifetime
@@ -409,12 +409,14 @@ What is known, from an interactive session with Claude Code 2.1.288 on protocol 
 
 So `serve` can receive SIGINT, then SIGTERM about 100 ms later, or just lose its stdin, at any moment: in the middle of a call, a refresh, a stored-copy write, or while another process approves. It may also be killed outright, so it must not rely on any of this.
 
-**What serve does.** SIGINT, SIGTERM (POSIX) and end of input all start one shutdown path. The handlers use `anyio.open_signal_receiver`. On Windows only end of input and Ctrl+C apply.
+**What serve does.** SIGINT, SIGTERM (POSIX) and end of input all start one shutdown path. The handlers use `anyio.open_signal_receiver`. On Windows only end of input and Ctrl+C apply; Ctrl+C reaches the path through a `signal.signal` handler, since anyio has no signal receiver there.
+
+**Reading stdin.** `serve` reads its stdin itself, with `os.read` on file descriptor 0 in a daemon thread, and hands each line to the SDK's `stdio_server` through its `stdin` parameter. The SDK's own reader runs on an anyio worker thread, which a cancel can't interrupt and which isn't a daemon thread, so after a signal, with the client still holding stdin open, shutdown would wait until stdin closed. A buffered reader (`sys.stdin.buffer`) would make the interpreter abort at exit while the thread is blocked in it. The reader calls the shutdown path at end of input before the SDK sees it, so the calls in flight are recorded as shut down. One consequence: with the SDK's reader, file descriptor 0 pointed at the null device while serving; now it stays the client's pipe. Upstreams are started with pipes of their own and never read it.
 
 **End of input during startup** does not cancel startup. `serve` finishes connecting every upstream, listing it, storing the copies and recording what it saw, each upstream bounded by its `connect_timeout_seconds`, then takes the shutdown path below, fsyncs and exits 0. That is how `serve < /dev/null` primes a ledger (section 7, First run). Stage 4 builds and tests this rule (`test_prime_with_closed_stdin`); stage 5's shutdown path keeps it. A signal during startup still starts the shutdown path at once.
 1. **Stop serving and cancel every in-flight call.** Each call's handler records `call.returned` with outcome `cancelled` in a shielded scope, as M0 does. The error is `polarizer shut down during the call` when shutdown caused the cancel, and M0's `the client cancelled the call` when a `notifications/cancelled` arrived first. The SDK's upstream clients send their own `notifications/cancelled` upstream as part of the cancel.
 2. **Close the upstream clients in parallel, bounded at 1 s in total.** An upstream still running after that is left to see end of input when Polarizer's pipes close.
-3. **Close the writer.** It writes what is queued, fsyncs, and releases its files. Then the process exits 0.
+3. **Close the writer.** It writes what is queued, fsyncs, and releases its files. Then the process exits 0 at once, with `os._exit(0)`: nothing is left to do, an upstream still in the SDK's shielded shutdown (up to about 6 s, which anyio can't abandon) would otherwise hold the process, and a signal arriving while the interpreter tears down, after the signal receiver has closed, would get the operating system's default action and end the process with that signal instead of 0.
 
 A second signal during shutdown skips the rest of step 2 and goes straight to step 3.
 
@@ -486,6 +488,7 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 | `test_failed_refresh_retries_on_timer` | After a failed refresh, with the intervals injected (milliseconds instead of 30 s and 5 minutes), `serve` lists the upstream again on the timer, doubling the interval up to its cap, each attempt bounded by `connect_timeout_seconds`; the first success exposes the approved tools again and resets the interval. A lost connection is never retried. | Default |
 | `test_flip_flop_is_bounded` | An upstream with a new definition on every list records at most 16 observations, then one cap entry, and the client gets at most one notice per second. | Default |
 | `test_notice_only_when_exposed_list_changes` | An upstream notice that changes nothing exposed sends the client nothing. | Default |
+| `test_notices_at_most_once_per_second` | Two decisions a moment apart give two notices at least a second apart. | Default |
 
 ### `tests/test_pin_cli.py`, `tests/test_golden.py` and `tests/test_cli_subprocess.py`
 
@@ -515,7 +518,7 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 
 | Test | Claim | Suite |
 |---|---|---|
-| `test_approval_fsynced_before_exposed` | With the approving writer's fsync held on an event, the watch runs repeatedly and the tool stays hidden. Once the fsync is released, it is exposed. | Default |
+| `test_approval_fsynced_before_exposed` | With the approving writer's fsync held on an event, the tool stays hidden through ten watch intervals: the approving writer holds the ledger lock until its fsync returns, so the watch's catch-up waits for it. Once the fsync is released, it is exposed. | Default |
 | `test_serve_fsyncs_adopted_approval` | When the approving writer's fsync raises after its write, serve calls its own fsync (counted through `FileOps`) before exposing. If that fsync raises too, nothing is exposed and the writer stops. | Default |
 | `test_approve_from_second_process` | `python -m polarizer approve` run as a subprocess while a gateway serves exposes the tool within 2 s, and the client receives a change notice. | Default |
 | `test_watch_reads_only_new_bytes` | The once-a-second watch reads nothing when the file hasn't grown, and only the new bytes when it has, at 100 and 10,000 entries. | Default |
@@ -528,6 +531,7 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 | `test_sigterm_alone_during_call` | The same with SIGTERM only. | POSIX, for the same reason |
 | `test_stdin_closed_during_call` | Closing serve's stdin mid-call gives the same ledger result. | Default |
 | `test_kill_then_restart` | SIGKILL mid-call leaves an intact ledger with a `call.sent` and no `call.returned`, and a new serve exposes the same tools. | POSIX, for the same reason |
+| `test_signal_during_startup` | SIGTERM while an upstream is still connecting starts the shutdown path at once: serve exits 0 within the 1 s bound, not the upstream's connect timeout, and the ledger verifies. | POSIX, for the same reason |
 
 ### `tests/test_reference.py` (additions)
 
@@ -544,6 +548,8 @@ Draft text, describing only M1a:
 > **What it does not do.** It checks definitions, not behavior: a server can change what a tool does without changing its description, and Polarizer won't notice. It doesn't judge definitions yet. If the first definition you approve is poisoned and you approve it without reading it, Polarizer will keep serving exactly that poisoned definition. It does nothing outside the proxy. That includes MCP servers configured directly in Claude Code, the agent's own shell, and any program that can write to the ledger directory. An agent that can run commands as you can also run `polarizer approve`. Polarizer makes that a little harder, not impossible: `approve` and `reject` refuse to run unless they are started from a terminal, or told they are being run by a script. That only stops accidents, because an agent can give the same option.
 >
 > **What it relies on.** The ledger staying intact: Polarizer refuses to start on a damaged ledger, but someone who can write to its directory can rewrite it. And you reading what you approve. Group approval exists for the first run; it approves exactly the definitions `polarizer pending` printed, and nothing that changed since.
+>
+> **Pins only, for now.** This version pins tool definitions and nothing else: it doesn't scan descriptions for anything suspicious, it has no policy, and it holds no calls for you. An approved tool's calls go straight through, recorded in the ledger. Those are later milestones.
 
 ## 12. Build order and size
 
@@ -571,6 +577,8 @@ M1a stays **medium**, as milestones.md says: about one to two weeks, split into 
 5. **Rug-pull test servers**: `PROBE_RUGPULL`, the probe's `change` tool, `FakeUpstream.rug_pull()`. Done with the tests that use them. Small.
 6. **Live check**: `live-check.sh` primed. Done when it passes locally, if the owner runs it. Small.
 7. **Docs**: MANUAL-CHECK.md's first-run and rug-pull steps, QUICKSTART-DRAFT.md's first run and the threat model paragraph, STAGE5 notes and claims table. Small.
+
+Stage 5 records what it decided on its own in docs/STAGE5-NOTES.md; deviations 38 to 45 below summarize the ones that change this spec.
 
 **Stop for review,** then the owner's manual check.
 
@@ -634,3 +642,11 @@ The owner answered the spec round's fourteen open questions on Oct 3, 2026. Each
 35. **A size cap on one definition** (stage 4 review): 262144 bytes of canonical form. Nothing limited it before; a larger definition is unservable, unstored and unapprovable (section 2).
 36. **`pending` escapes what it prints from the ledger** (stage 4 review): free text and names, through one function, and DEL in definitions (section 7).
 37. **A tool with more than one definition waiting is left out of the group** (stage 4 review). Stage 4 grouped all of them and let the most recently seen become the decision, which picked a definition for the person (section 7).
+38. **serve reads stdin itself** (stage 5), on a daemon thread with `os.read`, because the SDK's reader can't be interrupted and would hold shutdown until stdin closed (section 8, Reading stdin).
+39. **serve ends with `os._exit(0)`** once its writer is closed (stage 5, section 8, step 3). The 1 s bound on closing upstreams can't be kept otherwise: anyio waits for every task, and the SDK shields its stdio teardown.
+40. **"One refresh at a time" covers every trigger** (stage 5, section 6): a per-upstream lock, with notices coalesced on top of it. Notices during startup are acted on after it.
+41. **The retry timer's failures record nothing,** since a retry follows a recorded first failure; `upstream.refresh_failed`'s `trigger` keeps its three values (stage 5).
+42. **A writer whose idle fsync fails stops** with `polarizer: stopped writing the ledger: could not fsync the ledger: <why>; run polarizer verify`, as for a ledger that changed under it, instead of ending its thread and leaving later appends waiting (stage 5). Its `close()` may be called twice, and an append after it fails at once.
+43. **`test_approval_fsynced_before_exposed`'s claim** said the watch "runs repeatedly" while the approving fsync is held. It can't: the approving writer holds the ledger lock through its fsync, and the watch's catch-up waits for the lock, which is what keeps the tool hidden. The claim now says so (section 10).
+44. **Two tests beyond section 10's list:** `test_signal_during_startup` and `test_notices_at_most_once_per_second`. `test_approve_from_second_process` runs the watch every 0.25 s, so its 2 s bound is eight times what the watch needs.
+45. **The README's limits** gain "pins only: no scanning, no policy, no holds" (section 11), as the stage 5 prompt asked. There is no README yet; QUICKSTART-DRAFT.md carries the same line.

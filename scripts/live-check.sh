@@ -8,6 +8,10 @@
 # cancel and the ledger has a call.returned with outcome cancelled for that call; otherwise it
 # exits 1 and names the failed check (docs/m0-plan.md, build step 7).
 #
+# Before Claude Code runs, it primes the temp ledger (live_check.py prime: a serve run with stdin
+# closed, then the group approval, with no model), because from M1a no tool is exposed until a
+# person approves it.
+#
 # Everything it writes goes in a new temporary directory, which it prints and leaves in place.
 # It reads nothing under ~/.claude, and only stats ~/.claude.json, which Claude Code updates
 # on every run.
@@ -19,6 +23,8 @@ command -v claude > /dev/null || { echo "live-check: claude is not on PATH" >&2;
 
 DIR="$(mktemp -d "${TMPDIR:-/tmp}/polarizer-live-check.XXXXXX")"
 "$PY" "$REPO/scripts/live_check.py" setup "$DIR" "$REPO"
+echo "== priming the ledger (no model)"
+"$PY" "$REPO/scripts/live_check.py" prime "$DIR"
 
 PROMPT="Call the tool mcp__pz__probe__wait exactly once, with seconds set to 14. Do not call any other tool and do not retry. Then reply in one line saying what happened."
 ARGS=(

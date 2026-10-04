@@ -103,6 +103,9 @@ class Upstream:
         self._on_lost = on_lost
         self._ready = anyio.Event()
         self._scope = anyio.CancelScope()
+        self._refresh_lock = anyio.Lock()  # one listing at a time, whatever triggered it
+        self.started = False  # run() was handed to a task group
+        self.closed = anyio.Event()  # run() has returned: the client and its process are gone
 
     @property
     def connected(self) -> bool:
@@ -118,6 +121,16 @@ class Upstream:
 
     async def run(self) -> None:
         """The upstream's task: connect, list, then follow change notices until cancelled."""
+        try:
+            await self._run()
+        finally:
+            self.closed.set()
+
+    def close(self) -> None:
+        """Cancel the task; the SDK then closes the client and stops the process."""
+        self._scope.cancel()
+
+    async def _run(self) -> None:
         with self._scope:
             try:
                 async with Client(
@@ -194,6 +207,10 @@ class Upstream:
         """List again with cache_mode="refresh", bounded by the connect timeout. On a failure,
         `list_error` says why, one line goes to stderr, and the tools count as unknown until a
         later listing succeeds. Returns True on success."""
+        async with self._refresh_lock:
+            return await self._refresh()
+
+    async def _refresh(self) -> bool:
         client = self.client
         if client is None:
             return False

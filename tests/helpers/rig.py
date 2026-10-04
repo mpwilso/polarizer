@@ -86,13 +86,23 @@ async def approve_pending(gw: Gateway, changed: bool = False) -> None:
 
 
 @asynccontextmanager
-async def gateway(ledger_dir: Path, specs: list[UpstreamSpec], approve: bool = True):
+async def gateway(
+    ledger_dir: Path,
+    specs: list[UpstreamSpec],
+    approve: bool = True,
+    *,
+    ops=None,
+    state: PinState | None = None,
+    **options,
+):
     """A started Gateway on a fresh writer; the writer is closed afterwards. With approve
     (the default), every tool its startup saw is approved before it is handed over, so M0
-    tests see M0's tools. Pin tests pass approve=False."""
-    state = PinState()
-    writer = LedgerWriter.open(ledger_dir, on_entry=state.apply)
-    gw = Gateway(specs, writer, config_sha256=CONFIG_SHA, pins=state)
+    tests see M0's tools. Pin tests pass approve=False. `ops` is the writer's file layer,
+    `state` the pin state it folds into, and `options` go to Gateway (watch_interval,
+    notice_interval, retry)."""
+    state = state if state is not None else PinState()
+    writer = LedgerWriter.open(ledger_dir, on_entry=state.apply, ops=ops)
+    gw = Gateway(specs, writer, config_sha256=CONFIG_SHA, pins=state, **options)
     try:
         async with gw.running():
             if approve:
@@ -104,12 +114,41 @@ async def gateway(ledger_dir: Path, specs: list[UpstreamSpec], approve: bool = T
 
 @asynccontextmanager
 async def proxied(
-    ledger_dir: Path, specs: list[UpstreamSpec], mode: str = "auto", approve: bool = True
+    ledger_dir: Path,
+    specs: list[UpstreamSpec],
+    mode: str = "auto",
+    approve: bool = True,
+    message_handler=None,
+    **options,
 ):
-    """(client, gateway): an SDK client connected in memory to a started gateway."""
-    async with gateway(ledger_dir, specs, approve) as gw:
-        async with Client(gw.server, mode=mode) as client:
+    """(client, gateway): an SDK client connected in memory to a started gateway. `options`
+    go to gateway()."""
+    async with gateway(ledger_dir, specs, approve, **options) as gw:
+        async with Client(gw.server, mode=mode, message_handler=message_handler) as client:
             yield client, gw
+
+
+async def next_notice(subscription, seconds: float = 10):
+    """The next event on a client's listen subscription, waiting at most `seconds`. A notice
+    can need about 2 s: up to 1 s for the watch, and up to 1 s more for the once-a-second
+    limit on notices."""
+    with anyio.fail_after(seconds):
+        return await subscription.__anext__()
+
+
+async def no_notice(subscription, seconds: float = 1.5) -> bool:
+    """True if no event arrives on a listen subscription within `seconds`."""
+    with anyio.move_on_after(seconds):
+        await subscription.__anext__()
+        return False
+    return True
+
+
+async def until(condition, seconds: float = 5, step: float = 0.01):
+    """Wait until condition() is true, at most `seconds`."""
+    with anyio.fail_after(seconds):
+        while not condition():
+            await anyio.sleep(step)
 
 
 def entries(ledger_dir: Path) -> list[dict]:

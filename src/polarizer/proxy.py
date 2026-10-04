@@ -8,9 +8,14 @@ never enter the ledger.
 
 Pins: every listing is hashed, its copies stored and its observations recorded; only tools whose
 latest decision approves their live hash are exposed, each served from its stored copy. Pin
-state comes from the ledger alone (polarizer.pins), and the gateway catches up with the ledger
-at the start of every client tools/list and tools/call, so a decision made by another process
-applies there.
+state comes from the ledger alone (polarizer.pins). The gateway catches up with the ledger once
+a second (the watch) and at the start of every client tools/list and tools/call, so a decision
+made by another process applies within about a second.
+
+In motion (docs/PIN-SPEC.md, sections 6 and 8): an upstream's change notice refreshes that
+upstream (one refresh at a time, and notices during one cause exactly one more); a refresh that
+fails is retried on a timer; and clients are told when the exposed list changes, at most once a
+second, never just because an upstream said something changed.
 """
 
 import asyncio
@@ -45,6 +50,13 @@ MAX_DROPPED = 32  # meta_dropped keeps at most this many key names, each cut to 
 # The client's line when the SDK can't parse an upstream's result. The SDK's own message quotes
 # the result, which must not reach the ledger.
 UNREADABLE = "result did not match the MCP schema"
+# call.returned's error when Polarizer's own shutdown cancelled the call (PIN-SPEC.md, section 8),
+# and when the client's notifications/cancelled did.
+SHUTDOWN_ERROR = "polarizer shut down during the call"
+CLIENT_CANCEL_ERROR = "the client cancelled the call"
+WATCH_INTERVAL = 1.0  # seconds between catch-ups with the ledger
+NOTICE_INTERVAL = 1.0  # at most one change notice to clients per this many seconds
+RETRY = (30.0, 300.0)  # the retry timer after a failed refresh: first interval, and the cap
 INPUT_KINDS = {
     "elicitation/create": "elicitation",
     "sampling/createMessage": "sampling",
@@ -72,6 +84,10 @@ def _leaf(error: BaseException, kind: type) -> bool:
     return isinstance(error, kind)
 
 
+def _dump(tools: list[types.Tool]) -> list[dict]:
+    return [t.model_dump(by_alias=True, mode="json", exclude_none=True) for t in tools]
+
+
 def result_bytes(result: types.Result) -> int:
     dumped = result.model_dump(by_alias=True, mode="json", exclude_none=True)
     text = json.dumps(dumped, separators=(",", ":"), ensure_ascii=False)
@@ -92,8 +108,15 @@ class Gateway:
         *,
         config_sha256: str,
         pins: PinState | None = None,
+        watch_interval: float = WATCH_INTERVAL,
+        notice_interval: float = NOTICE_INTERVAL,
+        retry: tuple[float, float] = RETRY,
     ):
         self.writer = writer
+        self.watch_interval = watch_interval
+        self.notice_interval = notice_interval
+        self.retry_first, self.retry_max = retry
+        self.sleep = anyio.sleep  # the retry timer's sleep; a test replaces it to see intervals
         self.config_sha256 = config_sha256
         self.session = secrets.token_hex(8)
         self.pins = pins if pins is not None else PinState()
@@ -110,6 +133,15 @@ class Gateway:
         self._failing: set[str] = set()  # prefixes in a run of failed refreshes, recorded
         self._observe_lock = anyio.Lock()
         self._stop_announced = False
+        self.shutting_down = False
+        self._started = False  # startup finished: notices and the timers may run
+        self._background = None  # the task group of the watch, notices, refreshes and retries
+        self._deferred: set[str] = set()  # upstreams whose notice came during startup
+        self._notice_refreshing: set[str] = set()
+        self._notice_again: set[str] = set()
+        self._retrying: set[str] = set()
+        self._announced: list[dict] | None = None  # the exposed list clients last got
+        self._dirty = anyio.Event()  # set when the exposed list may have changed
         self.bus = InMemorySubscriptionBus()
         self.server = _ProxyServer(
             "polarizer",
@@ -127,34 +159,75 @@ class Gateway:
 
     @asynccontextmanager
     async def running(self):
-        """Append session.started, connect every upstream in parallel, append one
-        upstream.connected per upstream, then serve until the block exits."""
+        """start() in a task group of its own, then serve until the block exits."""
         async with anyio.create_task_group() as tasks:
-            await self._append(
-                "session.started",
-                {
-                    "session": self.session,
-                    "polarizer_version": __version__,
-                    "config_sha256": self.config_sha256,
-                },
-            )
-            for upstream in self.upstreams.values():
-                tasks.start_soon(upstream.run)
-            async with anyio.create_task_group() as waits:
-                for upstream in self.upstreams.values():
-                    waits.start_soon(upstream.wait_ready)
-            for upstream in self.upstreams.values():
-                await self._append("upstream.connected", self._connected_data(upstream))
-            for upstream in self.upstreams.values():
-                if upstream.list_known:
-                    await self._observe(upstream)
-            waiting = self._count_waiting()
-            if waiting:
-                log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
+            await self.start(tasks)
             try:
                 yield self
             finally:
                 tasks.cancel_scope.cancel()
+
+    async def start(self, tasks) -> None:
+        """Startup (PROXY-SPEC.md, steps 4 and 5): append session.started, connect every
+        upstream in parallel, append one upstream.connected per upstream, and observe each
+        listing. Then start the background work: the watch, change notices, notice-driven
+        refreshes and the retry timer. Upstream tasks and the background run in `tasks`."""
+        await self._append(
+            "session.started",
+            {
+                "session": self.session,
+                "polarizer_version": __version__,
+                "config_sha256": self.config_sha256,
+            },
+        )
+        for upstream in self.upstreams.values():
+            upstream.started = True
+            tasks.start_soon(upstream.run)
+        async with anyio.create_task_group() as waits:
+            for upstream in self.upstreams.values():
+                waits.start_soon(upstream.wait_ready)
+        for upstream in self.upstreams.values():
+            await self._append("upstream.connected", self._connected_data(upstream))
+        for upstream in self.upstreams.values():
+            if upstream.list_known:
+                await self._observe(upstream)
+        waiting = self._count_waiting()
+        if waiting:
+            log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
+        self._announced = await self._exposed_dump()
+        self._background = await tasks.start(self._run_background)
+        self._started = True
+        for prefix in sorted(self._deferred):
+            await self._upstream_changed(self.upstreams[prefix])
+        self._deferred.clear()
+
+    async def _run_background(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
+        async with anyio.create_task_group() as background:
+            background.start_soon(self._watch)
+            background.start_soon(self._notifier)
+            task_status.started(background)
+            await anyio.sleep_forever()
+
+    # Shutdown (PIN-SPEC.md, section 8; cli.serve drives it) ---------------------------
+
+    def begin_shutdown(self) -> None:
+        """From now on a cancelled call records SHUTDOWN_ERROR, and the background work
+        (the watch, notices, refreshes and retries) stops."""
+        self.shutting_down = True
+        if self._background is not None:
+            self._background.cancel_scope.cancel()
+
+    async def close_upstreams(self, bound: float) -> bool:
+        """Close every upstream client in parallel, waiting at most `bound` seconds in total.
+        Returns True if all of them finished; an upstream still closing is left to see end of
+        input when Polarizer's pipes close."""
+        started = [u for u in self.upstreams.values() if u.started]
+        for upstream in started:
+            upstream.close()
+        with anyio.move_on_after(bound):
+            for upstream in started:
+                await upstream.closed.wait()
+        return all(u.closed.is_set() for u in started)
 
     def _connected_data(self, upstream: Upstream) -> dict:
         if not upstream.connected:
@@ -248,10 +321,101 @@ class Gateway:
             except Exception:
                 self._legacy_sessions.remove(session)
 
+    def _changed(self) -> None:
+        """The exposed list may have changed: the notifier compares and tells clients."""
+        self._dirty.set()
+
+    async def _exposed_dump(self) -> list[dict]:
+        """The exposed list as clients receive it, for comparing with what they last got."""
+        return _dump(await self.exposed())
+
+    async def _notifier(self) -> None:
+        """Tell clients when the exposed list differs from what they last got, at most once
+        per notice_interval: a change inside that interval is folded into one notice at its
+        end. A client's own tools/list counts as being told."""
+        last = None
+        while True:
+            await self._dirty.wait()
+            if last is not None:
+                wait = last + self.notice_interval - anyio.current_time()
+                if wait > 0:
+                    await anyio.sleep(wait)
+            self._dirty = anyio.Event()  # changes from here on wake the next round
+            current = await self._exposed_dump()
+            if current != self._announced:
+                self._announced = current
+                last = anyio.current_time()
+                await self._notify_clients()
+
+    async def _watch(self) -> None:
+        """Catch up with the ledger once every watch_interval, so another process's decision
+        applies within about that long (PIN-SPEC.md, section 8)."""
+        while True:
+            await anyio.sleep(self.watch_interval)
+            await self._catch_up()
+
     async def _upstream_changed(self, upstream: Upstream) -> None:
-        """An upstream's list changed: pass the notice on, as M0 does. The client's tools/list
-        that follows refreshes the upstream and checks the pins."""
-        await self._notify_clients()
+        """An upstream's change notice: refresh that upstream, one refresh at a time; notices
+        during one cause exactly one more. Clients hear about it only if the exposed list
+        changes. Called from the upstream's own tasks, so it never waits for the refresh."""
+        prefix = upstream.prefix
+        if self.shutting_down:
+            return
+        if not self._started:
+            self._deferred.add(prefix)  # refreshed once startup is done
+            return
+        if prefix in self._notice_refreshing:
+            self._notice_again.add(prefix)
+            return
+        self._notice_refreshing.add(prefix)
+        self._background.start_soon(self._notice_refresh, upstream)
+
+    async def _notice_refresh(self, upstream: Upstream) -> None:
+        prefix = upstream.prefix
+        try:
+            while True:
+                self._notice_again.discard(prefix)
+                await self._refresh_one(upstream, "upstream-notice")
+                if prefix not in self._notice_again:
+                    return
+        finally:
+            self._notice_refreshing.discard(prefix)
+
+    async def _refresh_one(self, upstream: Upstream, trigger: str | None) -> bool:
+        """List one upstream again and observe it, or record the failure (unless `trigger` is
+        None: the retry timer, whose failures are never the first of a run) and start the
+        retry timer. Returns True on success."""
+        ok = await upstream.refresh()
+        if ok:
+            await self._observe(upstream)
+        elif upstream.client is not None:
+            if trigger is not None:
+                await self._refresh_failed(upstream, trigger, upstream.list_error or "failed")
+            self._start_retry(upstream)
+        self._changed()
+        return ok
+
+    def _start_retry(self, upstream: Upstream) -> None:
+        """The retry timer for a refresh that failed (not for a lost connection, which is
+        never retried): PIN-SPEC.md, section 6."""
+        prefix = upstream.prefix
+        if prefix in self._retrying or self._background is None or self.shutting_down:
+            return
+        self._retrying.add(prefix)
+        self._background.start_soon(self._retry, upstream)
+
+    async def _retry(self, upstream: Upstream) -> None:
+        interval = self.retry_first
+        try:
+            while True:
+                await self.sleep(interval)
+                if upstream.client is None or upstream.list_error is None:
+                    return  # lost, or another trigger's refresh succeeded
+                if await self._refresh_one(upstream, None):
+                    return  # the next run of failures starts at retry_first again
+                interval = min(interval * 2, self.retry_max)
+        finally:
+            self._retrying.discard(upstream.prefix)
 
     # Pins --------------------------------------------------------------------------------
 
@@ -260,7 +424,8 @@ class Gateway:
         under the writer stops it: nothing is exposed after that, and clients are told once."""
         if not self.writer.stopped:
             try:
-                await self.writer.catch_up_async()
+                if await self.writer.catch_up_async():
+                    self._changed()
             except Stopped:
                 pass
         await self._check_stopped()
@@ -273,6 +438,7 @@ class Gateway:
     async def _upstream_lost(self, upstream: Upstream) -> None:
         why = upstream.lost or "connection closed"
         await self._refresh_failed(upstream, "connection-lost", why)
+        self._changed()
 
     async def _refresh_failed(self, upstream: Upstream, trigger: str, error: str) -> None:
         """Record the first failure of a run of failed refreshes; the next success ends it."""
@@ -421,8 +587,12 @@ class Gateway:
                 await self._observe(upstream)
             elif upstream.client is not None:
                 await self._refresh_failed(upstream, "client-list", upstream.list_error or "failed")
+                self._start_retry(upstream)
         await self._check_stopped()
-        return types.ListToolsResult(tools=await self.exposed())
+        tools = await self.exposed()
+        # The response tells this client the list; no notice is needed for what it shows.
+        self._announced = _dump(tools)
+        return types.ListToolsResult(tools=tools)
 
     # tools/call ------------------------------------------------------------------------
 
@@ -525,10 +695,11 @@ class Gateway:
                 allow_input_required=True,
             )
         except anyio.get_cancelled_exc_class():
+            # Shutdown sets its flag before it cancels anything, so a cancel that came first
+            # (the client's notifications/cancelled) keeps the client's text.
+            error = SHUTDOWN_ERROR if self.shutting_down else CLIENT_CANCEL_ERROR
             with anyio.CancelScope(shield=True):
-                await self._append(
-                    "call.returned", finish("cancelled", 0, "the client cancelled the call")
-                )
+                await self._append("call.returned", finish("cancelled", 0, error))
             raise
         except MCPError as e:
             if e.code != CONNECTION_CLOSED:

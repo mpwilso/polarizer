@@ -13,7 +13,7 @@ from polarizer import defhash
 from polarizer.ledger import LEDGER
 from polarizer.pins import PinState, blocks, group
 from polarizer.upstream import one_line
-from polarizer.writer import LedgerError, LedgerWriter
+from polarizer.writer import FileOps, LedgerError, LedgerWriter
 
 ACTOR = "person"
 
@@ -36,17 +36,17 @@ class Decider:
     pins: PinState
 
     @classmethod
-    def open(cls, ledger_dir: Path) -> "Decider":
+    def open(cls, ledger_dir: Path, ops: FileOps | None = None) -> "Decider":
         """Open the ledger as a writer (2 s lock wait, full verification), folding pin state
         in the same pass. Raises Refusal: no ledger (2), or a ledger that isn't intact (the
-        status's code, with serve's line)."""
+        status's code, with serve's line). `ops` is the writer's file layer (tests)."""
         ledger_dir = Path(ledger_dir)
         path = ledger_dir / LEDGER
         if not path.is_file() or path.stat().st_size == 0:
             raise Refusal(f"polarizer: no ledger at {ledger_dir}")
         state = PinState()
         try:
-            writer = LedgerWriter.open(ledger_dir, on_entry=state.apply)
+            writer = LedgerWriter.open(ledger_dir, on_entry=state.apply, ops=ops)
         except LedgerError as e:
             raise Refusal(e.line, e.exit_code) from None
         return cls(ledger_dir, writer, state)

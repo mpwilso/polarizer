@@ -86,6 +86,7 @@ def test_stdout_clean(tmp_path):
         "p__fail",
         "p__rich",
         "p__invalid",
+        "p__change",
     ]
     assert by_id[3]["result"]["content"] == [{"type": "text", "text": "waited 1 s"}]
     assert by_id[4]["result"]["isError"] is True

@@ -1,6 +1,6 @@
-# Manual check (M0)
+# Manual check (M0 and M1a)
 
-**Which code this checks.** These steps describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run this check as written, check out commit 4eaa61a. The M1a steps (priming the ledger, approving, and the rug-pull check) are added in stage 5.
+**Which code this checks.** Steps 1 to 8 describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run steps 1 to 8 as written, check out commit 4eaa61a. The M1a section at the end runs on the current code: the first run, approving while a session is open, and a rug pull.
 
 Run this in a real, interactive Claude Code session. It covers what no headless run can: `/mcp`, Esc to cancel, and normal use of two upstreams through Polarizer. Each step gives the command, what to expect, and what to paste back if it differs. Run every command from `~/code/polarizer`, in a terminal. Never run the manual check from inside another Claude Code session: that session's tools and settings would be mixed into what you observe.
 
@@ -103,3 +103,89 @@ scripts/guard.sh check
 ```
 
 Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file on every run. Paste the whole output.
+
+## M1a: pins (current code)
+
+Run this on the current code, from `~/code/polarizer`, in a plain terminal, never from inside another Claude Code session. It answers one open question, whether interactive Claude Code lists the tools again after Polarizer's change notice without a reconnect (docs/PIN-SPEC.md, decision 9), and checks the first run and a rug pull (sections 7 and 9). Keep a second terminal open in `~/code/polarizer` for the `polarizer` commands.
+
+### M1. Prepare
+
+Do steps 1 and 2 above first (the snapshot, `uv sync --locked`, the pre-warm, `polarizer.toml` and `manual/mcp.json`). Then give this check its own ledger and turn on the probe's rug-pull mode:
+
+```
+sed -i 's|^ledger_dir = .*|ledger_dir = "~/.local/share/polarizer-m1a-check"|' polarizer.toml
+sed -i 's|env = { PROBE_LOG = "/tmp/polarizer-probe.log" }|env = { PROBE_LOG = "/tmp/polarizer-probe.log", PROBE_RUGPULL = "/tmp/polarizer-rugpull" }|' polarizer.toml
+rm -f /tmp/polarizer-rugpull
+grep -n 'ledger_dir\|PROBE_RUGPULL' polarizer.toml
+```
+
+Expect the new `ledger_dir` line and the probe's `env` line with `PROBE_RUGPULL`. With `PROBE_RUGPULL` set, the probe serves its usual definitions the first time it starts and creates `/tmp/polarizer-rugpull`; every later start finds the file and changes `wait`'s description to `Wait for a number of seconds. Changed after approval.`: a server that changes itself after it was approved. If either line is missing, paste the `grep` output.
+
+### M2. First start: nothing exposed
+
+Start Claude Code with the same command as in step 3, `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config`, and type `/mcp`. Expect `polarizer` connected with no tools: this Polarizer has recorded what the probe and the Filesystem server list, and nothing is approved yet. Paste what `/mcp` shows if it lists any tool, or if `polarizer` failed to connect. Keep this session open until M5.
+
+(The first run without Claude Code, which the quickstart describes, is `polarizer serve --config <path> < /dev/null`: it records the definitions and exits. This check starts Claude Code first instead, so M3 can approve while a session is open.)
+
+### M3. Approve while the session is open
+
+In the second terminal:
+
+```
+.venv/bin/polarizer pending --config "$HOME/code/polarizer/polarizer.toml"
+```
+
+Expect `pending: 21 new, 0 changed, 0 unservable` (the probe's 7 tools and the Filesystem server's 14), each definition printed in full, and a last line `group <id> covers the 21 new definitions above for tools with no decision yet and one definition waiting`. Read them; then approve the group, with the id from that last line:
+
+```
+.venv/bin/polarizer approve --config "$HOME/code/polarizer/polarizer.toml" --group <id>
+```
+
+Expect 21 `approved ... at seq <q>` lines, then `approved 21 definitions as group <id>`.
+
+Now, in Claude Code, without reconnecting anything, wait about 5 seconds and type `/mcp`. Polarizer notices the approval within about a second and sends Claude Code a change notice. Note whether the 21 tools are listed.
+- **Listed:** interactive Claude Code lists the tools again after a change notice.
+- **Not listed:** reconnect `polarizer` from `/mcp`, type `/mcp` again, and note whether they are listed then.
+
+Paste back: whether the tools appeared without reconnecting, about how many seconds after the approval you typed `/mcp`, and the tool list as `/mcp` shows it (or, if you had to reconnect, what it showed before and after).
+
+### M4. The rug pull
+
+In `/mcp`, reconnect `polarizer`. That starts a new Polarizer process and a new probe, which finds `/tmp/polarizer-rugpull` and changes `wait`'s description. Then, in the second terminal, run M3's `pending` command again. Expect `pending: 0 new, 1 changed, 0 unservable` and a block starting `changed probe__wait <new hash>, approved <old hash>`, whose definition has the description `Wait for a number of seconds. Changed after approval.`
+
+In Claude Code, type `/mcp`. Expect the other 20 tools, and no `probe__wait`. Then ask Claude:
+
+> Call probe__wait with 1 second.
+
+Claude Code may say the tool doesn't exist, since it is no longer listed. If it calls it, expect the error `polarizer: probe__wait is not available: its definition changed after approval`. Either way, check the ledger:
+
+```
+grep -c '"kind":"tool.drift"' ~/.local/share/polarizer-m1a-check/ledger.jsonl
+grep '"kind":"call.refused"' ~/.local/share/polarizer-m1a-check/ledger.jsonl | tail -n 1
+```
+
+Expect `1` drift. If Claude called the tool, expect a `call.refused` entry whose `reason` is `upstream probe tool "wait" changed after approval`; if it didn't, no new `call.refused`. Paste the `pending` output's first two lines, what `/mcp` listed, what Claude said, and both `grep` outputs.
+
+### M5. Approve the change while the session is open
+
+In the second terminal, with the new hash from M4's `changed` line:
+
+```
+.venv/bin/polarizer approve --config "$HOME/code/polarizer/polarizer.toml" probe wait <new hash>
+```
+
+Expect the definition with the changed description, then `approved probe__wait <new hash> at seq <q>`. In Claude Code, without reconnecting, wait about 5 seconds and type `/mcp`. Note whether `probe__wait` is listed again. Paste whether it came back without reconnecting, and after about how many seconds.
+
+### M6. Verify, tidy up and guard
+
+Exit Claude Code, then:
+
+```
+.venv/bin/polarizer verify --config "$HOME/code/polarizer/polarizer.toml"
+sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
+rm -f /tmp/polarizer-rugpull
+scripts/guard.sh check
+```
+
+Expect an `intact:` first line from `verify` (the `sed` line then puts `polarizer.toml` back as in step 2, without the M1a changes), and the guard as in step 8. Paste both outputs. Claude Code updates `~/.claude.json` on every run; the guard reports its size and mtime for information only.
+

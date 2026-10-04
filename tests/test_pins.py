@@ -1,19 +1,20 @@
 """Pins in the gateway: hiding, exposing from stored copies, refusing hidden tools, failed and
-lost listings, sticky drift and the cap (docs/PIN-SPEC.md, sections 3 to 6).
-
-Stage 4 covers pins at rest. The claims that need stage 5 (change notices on decisions,
-mid-session drift through upstream notices, the retry timer, a second process approving while
-the gateway serves) are in stage 5's tests."""
+lost listings, sticky drift and the cap, and pins in motion: change notices on decisions,
+mid-session drift through upstream notices, and the retry timer (docs/PIN-SPEC.md, sections 3
+to 6). A second process approving while the gateway serves is in test_pin_durability.py."""
 
 import os
 import signal
 import sys
 
 import anyio
+import mcp_types as types
 import pytest
 from helpers import rig
 from helpers.fakes import FakeUpstream
 from helpers.raw import RawClient
+from mcp import Client
+from mcp.shared.subscriptions import ToolsListChanged
 
 from polarizer import cli, defhash
 from polarizer.ledger import verify_bytes
@@ -131,15 +132,17 @@ def test_pending_tools_hidden(tmp_path, capfd):
 
 
 def test_approve_exposes(tmp_path):
-    """After approve, the tool is listed from its stored copy. (The change notice that tells
-    the client is stage 5.)"""
+    """After approve, the client gets a change notice, without listing first (the watch reads
+    the decision), and the tool is listed from its stored copy."""
     fake = FakeUpstream(names=["echo", "wait"])
     ledger_dir = tmp_path / "ledger"
 
     async def scenario():
         async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)], approve=False) as (c, _):
             before = (await c.list_tools()).tools
-            await approve(ledger_dir, "f", "wait", hash_now(fake, "wait"))
+            async with c.listen(tools_list_changed=True) as subscription:
+                await approve(ledger_dir, "f", "wait", hash_now(fake, "wait"))
+                assert isinstance(await rig.next_notice(subscription), ToolsListChanged)
             after = (await c.list_tools()).tools
             return before, after
 
@@ -161,8 +164,8 @@ def test_approve_exposes(tmp_path):
 
 
 def test_reject_hides_and_needs_reason(tmp_path, capsys):
-    """reject without a reason writes nothing; with one, it hides an approved tool and records
-    the reason. (The change notice is stage 5.)"""
+    """reject without a reason writes nothing; with one, it hides an approved tool, records
+    the reason, and the client gets a change notice."""
     fake = FakeUpstream(names=["echo"])
     ledger_dir = tmp_path / "ledger"
     h = hash_now(fake, "echo")
@@ -175,7 +178,9 @@ def test_reject_hides_and_needs_reason(tmp_path, capsys):
                 argv = ["reject", "--ledger-dir", str(ledger_dir), "f", "echo", h, *reason]
                 assert await anyio.to_thread.run_sync(run_cli, *argv) == 2
             assert (ledger_dir / "ledger.jsonl").stat().st_size == size
-            await reject(ledger_dir, "f", "echo", h, "it  reads\nmy files")
+            async with c.listen(tools_list_changed=True) as subscription:
+                await reject(ledger_dir, "f", "echo", h, "it  reads\nmy files")
+                assert isinstance(await rig.next_notice(subscription), ToolsListChanged)
             after = (await c.list_tools()).tools
             refused = await c.call_tool("f__echo", {})
             return before, after, refused
@@ -252,17 +257,24 @@ def test_restart_rebuilds_exposed_set(tmp_path):
 
 
 def test_drift_once_per_pair_and_sticky(tmp_path):
+    """A rug pull mid-session records one drift, however often the changed definition is
+    listed again; going back to the approved definition, with its own notice, keeps the tool
+    hidden and records nothing."""
     fake = FakeUpstream(names=["echo"])
     ledger_dir = tmp_path / "ledger"
 
     async def scenario():
-        async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)]) as (c, _):
+        async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)]) as (c, gw):
             assert names((await c.list_tools()).tools) == ["f__echo"]
-            fake.version = 2
+            await fake.rug_pull()
+            await rig.until(lambda: rig.kinds(ledger_dir, "tool.drift"))
             for _ in range(3):
                 assert (await c.list_tools()).tools == []
             count = len(rig.entries(ledger_dir))
-            fake.version = 1  # back to the approved definition
+            calls = fake.list_calls
+            fake.version = 0
+            await fake.rug_pull()  # back to v1, the approved definition, with a notice
+            await rig.until(lambda: fake.list_calls > calls and not gw._notice_refreshing)
             back = (await c.list_tools()).tools
             refused = await c.call_tool("f__echo", {})
             return back, count, refused
@@ -514,8 +526,9 @@ def test_lost_upstream_hides_tools(tmp_path):
 
 def test_flip_flop_is_bounded(tmp_path):
     """An upstream with a new definition on every listing records at most 16 observations
-    between decisions, then one cap entry, then nothing more. (At most one change notice per
-    second to the client is stage 5.)"""
+    between decisions, then one cap entry, then nothing more. Driven by its own notices, it
+    makes the client hear at most one notice per second: here exactly one, when the tool hides,
+    since a changed tool stays hidden."""
     fake = FakeUpstream(names=["echo"])
     ledger_dir = tmp_path / "ledger"
 
@@ -535,3 +548,226 @@ def test_flip_flop_is_bounded(tmp_path):
     assert cap["seq"] > drifts[-1]["seq"]
     assert not (ledger_dir / "defs" / f"{cap['data']['def_hash']}.json").exists()
     assert len(list((ledger_dir / "defs").iterdir())) == CAP + 1  # the approved one, and 16
+
+    flipping = FakeUpstream(names=["echo"])
+
+    async def notices():
+        ledger2 = tmp_path / "ledger2"
+        async with rig.proxied(ledger2, [rig.spec("f", flipping.server)]) as (client, gw):
+            assert names((await client.list_tools()).tools) == ["f__echo"]
+            heard = []
+            async with client.listen(tools_list_changed=True) as subscription:
+                began = anyio.current_time()
+                for _ in range(CAP + 10):
+                    await flipping.rug_pull()
+                    await anyio.sleep(0.02)
+                await rig.until(lambda: not gw._notice_refreshing)
+                with anyio.move_on_after(1.5):
+                    async for event in subscription:
+                        heard.append(event)
+                elapsed = anyio.current_time() - began
+            return heard, elapsed, len(rig.kinds(ledger2, "tool.drift"))
+
+    heard, elapsed, drifts = anyio.run(notices)
+    assert 1 <= len(heard) <= 1 + int(elapsed)
+    assert len(heard) == 1  # the tool hid once; later changes don't change what is exposed
+    assert 1 <= drifts <= CAP
+
+
+def test_drift_mid_session_modern(tmp_path):
+    """A 2026-07-28 upstream's rug_pull() hides its tool through a listen event, with no
+    client tools/list: one tool.drift, and a change published to the client."""
+    fake = FakeUpstream(names=["echo", "wait"])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, [rig.spec("m", fake.server)]) as (client, gw):
+            assert gw.upstreams["m"].protocol_version == "2026-07-28"
+            assert names((await client.list_tools()).tools) == ["m__echo", "m__wait"]
+            async with client.listen(tools_list_changed=True) as subscription:
+                await fake.rug_pull()
+                event = await rig.next_notice(subscription)
+            hidden = await gw.exposed()
+            listed = (await client.list_tools()).tools
+            return event, hidden, listed
+
+    event, hidden, listed = anyio.run(scenario)
+    assert isinstance(event, ToolsListChanged)
+    assert hidden == [] and listed == []
+    drifts = rig.kinds(ledger_dir, "tool.drift")
+    assert sorted(d["data"]["tool"] for d in drifts) == ["echo", "wait"]  # one per tool
+
+
+def test_drift_mid_session_handshake(tmp_path):
+    """The same through a 2025-11-25 upstream's notifications/tools/list_changed: in memory
+    (FakeUpstream.rug_pull), and over stdio with the probe's change tool."""
+    fake = FakeUpstream(names=["echo"])
+    specs = [
+        rig.spec("l", fake.server, mode="legacy"),
+        rig.spec("p", rig.probe({"PROBE_LOG": str(tmp_path / "probe.log")})),
+    ]
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, specs) as (client, gw):
+            assert gw.upstreams["l"].protocol_version == "2025-11-25"
+            assert gw.upstreams["p"].protocol_version == "2025-11-25"
+            before = names((await client.list_tools()).tools)
+            async with client.listen(tools_list_changed=True) as subscription:
+                await fake.rug_pull()
+                first = await rig.next_notice(subscription)
+                answer = await client.call_tool("p__change", {})
+                second = await rig.next_notice(subscription)
+            after = names((await client.list_tools()).tools)
+            return before, first, answer, second, after
+
+    before, first, answer, second, after = anyio.run(scenario)
+    assert "l__echo" in before and "p__wait" in before and "p__change" in before
+    assert isinstance(first, ToolsListChanged) and isinstance(second, ToolsListChanged)
+    assert answer.content[0].text == "changed"
+    assert "l__echo" not in after and "p__wait" not in after
+    assert "p__change" in after  # only wait's definition changed
+    drifts = {
+        (d["data"]["upstream"], d["data"]["tool"]) for d in rig.kinds(ledger_dir, "tool.drift")
+    }
+    assert drifts == {("l", "echo"), ("p", "wait")}
+
+
+def test_failed_refresh_retries_on_timer(tmp_path, capfd):
+    """After a failed refresh, serve lists the upstream again on the retry timer: 30 s, then
+    doubling to the 5-minute cap (the sleep is replaced, so each interval is seen as asked but
+    lasts milliseconds). Each attempt is bounded by connect_timeout_seconds. The first success
+    exposes the approved tools again and resets the interval. A lost connection is never
+    retried."""
+    fake = FakeUpstream(names=["echo"])
+    specs = [
+        rig.spec("f", fake.server, timeout=0.5),
+        rig.spec("crashy", rig.probe({"PROBE_LOG": str(tmp_path / "probe.log")})),
+    ]
+    ledger_dir = tmp_path / "ledger"
+    asked = []
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, specs) as (client, gw):
+            assert "f__echo" in names((await client.list_tools()).tools)
+
+            async def sleep(seconds):
+                asked.append(seconds)
+                if len(asked) == 3:
+                    fake.fail_list, fake.list_delay = False, 3  # the 3rd attempt hangs
+                elif len(asked) == 4:
+                    fake.fail_list, fake.list_delay = True, 0
+                elif len(asked) == 7:
+                    fake.fail_list = False  # the 7th attempt succeeds
+                await anyio.sleep(0.01)
+
+            gw.sleep = sleep
+            fake.fail_list = True
+            async with client.listen(tools_list_changed=True) as subscription:
+                assert names((await client.list_tools()).tools) == [
+                    "crashy__" + n
+                    for n in ("wait", "crash", "env", "fail", "rich", "invalid", "change")
+                ]
+                await rig.until(lambda: len(asked) >= 7 and not gw._retrying, seconds=30)
+                back = await rig.next_notice(subscription)  # f__echo is exposed again
+            exposed = names(await gw.exposed())
+            first_run = list(asked)
+            fake.fail_list = True  # a second run of failures starts at 30 s again
+            assert names((await client.list_tools()).tools)[0].startswith("crashy__")
+            await rig.until(lambda: len(asked) > len(first_run), seconds=30)
+            fake.fail_list = False
+            await rig.until(lambda: not gw._retrying, seconds=30)
+            # A lost connection: hidden, recorded, and never put on the timer.
+            await client.call_tool("crashy__crash", {})
+            await rig.until(lambda: gw.upstreams["crashy"].client is None)
+            await anyio.sleep(0.2)
+            return exposed, first_run, list(asked), "crashy" in gw._retrying, back
+
+    exposed, first_run, all_asked, crashy_retrying, back = anyio.run(scenario)
+    assert first_run == [30, 60, 120, 240, 300, 300, 300]
+    assert all_asked[len(first_run)] == 30  # reset after the success
+    assert "f__echo" in exposed  # came back with no new approval
+    assert isinstance(back, ToolsListChanged)
+    assert not crashy_retrying
+    failed = [
+        (e["data"]["prefix"], e["data"]["trigger"])
+        for e in rig.kinds(ledger_dir, "upstream.refresh_failed")
+    ]
+    # One record per run of failures: the timer's own failures are never the first of a run.
+    assert failed == [("f", "client-list"), ("f", "client-list"), ("crashy", "connection-lost")]
+    assert (
+        "polarizer: upstream f: listing timed out; its tools are hidden" in capfd.readouterr().err
+    )
+
+
+def test_notice_only_when_exposed_list_changes(tmp_path):
+    """An upstream notice that changes nothing exposed sends clients nothing, in either era:
+    a notice with no change, and a change to a tool that isn't approved. A change to an
+    approved tool does reach both."""
+    echo = types.Tool(name="echo", description="Echo.", input_schema={"type": "object"})
+    wait = types.Tool(name="wait", description="Wait.", input_schema={"type": "object"})
+    fake = FakeUpstream(definitions=[echo, wait])
+    ledger_dir = tmp_path / "ledger"
+    legacy_notices = []
+
+    async def on_message(message):
+        if isinstance(message, types.ToolListChangedNotification):
+            legacy_notices.append(message)
+
+    async def scenario():
+        async with rig.gateway(ledger_dir, [rig.spec("f", fake.server)], approve=False) as gw:
+            # Approved before any client connects, so its own notice reaches no one.
+            await approve(ledger_dir, "f", "echo", defhash.definition(echo)[0])
+            await gw.catch_up()
+            await rig.until(lambda: gw._announced is not None and len(gw._announced) == 1)
+            async with (
+                Client(gw.server, mode="auto") as modern,
+                Client(gw.server, mode="legacy", message_handler=on_message) as legacy,
+            ):
+                for client in (modern, legacy):
+                    assert names((await client.list_tools()).tools) == ["f__echo"]
+                async with modern.listen(tools_list_changed=True) as subscription:
+                    quiet = []
+                    for change in ("nothing", "a pending tool"):
+                        calls = fake.list_calls
+                        if change == "a pending tool":
+                            fake.definitions = [echo, wait.model_copy(update={"description": "W2"})]
+                        await fake.bus.publish(ToolsListChanged())
+                        await rig.until(lambda c=calls: fake.list_calls > c)
+                        quiet.append(await rig.no_notice(subscription, 1.5))
+                    assert not legacy_notices
+                    fake.definitions = [echo.model_copy(update={"description": "E2"}), wait]
+                    await fake.bus.publish(ToolsListChanged())
+                    loud = await rig.next_notice(subscription)
+                    await rig.until(lambda: legacy_notices)
+                return quiet, loud
+
+    quiet, loud = anyio.run(scenario)
+    assert quiet == [True, True]
+    assert isinstance(loud, ToolsListChanged) and len(legacy_notices) == 1
+    assert [e["data"]["tool"] for e in rig.kinds(ledger_dir, "tool.seen")][-1] == "wait"
+
+
+def test_notices_at_most_once_per_second(tmp_path):
+    """Two decisions a moment apart give two notices, the second folded to the end of the
+    first one's second: never two within a second."""
+    fake = FakeUpstream(names=["echo", "wait"])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(
+            ledger_dir, [rig.spec("f", fake.server)], approve=False, watch_interval=0.05
+        ) as (client, _):
+            times = []
+            async with client.listen(tools_list_changed=True) as subscription:
+                await approve(ledger_dir, "f", "echo", hash_now(fake, "echo"))
+                await rig.next_notice(subscription)
+                times.append(anyio.current_time())
+                await approve(ledger_dir, "f", "wait", hash_now(fake, "wait"))
+                await rig.next_notice(subscription)
+                times.append(anyio.current_time())
+            return times, names((await client.list_tools()).tools)
+
+    times, listed = anyio.run(scenario)
+    assert times[1] - times[0] >= 0.95  # lower bound only: load can only make it later
+    assert listed == ["f__echo", "f__wait"]

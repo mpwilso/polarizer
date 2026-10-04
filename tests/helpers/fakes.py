@@ -13,8 +13,14 @@ Tools, by name:
 - change: bumps every description to "Definition v<n>" and announces a list change.
 - rich, rich_error (only when passed in `extra`): rich() below, with is_error false or true.
 
-`list_delay` (seconds) makes each tools/list wait first, and `bump_on_list` gives every
-tools/list a new version: both are attributes tests set while the fake runs.
+`list_delay` (seconds) makes each tools/list wait first, `bump_on_list` gives every tools/list
+a new version, and `fail_list` makes tools/list answer with a JSON-RPC error: attributes tests
+set while the fake runs. `list_times` holds the time.monotonic() of each tools/list.
+
+`rug_pull()` bumps every description to "Definition v<n+1>" and announces it the way the
+connection's era expects: ToolsListChanged() on the listen bus for 2026-07-28, or
+send_tool_list_changed() on the session that last listed it for 2025-11-25. Tests call it
+directly, so no tool call through the proxy is needed.
 
 `definitions=` serves those fixed Tool objects instead of the generated ones (for the
 definition hash tests); `fakes.from_env` reads them from the JSON file named by
@@ -89,8 +95,11 @@ class FakeUpstream:
         self.events: list[str] = []
         self.spans: list[tuple[float, float]] = []
         self.list_calls = 0
+        self.list_times: list[float] = []
         self.list_delay = 0.0
         self.bump_on_list = False
+        self.fail_list = False
+        self._last_lister = None  # (protocol version, session) of the latest tools/list
         self.log = log
         self.bus = InMemorySubscriptionBus()
         hints = {"tools/list": CacheHint(ttl_ms=ttl_ms)} if ttl_ms else None
@@ -116,8 +125,22 @@ class FakeUpstream:
             input_schema={"type": "object"},
         )
 
+    async def rug_pull(self) -> None:
+        self.version += 1
+        if self._last_lister is None:
+            return
+        version, session = self._last_lister
+        if version in MODERN_PROTOCOL_VERSIONS:
+            await self.bus.publish(ToolsListChanged())
+        else:
+            await session.send_tool_list_changed()
+
     async def _list(self, ctx, params) -> types.ListToolsResult:
         self.list_calls += 1
+        self.list_times.append(time.monotonic())
+        self._last_lister = (ctx.protocol_version, ctx.session)
+        if self.fail_list:
+            raise MCPError(code=-32603, message="listing failed on purpose")
         if self.list_delay:
             await anyio.sleep(self.list_delay)
         if self.bump_on_list:

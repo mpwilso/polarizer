@@ -14,7 +14,7 @@ ledger_forbidden_paths = [
     "~/code/isr",
 ]
 
-# The stdlib test probe: wait(seconds), crash, env, fail, rich, invalid.
+# The stdlib test probe: wait(seconds), crash, env, fail, rich, invalid, change.
 [upstream.probe]
 command = "/home/<you>/code/polarizer/.venv/bin/python"
 args = ["/home/<you>/code/polarizer/tests/helpers/probe_server.py"]

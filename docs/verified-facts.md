@@ -590,6 +590,16 @@ Checked while fixing the stage 4 review items, on mcp 2.2.0, mcp-types 2.2.0, py
 - **Nothing limits one definition's size** (read): `mcp/client/stdio.py` splits stdout into lines with no length limit, and Polarizer's only listing limits are 100 pages and 1,000 tools.
 - **The reference servers, offline.** `npx --offline -y <package>@2026.8.31 ...` ran both pinned servers from npx's cache; `--offline` makes npm refuse any registry request, and a version not in the cache failed with `notarget`. The two reference tests ran through a scratch `npx` script that adds `--offline` (STAGE4-NOTES.md, Review fixes). Nothing new was fetched or pinned.
 
+## Stage 5 (Oct 4, 2026, UTC)
+
+Checked while building pins in motion and shutdown, on mcp 2.2.0, anyio 4.15.1 and Python 3.12.3, in `.venv`. No Claude Code, no model.
+
+- **End of input cancels the calls in flight** (read): `JSONRPCDispatcher.run` (`mcp/shared/jsonrpc_dispatcher.py`, around lines 476 to 525) cancels its handler task group when the read stream ends, so a `tools/call` handler sees `CancelledError`, as M0 relied on.
+- **The SDK's stdio server reads stdin on an anyio worker thread** (read): `stdio_server` iterates `anyio.wrap_file(...)`, whose reads run through `to_thread.run_sync` without `abandon_on_cancel`, so a cancel waits for the read. anyio's `WorkerThread` is not a daemon thread (`anyio/_backends/_asyncio.py`, around line 1044). With an explicit `stdin` argument, `stdio_server` skips its claim on file descriptor 0 and still claims 1 (`mcp/server/stdio.py`).
+- **The SDK's stdio client shuts an upstream down inside a shield** (read): close its stdin, wait up to 2 s (`PROCESS_TERMINATION_TIMEOUT`), then SIGTERM to its process group, 2 s more, and up to 2 s to reap (`mcp/client/stdio.py`). A cancelled caller can't cut that short.
+- **A daemon thread blocked in `sys.stdin.buffer.readline` aborts the interpreter at exit** (executed, a throwaway script with stdin a pipe left open): exit code -6 and `Fatal Python error: _enter_buffered_busy: could not acquire lock for <_io.BufferedReader name='<stdin>'> at interpreter shutdown, possibly due to daemon threads`. The same thread blocked in `os.read(0, ...)` exits 0. Seen first as `test_sigterm_alone_during_call` exiting -6, before serve read stdin with `os.read`.
+- **anyio's signal receiver restores the default action when it closes** (read): `_SignalReceiver.__exit__` calls `loop.remove_signal_handler`, which sets SIGTERM back to `SIG_DFL` (and SIGINT to `default_int_handler`) in asyncio's `unix_events.py`. Seen as `test_sigint_then_sigterm_during_call` exiting -15 when serve's shutdown finished within the 100 ms before the SIGTERM and then tore down normally; that the SIGTERM landed after the receiver closed is inferred from the exit code, not traced.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

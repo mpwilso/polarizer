@@ -117,16 +117,16 @@ def test_prime_with_closed_stdin(tmp_path):
     cfg = rig.serve_config(tmp_path, toml, ledger_dir)
     done = rig.run_serve(cfg)
     assert done.returncode == 0, done.stderr
-    assert b"polarizer: 12 tools wait for approval; run polarizer pending" in done.stderr
+    assert b"polarizer: 14 tools wait for approval; run polarizer pending" in done.stderr
     connected = {
         e["data"]["prefix"]: e["data"] for e in rig.kinds(ledger_dir, "upstream.connected")
     }
-    assert connected["fast"]["tools"] == connected["slow"]["tools"] == 6
+    assert connected["fast"]["tools"] == connected["slow"]["tools"] == 7
     seen = rig.kinds(ledger_dir, "tool.seen")
     assert sorted((e["data"]["upstream"], e["data"]["tool"]) for e in seen) == sorted(
         (p, t)
         for p in ("fast", "slow")
-        for t in ("wait", "crash", "env", "fail", "rich", "invalid")
+        for t in ("wait", "crash", "env", "fail", "rich", "invalid", "change")
     )
     for entry in seen:
         assert (ledger_dir / "defs" / f"{entry['data']['def_hash']}.json").is_file()
