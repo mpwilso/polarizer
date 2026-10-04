@@ -238,6 +238,12 @@ A line is committed when its newline is written. Any bytes after the last newlin
 5. If the file is now empty (the torn line was the genesis), write a fresh `ledger.genesis` with a new chain id first.
 6. Append `ledger.repaired` with `data.bytes`, `data.sha256` and `data.file`, fsync it, update `ledger.head`, then release the lock.
 
+**A crash during repair.** Each step is fsynced before the next begins, and the lock is released when the process ends. A repair that crashes leaves one of these states:
+- **After the torn bytes are saved, before the truncate:** the ledger and `ledger.head` are unchanged and still show the torn tail. The side file holds the torn bytes, or part of them if the crash came while writing it. Its name depends only on the torn bytes and their seq, and nothing appends after a torn tail, so a second repair picks the same name; it would differ only if someone changed the torn bytes. The exclusive create then fails, and repair refuses with `polarizer: cannot repair <path of the side file>: File exists` on stderr, exit 2, changing nothing. A person compares the side file with the ledger's tail, removes it, and runs repair again.
+- **After the truncate, before `ledger.repaired` is appended:** the ledger ends at its last complete line and is `intact`, with no record of the repair. `ledger.head` is unchanged, at or before that line. The side file holds the removed bytes, and its name gives the seq they would have had. A second repair prints `nothing to repair: ledger is intact`, and the next `serve` starts normally.
+- **A torn genesis, after the truncate:** the ledger is empty. Repair then prints `no ledger at <dir>` (exit 2), and the next process to open the ledger writes a fresh `ledger.genesis` with a new chain id, as on a first run, with no `ledger.repaired`. If the crash comes after repair's own new genesis is fsynced and before `ledger.head` is written, the ledger holds that genesis alone, under a new chain id, with no `ledger.head`: repair finds it intact, and the next open rebuilds `ledger.head` and appends `ledger.head_rebuilt`. Either way the old chain id is left only in the side file.
+- **After `ledger.repaired` is fsynced, before `ledger.head` moves:** the ledger is intact, with the record, and `ledger.head` lags behind it, which verify accepts (see ledger.head).
+
 Writers in other processes that saw the torn tail have already stopped (see Appending) and must be restarted.
 
 ## Part 3: argument side files

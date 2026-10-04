@@ -9,7 +9,7 @@ from conftest import build_chain, install_fixture
 from helpers import rig
 from helpers.fakes import FakeUpstream
 
-from polarizer import cli
+from polarizer import cli, pins
 from polarizer.ledger import verify_bytes
 
 BROKEN = {
@@ -42,6 +42,33 @@ def test_startup_fails_closed_on_each_status(case, tmp_path, capsys, fake_home):
     out, err = capsys.readouterr()
     assert out == "" and err.startswith("polarizer: ") and err.count("\n") == 1
     assert not log.exists()  # no upstream was started
+
+
+def test_startup_refuses_when_pin_state_cannot_fold(tmp_path, capsys, monkeypatch, fake_home):
+    """A fold that raises at open: serve prints one line and exits 1 (what the traceback gave
+    before), starts no upstream and writes nothing."""
+    ledger_dir = tmp_path / "ledger"
+    seen = {"session": "0" * 16, "upstream": "p", "tool": "wait", "def_hash": "a" * 64}
+    build_chain(ledger_dir, [("tool.seen", seen)], head_at=1)
+    before = (ledger_dir / "ledger.jsonl").read_bytes()
+
+    def broken(self, entry):
+        if entry["kind"] == "tool.seen":
+            raise ValueError("fold" + chr(10) + "broke")
+
+    monkeypatch.setattr(pins.PinState, "apply", broken)
+    log = tmp_path / "probe.log"
+    cfg = probe_config(tmp_path, ledger_dir, log)
+    assert cli.main(["serve", "--config", str(cfg)]) == 1
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == "polarizer: could not fold seq 1 into pin state: fold broke\n"
+    assert not log.exists()
+    assert (ledger_dir / "ledger.jsonl").read_bytes() == before
+    argv = ["reject", "--ledger-dir", str(ledger_dir), "p", "wait", "a" * 64, "--reason", "r"]
+    assert cli.main([*argv, "--allow-no-terminal"]) == 1
+    assert capsys.readouterr() == ("", err)  # reject refuses the same way
+    assert (ledger_dir / "ledger.jsonl").read_bytes() == before
 
 
 def test_head_ahead_of_file(tmp_path, capsys, fake_home):

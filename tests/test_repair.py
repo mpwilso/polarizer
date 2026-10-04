@@ -10,7 +10,7 @@ from conftest import build_chain, install_fixture
 from polarizer import cli
 from polarizer.ledger import LEDGER, LOCK, LOCKED_LINE, parse_head, verify_bytes
 from polarizer.lock import LedgerLock
-from polarizer.writer import LedgerError, LedgerWriter, repair
+from polarizer.writer import FileOps, LedgerError, LedgerWriter, repair
 
 END = "; repair only fixes a torn tail"
 
@@ -149,3 +149,126 @@ def test_repair_without_a_ledger_creates_nothing(tmp_path):
     outcome = repair(tmp_path / "missing")
     assert (outcome.lines, outcome.exit_code) == ([f"no ledger at {tmp_path / 'missing'}"], 2)
     assert not (tmp_path / "missing").exists()
+
+
+class Crash(Exception):
+    """Stands in for the process dying: nothing after it in repair runs."""
+
+
+class CrashAfterFsync(FileOps):
+    """Completes the nth fsync, then crashes. In repair, fsync 1 is the side file's (the torn
+    bytes are saved), fsync 2 the ledger's after the truncate, fsync 3 a new genesis's."""
+
+    def __init__(self, n):
+        self.n = n
+        self.count = 0
+
+    def fsync(self, fd):
+        super().fsync(fd)
+        self.count += 1
+        if self.count == self.n:
+            raise Crash
+
+
+def torn_names(directory):
+    return sorted(p.name for p in directory.iterdir() if ".torn-" in p.name)
+
+
+def test_crash_after_saving_the_torn_bytes(tmp_path, capsys):
+    """The ledger and ledger.head are untouched and the side file holds the torn bytes. A
+    second repair picks the same name, so its exclusive create fails: exit 2, one line, nothing
+    changed. Once a person removes the side file, repair runs to the end."""
+    directory = install_fixture("broken/tear_last_line", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    head = (directory / "ledger.head").read_bytes()
+    torn = data[data.rfind(b"\n") + 1 :]
+    with pytest.raises(Crash):
+        repair(directory, ops=CrashAfterFsync(1))
+    assert (directory / LEDGER).read_bytes() == data
+    assert (directory / "ledger.head").read_bytes() == head
+    (name,) = torn_names(directory)
+    assert name.startswith("ledger.jsonl.torn-12-")
+    assert (directory / name).read_bytes() == torn
+    capsys.readouterr()
+    assert cli.main(["repair", "--ledger-dir", str(directory)]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err == f"polarizer: cannot repair {directory / name}: File exists\n"
+    assert (directory / LEDGER).read_bytes() == data
+    assert torn_names(directory) == [name]
+    (directory / name).unlink()
+    outcome = repair(directory)
+    assert outcome.exit_code == 0 and f"to {name};" in outcome.lines[0]
+
+
+def test_crash_after_the_truncate(tmp_path):
+    """The ledger is intact, ending at the last complete line, with no ledger.repaired; the
+    side file holds the removed bytes. A second repair finds nothing to do."""
+    directory = install_fixture("broken/tear_last_line", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    head = (directory / "ledger.head").read_bytes()
+    complete = data[: data.rfind(b"\n") + 1]
+    with pytest.raises(Crash):
+        repair(directory, ops=CrashAfterFsync(2))
+    assert (directory / LEDGER).read_bytes() == complete
+    assert (directory / "ledger.head").read_bytes() == head
+    assert verify_bytes(complete, head).status == "intact"
+    (name,) = torn_names(directory)
+    assert (directory / name).read_bytes() == data[len(complete) :]
+    kinds = [json.loads(x)["kind"] for x in complete.splitlines()]
+    assert "ledger.repaired" not in kinds
+    outcome = repair(directory)
+    assert (outcome.lines, outcome.exit_code) == (["nothing to repair: ledger is intact"], 0)
+
+
+def test_crash_after_truncating_a_torn_genesis(tmp_path):
+    """The ledger is empty: repair says there is no ledger (exit 2), and the next open writes
+    a genesis with a new chain id, with no ledger.repaired."""
+    directory = install_fixture("broken/torn_genesis", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    with pytest.raises(Crash):
+        repair(directory, ops=CrashAfterFsync(2))
+    assert (directory / LEDGER).read_bytes() == b""
+    (name,) = torn_names(directory)
+    assert name.startswith("ledger.jsonl.torn-0-") and (directory / name).read_bytes() == data
+    outcome = repair(directory)
+    assert (outcome.lines, outcome.exit_code) == ([f"no ledger at {directory}"], 2)
+    LedgerWriter.open(directory).close()
+    lines = (directory / LEDGER).read_bytes().splitlines()
+    (genesis,) = [json.loads(x) for x in lines]
+    assert genesis["kind"] == "ledger.genesis"
+    assert genesis["data"]["chain_id"].encode() not in data
+
+
+def test_crash_after_the_new_genesis(tmp_path):
+    """A torn genesis, crashed after the new genesis is fsynced and before ledger.head is
+    written: one intact entry under a new chain id and no ledger.head. repair finds nothing to
+    do; the next open rebuilds ledger.head and records ledger.head_rebuilt."""
+    directory = install_fixture("broken/torn_genesis", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    with pytest.raises(Crash):
+        repair(directory, ops=CrashAfterFsync(3))
+    (genesis,) = [json.loads(x) for x in (directory / LEDGER).read_bytes().splitlines()]
+    assert genesis["kind"] == "ledger.genesis"
+    assert genesis["data"]["chain_id"].encode() not in data
+    assert not (directory / "ledger.head").exists()
+    assert repair(directory).lines == ["nothing to repair: ledger is intact"]
+    LedgerWriter.open(directory).close()
+    kinds = [json.loads(x)["kind"] for x in (directory / LEDGER).read_bytes().splitlines()]
+    assert kinds == ["ledger.genesis", "ledger.head_rebuilt"]
+
+
+def test_crash_after_ledger_repaired(tmp_path):
+    """Crashed after ledger.repaired is fsynced, before ledger.head moves: the ledger is intact
+    with the record, and ledger.head lags behind it, which verify accepts."""
+    directory = install_fixture("broken/tear_last_line", tmp_path / "l")
+    head = (directory / "ledger.head").read_bytes()
+    with pytest.raises(Crash):
+        repair(directory, ops=CrashAfterFsync(3))
+    after = (directory / LEDGER).read_bytes()
+    last = json.loads(after.splitlines()[-1])
+    assert (last["kind"], last["seq"]) == ("ledger.repaired", 12)
+    assert (directory / "ledger.head").read_bytes() == head
+    assert parse_head(head).seq < 12
+    assert verify_bytes(after, head).status == "intact"
+    assert repair(directory).lines == ["nothing to repair: ledger is intact"]

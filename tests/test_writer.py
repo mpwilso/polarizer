@@ -1,19 +1,25 @@
 """The writer: flat append cost, two processes, catch-up, stopping, and the fsync policy."""
 
 import asyncio
+import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
+import types
+from concurrent.futures import wait
 from pathlib import Path
 
 import pytest
 from conftest import build_chain
 
 from polarizer import ledger as ledger_mod
+from polarizer import writer as writer_mod
 from polarizer.canon import EntryRefused
 from polarizer.ledger import LEDGER, verify_bytes
-from polarizer.writer import FileOps, LedgerWriter, Stopped
+from polarizer.writer import Appended, FileOps, LedgerError, LedgerWriter, Stopped
 
 
 class CountingOps(FileOps):
@@ -213,3 +219,150 @@ def test_modes(tmp_path):
     assert os.stat(directory).st_mode & 0o777 == 0o700
     for name in ["ledger.jsonl", "ledger.jsonl.lock", "ledger.head"]:
         assert os.stat(directory / name).st_mode & 0o777 == 0o600
+
+
+# A listener's error text, as an upstream-built exception might carry: ESC, a newline, a C1
+# control. The stderr line must show it escaped, on one line.
+HOSTILE = "bad" + chr(0x1B) + "[2J\nsecond line" + chr(0x9B)
+HOSTILE_SAFE = "bad\\x1b[2J second line\\x9b"
+
+
+def failing_listener(seen):
+    """An on_entry that records each seq it is given and raises on entries marked boom."""
+
+    def listener(entry):
+        seen.append(entry["seq"])
+        if entry["data"].get("boom"):
+            raise RuntimeError(HOSTILE)
+
+    return listener
+
+
+def ledger_entries(directory):
+    return [json.loads(x) for x in (directory / LEDGER).read_bytes().splitlines()]
+
+
+@pytest.mark.parametrize("kind", ["call.sent", "tool.approved"])
+def test_listener_failure_on_append_still_resolves(tmp_path, capsys, kind):
+    """The line is written (and fsynced for a security kind) before the listener runs, so the
+    append resolves to it; the failure is one escaped stderr line and the writer goes on."""
+    seen = []
+    w = LedgerWriter.open(tmp_path / "l", on_entry=failing_listener(seen))
+    capsys.readouterr()
+    data = {"upstream": "p", "tool": "t", "def_hash": "0" * 64, "boom": True}
+    got = w.append(kind, data).result(timeout=5)
+    later = w.append(*note(2)).result(timeout=5)
+    w.close()
+    entries = ledger_entries(tmp_path / "l")
+    assert got == Appended(1, entries[1]["hash"])
+    assert entries[1]["kind"] == kind and entries[1]["data"] == data
+    assert later == Appended(2, entries[2]["hash"])
+    assert seen == [1, 2]  # a genesis written at first run is not handed over
+    assert w.stopped is None
+    assert capsys.readouterr().err.splitlines() == [
+        f"polarizer: warning: could not fold seq 1 into pin state: {HOSTILE_SAFE}"
+    ]
+    result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
+    assert (result.status, result.state.lines) == ("intact", 3)
+
+
+@pytest.mark.parametrize("via", ["catch_up", "append"])
+def test_listener_failure_on_catch_up_adopts_every_entry(tmp_path, capsys, via):
+    """Another writer appends three entries, the middle one failing in the listener. Every one
+    is adopted and handed over, the catch-up (or the append that ran it) succeeds, and later
+    appends chain."""
+    seen = []
+    w = LedgerWriter.open(tmp_path / "l", on_entry=failing_listener(seen))
+    other = LedgerWriter.open(tmp_path / "l")
+    other.append(*note(1)).result(timeout=5)
+    other.append("note", {"boom": True}).result(timeout=5)
+    other.append(*note(3)).result(timeout=5)
+    other.close()
+    capsys.readouterr()
+    if via == "catch_up":
+        assert w.catch_up().result(timeout=5) == 3
+        assert seen == [1, 2, 3]
+    else:
+        assert w.append(*note(4)).result(timeout=5).seq == 4
+        assert seen == [1, 2, 3, 4]
+    assert w.append(*note(5)).result(timeout=5).seq == 4 + (via == "append")
+    w.close()
+    assert w.stopped is None
+    assert capsys.readouterr().err.splitlines() == [
+        f"polarizer: warning: could not fold seq 2 into pin state: {HOSTILE_SAFE}"
+    ]
+    result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
+    assert result.status == "intact"
+
+
+@pytest.mark.parametrize("head_at", [2, None])
+def test_listener_failure_at_open_refuses_to_start(tmp_path, head_at):
+    """Pin state could not be folded, so open refuses with one escaped line and exit 1, writes
+    nothing (not even a missing ledger.head), and releases the lock."""
+    directory = tmp_path / "l"
+    build_chain(directory, [note(1), ("note", {"boom": True}), note(3)], head_at=head_at)
+    before = {p.name: p.read_bytes() for p in directory.iterdir()}
+    seen = []
+    with pytest.raises(LedgerError) as raised:
+        LedgerWriter.open(directory, on_entry=failing_listener(seen))
+    assert raised.value.exit_code == 1
+    assert raised.value.line == f"polarizer: could not fold seq 2 into pin state: {HOSTILE_SAFE}"
+    assert seen == [0, 1, 2]
+    after = {p.name: p.read_bytes() for p in directory.iterdir() if p.name != "ledger.jsonl.lock"}
+    assert after == before
+    LedgerWriter.open(directory, lock_wait=0).close()  # the lock was released
+
+
+class SlowPutQueue(queue.Queue):
+    """A queue whose put pauses before it enqueues work (not the close sentinel), which
+    widens the gap between an append's closed check and its put."""
+
+    def put(self, item, block=True, timeout=None):
+        if item is not None:
+            time.sleep(0.001)
+        super().put(item, block, timeout)
+
+
+@pytest.mark.parametrize("slow_put", [False, True])
+def test_close_racing_appenders_leaves_no_future_pending(tmp_path, monkeypatch, slow_put):
+    """Eight threads append (one catches up) while close() runs. Every future resolves within
+    a few seconds: an append to Appended or Stopped, a catch-up to a count or Stopped."""
+    if slow_put:
+        monkeypatch.setattr(writer_mod, "queue", types.SimpleNamespace(Queue=SlowPutQueue))
+    w = LedgerWriter.open(tmp_path / "l", idle_fsync=False)
+    appends, catch_ups, guard = [], [], threading.Lock()
+    started = threading.Barrier(9)
+
+    def appender(k):
+        started.wait()
+        for i in range(100_000):
+            f = w.append("note", {"k": k, "i": i}) if k else w.catch_up()
+            with guard:
+                (appends if k else catch_ups).append(f)
+            if f.done() and isinstance(f.exception(), Stopped):
+                return
+
+    threads = [threading.Thread(target=appender, args=(k,), daemon=True) for k in range(8)]
+    for t in threads:
+        t.start()
+    started.wait()
+    deadline = time.monotonic() + 5
+    while len(appends) < 200 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    w.close()
+    for t in threads:
+        t.join(timeout=5)
+        assert not t.is_alive()
+    _, pending = wait(appends + catch_ups, timeout=5)
+    assert not pending, f"{len(pending)} futures never resolved"
+    written = []
+    for f in appends:
+        if isinstance(f.exception(), Stopped):
+            continue
+        assert isinstance(f.result(), Appended)
+        written.append(f.result().seq)
+    for f in catch_ups:
+        assert isinstance(f.exception(), Stopped) or f.result() == 0
+    result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
+    assert result.status == "intact"
+    assert sorted(written) == list(range(1, result.state.lines))

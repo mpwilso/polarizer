@@ -33,6 +33,7 @@ from polarizer.ledger import (
     verify_bytes,
 )
 from polarizer.lock import LedgerLock
+from polarizer.text import safe
 
 SECURITY_KINDS = frozenset(
     {
@@ -182,6 +183,12 @@ def _append_durable(
     return entry
 
 
+def _fold_failed(entry: dict, error: Exception) -> str:
+    """The text for a listener that raised on an entry: its seq and the error, made safe."""
+    why = safe(str(error) or type(error).__name__)
+    return f"could not fold seq {entry['seq']} into pin state: {why}"
+
+
 def refusal(result: Result) -> str:
     """serve's one stderr line for a ledger that isn't intact. A torn tail's message already
     names its command (repair); the others point at verify."""
@@ -201,6 +208,11 @@ class LedgerWriter:
     folded this way. Before an adopted tool.approved is handed over, the writer fsyncs the
     ledger itself (docs/PIN-SPEC.md, section 8), so nothing acts on an approval that another
     process wrote but may not have made durable.
+
+    A listener that raises at open refuses the open (LedgerError, exit 1): pin state could not
+    be folded. Once open, the entry is already in the ledger when the listener runs, so a
+    failure there is one warning line on stderr; the append or catch-up still succeeds, and
+    the remaining adopted entries are still handed over.
     """
 
     def __init__(self, ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync, on_entry=None):
@@ -216,6 +228,7 @@ class LedgerWriter:
         self._dirty = False
         self._stopped: str | None = None
         self._closed = False
+        self._gate = threading.Lock()  # makes the closed check and the put one step
         self._queue: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._run, name="polarizer-ledger", daemon=True)
         self._thread.start()
@@ -289,7 +302,10 @@ class LedgerWriter:
             # acts on it (an approval in particular).
             ops.fsync(fd)
             for entry in verified:
-                on_entry(entry)
+                try:
+                    on_entry(entry)
+                except Exception as e:
+                    raise LedgerError(f"polarizer: {_fold_failed(entry, e)}", 1) from None
         if head is None:
             data = {"from_seq": state.last_seq, "from_hash": state.last_hash}
             _append_durable(ledger_dir, fd, state, "ledger.head_rebuilt", data, ops)
@@ -309,11 +325,7 @@ class LedgerWriter:
         future: Future = Future()
         if durable is None:
             durable = kind in SECURITY_KINDS
-        if self._closed:
-            future.set_exception(Stopped("polarizer: the ledger writer is closed", 1))
-            return future
-        self._queue.put((kind, data, durable, future))
-        return future
+        return self._submit((kind, data, durable, future))
 
     async def append_async(self, kind: str, data: dict, *, durable: bool | None = None):
         return await asyncio.wrap_future(self.append(kind, data, durable=durable))
@@ -322,11 +334,17 @@ class LedgerWriter:
         """Queue a catch-up: adopt whatever other processes appended, handing each entry to
         on_entry. The future resolves to the number of entries adopted, or raises Stopped.
         If the file hasn't grown, nothing is read and the lock isn't taken."""
-        future: Future = Future()
-        if self._closed:
-            future.set_exception(Stopped("polarizer: the ledger writer is closed", 1))
-            return future
-        self._queue.put((_CATCH_UP, None, False, future))
+        return self._submit((_CATCH_UP, None, False, Future()))
+
+    def _submit(self, item: tuple) -> Future:
+        """Queue item, or fail its future with Stopped once close() has begun. Under the gate,
+        so nothing is queued behind close()'s sentinel, where no one would take it."""
+        future = item[-1]
+        with self._gate:
+            if self._closed:
+                future.set_exception(Stopped("polarizer: the ledger writer is closed", 1))
+            else:
+                self._queue.put(item)
         return future
 
     async def catch_up_async(self) -> int:
@@ -340,10 +358,11 @@ class LedgerWriter:
     def close(self) -> None:
         """Write what is queued, fsync if anything is unsynced, and release the files. A second
         call does nothing; an append after it fails at once with Stopped."""
-        if self._closed:
-            return
-        self._closed = True
-        self._queue.put(None)
+        with self._gate:
+            if self._closed:
+                return
+            self._closed = True
+            self._queue.put(None)
         self._thread.join()
         if self._dirty:
             self._ops.fsync(self._fd)
@@ -394,8 +413,7 @@ class LedgerWriter:
                 update_head(self.ledger_dir, state.chain_id, entry["hash"], entry["seq"], self._ops)
             else:
                 self._dirty = True
-            if self._on_entry is not None:
-                self._on_entry(entry)
+            self._hand_over(entry)
             return Appended(entry["seq"], entry["hash"])
         finally:
             self._lock.release()
@@ -436,8 +454,18 @@ class LedgerWriter:
                 except OSError as e:
                     self._stop(f"could not fsync an approval another process wrote: {e}")
             for entry in adopted:
-                self._on_entry(entry)
+                self._hand_over(entry)
         return len(adopted)
+
+    def _hand_over(self, entry: dict) -> None:
+        """Give an entry already in the ledger to on_entry. A failure there can't undo the
+        write or the adoption, so it is reported on one line and the writer carries on."""
+        if self._on_entry is None:
+            return
+        try:
+            self._on_entry(entry)
+        except Exception as e:
+            print(f"polarizer: warning: {_fold_failed(entry, e)}", file=sys.stderr)
 
     def _stop(self, why: str) -> None:
         self._stopped = f"polarizer: stopped writing the ledger: {why}; run polarizer verify"
