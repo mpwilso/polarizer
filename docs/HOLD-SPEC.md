@@ -1,6 +1,6 @@
 # Hold spec (M2a)
 
-This is the behavior contract for M2a: tool classes and default holds. The ledger format is in LEDGER-SPEC.md, `serve` and the command line are in PROXY-SPEC.md, pins are in PIN-SPEC.md, and the facts this relies on are in verified-facts.md. Everything M0 and M1a do stays as those files say, except where this file changes it. Each change is listed under Deviations and guesses at the end (section 17), and each question left for the owner is in section 16.
+This is the behavior contract for M2a: tool classes and default holds. The ledger format is in LEDGER-SPEC.md, `serve` and the command line are in PROXY-SPEC.md, pins are in PIN-SPEC.md, and the facts this relies on are in verified-facts.md. Everything M0 and M1a do stays as those files say, except where this file changes it. Each change is listed under Deviations and guesses at the end (section 17), and the owner's answers to the spec round's questions are in section 16.
 
 docs/PLAN.md does not exist in the repo, so nothing here relies on it. Where this file mentions canaries, it uses milestones.md's M5 + M6 row.
 
@@ -97,7 +97,7 @@ post_comment = { class = "egress" }
 The Filesystem tool names above are from memory of the server's documented tools and from verified-facts.md (`list_directory`, `read_text_file`, `list_directory_with_sizes`). They were not listed again in this round. Stage 7 checks this example against the pinned server's real listing (section 13, `test_example_config_matches_reference_servers`) and fixes it.
 
 **`[policy]` keys:**
-- `workspace_roots`: list of strings, default empty. `~` is expanded, each result must be absolute, and there are at most 32. `serve` resolves each with `os.path.realpath` at start and refuses to start if one doesn't exist. Commands that only read the config (`verify`, `repair`, `pending`, `holds`, `allow`, `deny`) don't check existence.
+- `workspace_roots`: list of strings, default empty. `~` is expanded, each result must be absolute, and there are at most 32. `serve` resolves each with `os.path.realpath` at start and refuses to start if one doesn't exist. Polarizer never asks the client for its roots, although Claude Code advertises the capability: the answer would come from the session the holds guard (section 16, decision 10). Commands that only read the config (`verify`, `repair`, `pending`, `holds`, `allow`, `deny`) don't check existence.
 - `hold_timeout_seconds`: integer from 1 to 1200, default 300.
 - `write_hold_patterns`, `read_hold_patterns`: lists of patterns (section 3), default empty, at most 64 each.
 - Unknown keys are an error.
@@ -154,7 +154,7 @@ A tool's `path_args` names top-level argument keys. For each name, in the order 
 - **a list of strings:** each is a path, in order; an empty list has nothing to check; more than 256 elements is held, `path-unresolvable`;
 - **anything else** (a number, null, an object, a list holding a non-string): held, `path-not-string`.
 
-Nested keys (`edits[0].path`) cannot be named in M2a (section 16, question 3).
+Nested keys (`edits[0].path`) cannot be named in M2a; they come in M2b, and the README states the limit (section 16, decision 3).
 
 ### Resolving a path
 
@@ -162,7 +162,7 @@ A path is resolved before any comparison. Resolution never asks the upstream and
 
 | Input | Reason in the record |
 |---|---|
-| not absolute (`a/b`, `./a`; on Windows also `C:a`, `\a` and anything without a drive or UNC root) | `not an absolute path` |
+| not absolute (`a/b`, `./a`; on Windows also `C:a`, `\a` and anything without a drive or UNC root); kept held, with no key to resolve against a directory (section 16, decision 4) | `not an absolute path` |
 | starts with `~` | `starts with ~, which the server may expand` |
 | contains a NUL character | `contains a NUL character` |
 | a `..` part after a part that does not exist | `".." after a part that does not exist` |
@@ -194,13 +194,13 @@ A pattern is a `/`-separated list of parts, on every platform. In a part, `*` ma
 3. `~/.ssh/**`;
 4. `.env*`;
 5. shell start-up files: `~/.bashrc`, `~/.bash_profile`, `~/.bash_login`, `~/.bash_logout`, `~/.profile`, `~/.zshrc`, `~/.zshenv`, `~/.zprofile`, `~/.zlogin`, `~/.config/fish/**`, and on Windows `~/Documents/PowerShell/**` and `~/Documents/WindowsPowerShell/**`;
-6. Claude Code's own configuration: `.claude/**`, `.mcp.json`, `~/.claude.json`, `~/.claude/**`.
+6. Claude Code's own configuration: `.claude/**`, `.mcp.json`, `~/.claude.json`, `~/.claude/**`. `CLAUDE.md` is not in the list, since agents edit it routinely (section 16, decision 9).
 
 **Built-in read hold patterns,** always applied to every `local-read` and `open-world` path: `~/.ssh/**`, `~/.gnupg/**`, `~/.aws/**`, `~/.config/gh/**`, `~/.netrc`, `~/.git-credentials`, `~/.claude/.credentials.json` and `.env*`.
 
 **Polarizer's own files,** checked before any pattern, rule `polarizer-files`: a path inside `ledger_dir` is held for every class (the argument side files hold arguments in plain text), and a path that is the `--config` file, by resolved path or `samefile`, is held for `local-write`.
 
-The config's lists are added after the built-in ones. The built-in lists can't be removed in M2a (section 16, question 1). Items 1 and 6 of the write list, the whole read list and Polarizer's own files go beyond the decision as given (section 17, deviations 2 and 3).
+The config's lists are added after the built-in ones. The built-in lists can't be removed: there is no removal key, and `--no-holds` is the only way around them (section 16, decision 1). Items 1 and 6 of the write list, the whole read list and Polarizer's own files go beyond the decision as given (section 17, deviations 2 and 3).
 
 ### Windows and macOS
 
@@ -281,9 +281,10 @@ The format, the hash, the statuses and the exit codes don't change. LEDGER-SPEC.
 | `hold.expired` | `session`, `hold`, `reason`: `timeout after <n> s`, `the client cancelled the call` or `polarizer shut down while the call was held` | `serve`, the holding process | no |
 | `hold.abandoned` | `session` (the process writing it), `hold`, `held_by` (the session that created the hold) | `serve`, at start | no |
 
-**Changed kinds,** each gaining one optional field:
+**Changed kinds,** each gaining optional fields:
 - **`call.sent`** of a held call that was allowed has `hold`, the hold id. A call that was never held has no `hold` key, so every existing `call.sent` is unchanged.
-- **`call.refused`** that ends a held call has `hold`. Its `reason` is `hold <id> was denied`, `hold <id> expired: <hold.expired's reason>`, `the client cancelled the call before it was forwarded`, or, when a decision arrived but routing has changed since (section 6), M1a's reason for the hidden tool. A refusal for `too-many-holds` has no `hold` (no hold was created) and the reason in row 20. LEDGER-SPEC.md's description of `call.refused` widens from "a name that matches no listed tool" to "a call Polarizer never forwarded".
+- **`call.sent`** also has `allowed_by` (decided, section 16, decision 5): the rule that let a call run without a hold (`holds-off`, `inside-roots`, `local-read` or `open-world`), or `"hold"` for a call that was allowed from a hold. A call that never passed through the rule function has no `allowed_by` key; in M2a every forwarded call passes through it, and every `call.sent` written before M2a has neither key.
+- **`call.refused`** that ends a held call has `hold`. Its `reason` is `hold <id> was denied`, `hold <id> expired: <hold.expired's reason>`, `the client cancelled the call before it was forwarded`, `hold <id> was allowed, but its side file <problem>` (section 6, Allow), or, when a decision arrived but routing has changed since (section 6), M1a's reason for the hidden tool. A refusal for `too-many-holds` has no `hold` (no hold was created) and the reason in row 20. LEDGER-SPEC.md's description of `call.refused` widens from "a name that matches no listed tool" to "a call Polarizer never forwarded".
 - **`session.started`** is unchanged.
 
 **What the fields leave out, on purpose.** `hold.created` records nothing taken from the MCP request apart from the tool name and the arguments' commitment: no request id, no `client_call_id`, no progress token, no `_meta`. `call.sent` still records `client_call_id` once the call is forwarded. Section 12 says why.
@@ -309,6 +310,7 @@ LEDGER-SPEC.md's fsync policy said "later milestones' holds and decisions" are s
 | allow, then killed between `call.sent` and `call.returned` | `hold.decided` allow, `call.sent` | none | outcome unknown, as in M0 (LEDGER-SPEC.md, fsync policy) |
 | allow, then killed before `call.sent` | `hold.decided` allow; later `hold.abandoned` is not written, because the hold already ended | none | allowed, never forwarded: with no `call.sent`, nothing reached the upstream |
 | allow, but routing changed since | `hold.decided` allow, `call.refused` (M1a's reason, with `hold`) | `call.refused` | never forwarded |
+| allow, but the side file fails its check | `hold.decided` allow, `call.refused` (`hold <id> was allowed, but its side file <problem>`, with `hold`) | `call.refused` | never forwarded |
 | deny | `hold.decided` deny, `call.refused` | `call.refused` | never forwarded |
 | timeout | `hold.expired` (timeout), `call.refused` | `call.refused` | never forwarded |
 | the client's cancel while waiting | `hold.expired` (client), `call.refused` | `call.refused` | never forwarded |
@@ -316,7 +318,7 @@ LEDGER-SPEC.md's fsync policy said "later milestones' holds and decisions" are s
 | shutdown while waiting | `hold.expired` (shutdown), `call.refused` | `call.refused` | never forwarded |
 | killed while waiting | nothing; the next start writes `hold.abandoned` | `hold.abandoned` | never forwarded; the process died |
 
-So for a held call, "never forwarded" is exactly "no `call.sent` with its `hold`", and a `call.sent` without `call.returned` still reads as outcome unknown. The one case without a terminal entry and without a `call.sent` is the allowed hold whose process died before forwarding; the table says how it reads. A call that was never held keeps M0's rules.
+So for a held call, "never forwarded" is exactly "no `call.sent` with its `hold`", and a `call.sent` without `call.returned` still reads as outcome unknown. The one case without a terminal entry and without a `call.sent` is the allowed hold whose process died before forwarding; the table says how it reads, and section 7 says what the person sees. A call that was never held keeps M0's rules.
 
 ## 6. The hold in serve
 
@@ -330,7 +332,7 @@ When `evaluate` returns `hold`, serve, in a shielded scope as it does for `call.
 
 If the writer can't record the hold, the call isn't held or forwarded: the client gets M0's line, `polarizer: <name> was not called: the ledger could not record it`.
 
-The in-memory table is only a way to wake the waiting handler. What a hold is, its arguments and how it ended are all in the ledger and the side file, and every other process reads them from there. The waiting MCP request itself can only live in serve, and dies with it (decision 1).
+The in-memory table is only a way to wake the waiting handler. What a hold is, its arguments and how it ended are all in the ledger and the side file, and every other process reads them from there. The waiting MCP request itself can only live in serve, and dies with it (decision 1). The request's own copy of the arguments is never forwarded: after an allow, serve forwards what it reads back from the side file (The endings, Allow), so what reaches the upstream is exactly what `holds` showed the person.
 
 ### Waiting
 
@@ -346,7 +348,8 @@ The handler waits for the first of: its hold's ending, the timeout, the client's
 **Allow.** serve:
 1. calls `fsync` on the ledger itself (counted through `FileOps`), as it does before acting on an adopted `tool.approved`. If that fsync fails, the writer stops (PIN-SPEC.md, section 8), the call is not forwarded, and the client gets the "could not record it" line;
 2. routes the call again (M0 and M1a's checks). A tool that was rejected, drifted, hidden by a failed refresh or lost while the call waited is refused with M1a's reason and the hold's id in `call.refused`, and the client gets M1a's line, `polarizer: <name> is not available: <why>`. The policy is not evaluated again: the person decided on these arguments;
-3. writes `call.sent` with the hold's `args_commit` (the same side file) and `hold`, then forwards and records `call.returned` exactly as M0 does.
+3. reads the hold's side file back and checks it against the hold's `args_commit` exactly as `verify --args` does (the sha256 of the whole file must equal its name), then parses the arguments from the bytes after the 32-byte salt. They must be JSON whose value is an object or null. If any of that fails, the call is refused: `call.refused` with `hold` and the reason `hold <id> was allowed, but its side file <problem>`, where `<problem>` is one of the fixed texts `is missing`, `does not match its name`, `is unreadable` or `does not hold JSON arguments`. Nothing is forwarded, and the client gets `polarizer: <name> was not allowed`. The operating system's message for an unreadable file goes only to serve's stderr, through `safe()`;
+4. writes `call.sent` with the hold's `args_commit` (the same side file), `hold` and `allowed_by` `"hold"`, then forwards the arguments parsed in step 3, never the request's in-memory copy, and records `call.returned` exactly as M0 does (decided, section 16, decision 5, and the owner's decision on forwarded arguments).
 
 **Deny.** serve appends `call.refused` (`hold <id> was denied`, with `hold`), and the client gets one `isError` line: `polarizer: <name> was not allowed`.
 
@@ -387,7 +390,7 @@ Polarizer must tell whether the process that created a hold is still running, wi
 - **Ended** means the attempt succeeds. The prober releases it at once.
 - **Unknown** means the file is missing or can't be opened or locked for any other reason.
 - If serve can't create or lock its own file, it writes `polarizer: warning: cannot create the session lock <path>: <message>; this session's holds will show as unknown` and goes on. Its holds then show as unknown and are never abandoned automatically.
-- The files are never deleted in M2a: one empty file per session (section 16, question 6).
+- The files are never deleted in M2a: one empty file per session (section 16, decision 6).
 
 `holds` probes with a shared lock on a read-only descriptor, so it creates and writes nothing. Two probes at once can make each other read "running" for a moment; that only delays an abandonment or shows a dead session as running once. On Windows the operating system releases a dead process's locks, but not necessarily at once, so a just-ended session may read as running for a moment. That is from memory of Windows' locking documentation, not checked in this round and not tested.
 
@@ -406,6 +409,7 @@ What happens, from verified-facts.md (Interactive): Esc during a call made Claud
 - If the process was killed before recording that, `holds` still lists the holds, with `ended; no process will act on a decision`, because the session lock was released when the process died.
 - Every one of those calls was never forwarded: none has a `call.sent`. That is certain from the ledger alone.
 - Esc ends every hold of that process at once, not only the call on screen.
+- **A hold that was allowed, and whose session then died before the call was forwarded,** is not listed by `holds`: the allow is its ending, so it is no longer open, and no later start writes `hold.abandoned` for it. The ledger shows `hold.decided` allow and no `call.sent` with that hold, which reads as "allowed, never forwarded" (section 5). The call did not run. If the agent retries it in a new session, that is a new hold, and the person is asked again.
 
 **What the person cannot know:**
 - Whether Claude Code will start a new serve, and when. It did after about 12 s once, by an unknown trigger.
@@ -422,7 +426,7 @@ What happens, from verified-facts.md (Interactive): Esc during a call made Claud
 
 ```
 polarizer serve --config <absolute path> [--no-holds]
-polarizer holds (--config <absolute path> | --ledger-dir <absolute path>) [--wait]
+polarizer holds (--config <absolute path> | --ledger-dir <absolute path>) [--wait [--bell]]
 polarizer allow (--config <absolute path> | --ledger-dir <absolute path>) <hold id> [--allow-no-terminal]
 polarizer deny (--config <absolute path> | --ledger-dir <absolute path>) <hold id> [--reason <text>] [--allow-no-terminal]
 ```
@@ -465,6 +469,8 @@ hold <hold id> <tool> unclassified
 - **Several sessions** are listed together, each hold naming its own.
 
 **`--wait`.** Without open holds whose session is running, `holds --wait` waits: every 0.25 s it compares the ledger's size with what it read (`fstat`, no lock), and reads again under the lock only when the file grew. As soon as at least one open hold of a running session exists, it prints the listing as above and exits 0. A status other than `intact`, seen at any read, prints that status's output and exits with its code. Ctrl+C ends it without a traceback, by the default SIGINT action. This exists because nothing else tells the person that a call is held in M2a: serve's stderr goes to Claude Code's log, which recorded stderr only at connect in the one interactive check (verified-facts.md, Interactive).
+
+**`--bell`** (only with `--wait`; decided, section 16, decision 11). While waiting, `holds --wait --bell` writes one BEL character (0x07, `\a`) to stdout the first time each new open hold of a running session appears, then carries on exactly as `--wait` does. Since `--wait` ends as soon as such a hold exists, that means: at the read that finds them, one BEL per open hold of a running session, written and flushed before the listing, then the listing, then exit 0. A hold seen at an earlier read whose session was not running gets its BEL only once that session reads as running. Without `--bell` the output is exactly as above. It is only a convenience: whether the terminal beeps, flashes or does nothing is the terminal's choice, and nothing depends on it. `--bell` without `--wait` is a usage error, `polarizer: --bell goes with --wait`, exit 2.
 
 ### `polarizer allow`
 
@@ -512,7 +518,7 @@ When given `--config`, `pending` and `approve` also read the policy. `--ledger-d
 
 ### Golden files
 
-Every row gets a file under `tests/golden/`, on a ledger built by a deterministic helper, with `holds`' clock injected and each session's lock held or released by the test, comparing stdout byte for byte with the exit code.
+Every row gets a file under `tests/golden/`, on a ledger built by a deterministic helper, with `holds`' clock injected and each session's lock held or released by the test, comparing stdout byte for byte with the exit code. The ledger behind `holds_mixed.txt` is built in the test helper from named pieces, one function per hold, each with a docstring saying what that hold shows, so a reviewer can read what each block in the golden file is (decided by the owner).
 
 | Command and situation | Golden file | Exit |
 |---|---|---|
@@ -522,6 +528,7 @@ Every row gets a file under `tests/golden/`, on a ledger built by a deterministi
 | `holds`, each side file problem (missing, altered, not JSON) | `holds_side_file_<problem>.txt` | 0 |
 | `holds` on each non-intact status (tampered, invalid, torn tail, truncated) | `holds_<status>.txt` | that status's code |
 | `holds`, locked; no ledger | `holds_locked.txt`, `holds_no_ledger.txt` | 7, 2 |
+| `holds --wait --bell`, two open holds of a running session found at one read | `holds_wait_bell.txt` (stdout's bytes: two BEL characters, then the listing) | 0 |
 | `allow` an open hold of a running session | `allow_one.txt` | 0 |
 | `allow` an open hold of an ended session (stdout; the warning on stderr is compared too) | `allow_ended_session.txt` | 0 |
 | `allow` refusals: bad id, no such hold, already decided, expired, abandoned, side file altered, broken ledger, no terminal | `allow_refused_<case>.txt` (stdout empty; the stderr line compared) | 2, or the status's code |
@@ -573,6 +580,8 @@ The stage 7 manual check (section 11) asks the owner to hold one call in an inte
 ## 12. Canaries later (M6)
 
 A canary is a hold that is never forwarded, offered to see whether the person catches it. M2a builds none, but it keeps a later canary indistinguishable from a real hold until the person decides. `hold.created` records only what serve could also produce for a call it made up: the session, a random hold id, a tool name, an args_commit with its side file, a class, a rule and a reason. Nothing from the MCP request (request id, `client_call_id`, progress token, `_meta`) is recorded until `call.sent`, which only an allowed call gets. `holds` prints the same block for any hold; hold ids are random, not counters; the ending kinds and `allow`/`deny` behave the same for any hold. A held call's first ledger entry is its `hold.created`, so no earlier entry gives a real one away. **What M6 will have to add:** a generator inside serve, so a canary has the same session as real holds and its session reads as running; plausible arguments and timing alongside real calls, since a hold that appears while the agent is idle gives itself away to someone watching Claude Code; a commitment in every `hold.created`, real ones included (for example `sha256(salt || "real" or "canary")`, with the salt in a side file), so the reveal after the decision can be checked; a reveal entry written after each decision; the ending of a canary that is allowed (never forwarded, and no `call.*` entry, since there is no call); and the cap and opt-in from milestones.md. Adding the commitment field to every hold then changes no M2a reader.
+
+**Canaries and the cap of 16 open holds** (section 6, Too many holds; decided by the owner). A canary is an open hold of its session, so it counts toward the 16. M6 must not issue a canary when the cap is near: a real call refused at once because a canary took the last place would tell anyone watching that one of the waiting holds is not real, which gives the canary away. M6 must choose how near is too near, and must say in its disclosure to the person that canaries are never issued close to the cap, and why.
 
 ## 13. Tests
 
@@ -643,6 +652,9 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_one_terminal_entry_per_call` | After a scripted run of every ending in section 5's table that a live process can produce, a fold of the ledger alone finds exactly one ending per hold and exactly one terminal entry per held call, and no `call.sent` for any hold that wasn't allowed. | Default |
 | `test_model_line_has_no_details` | For deny, timeout and too-many-holds, the client's text is exactly `polarizer: <name> was not allowed`, and contains no rule, reason, path or deny reason. | Default |
 | `test_hold_state_from_ledger_matches_live` | After a scripted run, the hold fold over the ledger file alone equals the gateway's. | Default |
+| `test_forwarded_arguments_come_from_the_side_file` | The in-memory arguments of a held call are changed after `hold.created` is written; after `allow`, the upstream receives exactly the side file's arguments, and `call.sent` has `hold` and `allowed_by` `"hold"`. | Default |
+| `test_allow_with_altered_side_file_is_refused` | A hold's side file altered after the allow is recorded and before serve forwards (`allow` itself refuses an altered file, so the allow comes first): serve records `call.refused` with `hold` and `hold <id> was allowed, but its side file does not match its name`, nothing is forwarded, and the client gets `polarizer: <name> was not allowed`. The same with the side file removed (`is missing`). | Default |
+| `test_allowed_by_records_the_rule` | `call.sent` of an unheld call records the rule that let it run (`local-read`, `inside-roots`, `open-world`, and `holds-off` under `--no-holds`). | Default |
 
 ### `tests/test_hold_durability.py`
 
@@ -664,6 +676,7 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_esc_during_a_hold` | `polarizer serve` over stdio holds a call; SIGINT, then SIGTERM 100 ms later. serve exits 0, the ledger verifies intact, the hold has `hold.expired` (shutdown) and one `call.refused`, the probe saw no `tools/call`, and a new serve writes no `hold.abandoned`. | POSIX: Windows has no way to send the two signals as Claude Code does (PIN-SPEC.md, section 10) |
 | `test_kill_during_a_hold` | SIGKILL while a call is held: the ledger verifies intact with an open hold and no terminal entry; `holds` shows the session ended; a new serve writes `hold.abandoned`, and then there is exactly one terminal entry. | POSIX, for the same reason |
 | `test_holds_wait` | `holds --wait` started before any hold prints the listing and exits 0 within 2 s of a hold appearing; with only a dead session's open hold it keeps waiting. | Default |
+| `test_holds_wait_bell` | `holds --wait --bell` writes one BEL per new open hold of a running session before the listing, byte for byte as `holds_wait_bell.txt`; without `--bell` no BEL is written; `--bell` without `--wait` is the usage line. | Default |
 
 ### `tests/test_hold_cli.py` and `tests/test_golden.py`
 
@@ -689,9 +702,9 @@ Draft text, describing only M2a with M1a:
 
 > **What holding does.** You give each tool a class in `polarizer.toml`. Reads run. Writes run when every path you told Polarizer to check is inside your workspace, and isn't one of a few sensitive places such as `.git/hooks`, your shell start-up files, `~/.ssh` or Claude Code's own settings. Destructive and outgoing calls, and calls to tools you haven't classified, are held: the call waits, and nothing reaches the server until you run `polarizer allow` with the hold's id. `polarizer holds` shows each waiting call with its exact arguments, every unusual character escaped. If you deny it or don't answer within five minutes, the call is refused, and the agent sees only that it was not allowed. Every hold, decision and outcome is in the ledger.
 >
-> **What it does not do.** It sees only calls that go through Polarizer, not the agent's shell, its own file tools, or MCP servers configured directly in Claude Code. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the arguments you name, and only when the call arrives. A tool's own annotations are shown as a hint and are trusted only if you say so. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
+> **What it does not do.** It sees only calls that go through Polarizer, not the agent's shell, its own file tools, or MCP servers configured directly in Claude Code. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the top-level arguments you name, and only when the call arrives; a path nested inside an argument (a list of edits, each with its own path) is not checked in this version. A tool's own annotations are shown as a hint and are trusted only if you say so. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
 >
-> **What it relies on.** A held call lives inside the Polarizer process Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding; none of them reaches the server, and the ledger says so. Polarizer has no page or notification for holds yet: run `polarizer holds --wait` in another terminal to see them as they arrive.
+> **What it relies on.** A held call lives inside the Polarizer process Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding; none of them reaches the server, and the ledger says so. If you allow a call and that process dies before it forwards it, the call does not run either: `polarizer holds` no longer lists it, because you decided it, and if the agent tries the call again you are asked again. Polarizer has no page or notification for holds yet: run `polarizer holds --wait` in another terminal to see them as they arrive (add `--bell` to have the terminal ring).
 
 ## 15. Build order and size
 
@@ -703,35 +716,40 @@ M2a stays **medium**, as milestones.md says: about one to two weeks, in two stag
 2. **Paths and rules:** resolution, roots, patterns, built-ins, `evaluate`, annotation suggestions. Done when `test_paths.py` and `test_rules.py` pass on Linux. Medium.
 3. **Kinds and the hold fold:** the five kinds, the optional fields, `SECURITY_KINDS`, the fold with first-ending-wins, the conditional append, generated fixtures. Done when the fixtures verify in both verifiers and the fold equals the expected state on a generated ledger. Small.
 4. **serve:** policy at start (`policy.loaded`, the unclassified line), evaluation after routing, creating and waiting, every ending, the second routing, the cap, the watch at 0.25 s while holds are open, serve's fsync before forwarding. Done when `test_holds.py` passes except `test_progress_during_a_hold`, and `test_hold_durability.py` passes. Medium.
-5. **CLI:** `holds` (without `--wait`), `allow`, `deny`, golden files, the terminal check. Done when `test_hold_cli.py` and the new golden rows pass, except the `pending --config` rows. Small to medium.
+5. **CLI:** `holds` (without `--wait`), `allow`, `deny`, golden files, the terminal check, and the read side of session state: the probe of a session's lock file, the `<state>` in `holds` and the warning on `allow` and `deny`, because `holds_mixed.txt`, `holds_state_unknown.txt` and `allow_ended_session.txt` need them (stage 6, step 0). Done when `test_hold_cli.py` and the new golden rows pass, except the `pending --config` rows and `holds_wait_bell.txt`. Small to medium.
 6. **Helpers, existing tests, scripts:** `rig.classify`, `policy=`, the stdio helpers, `polarizer.example.toml`, the three scripts' tomls and their tests. Done when the whole earlier suite passes unchanged in what it asserts, apart from entry counts by kind. Small.
 
-**Stop for review.** Holds work while serve runs. A dead session's holds stay open in the ledger (no session locks yet), and the person must poll `holds`.
+**Stop for review.** Holds work while serve runs. serve creates no session lock yet, so `holds` shows its holds as `state unknown` and `allow` and `deny` warn that they cannot tell whether the session runs; a dead session's holds stay open in the ledger, and the person must poll `holds`. A held call cancelled by shutdown records nothing yet: its hold stays open, as if the process had been killed.
 
 ### Stage 7: lifetime, progress and visibility
 
-1. **Session locks and restart:** the lock file, probing, `hold.abandoned` at start, the session state in `holds`, the warning on `allow` and `deny`. Done when `test_hold_restart.py` passes, except `test_holds_wait`, with its POSIX skips in place. Small to medium.
+1. **Session locks and restart:** serve's own lock file, `hold.abandoned` at start (the probe, the session state in `holds` and the warnings are stage 6's). Done when `test_hold_restart.py` passes, except `test_holds_wait` and `test_holds_wait_bell`, with its POSIX skips in place. Small to medium.
 2. **Shutdown during holds:** held handlers record their ending in the shutdown path. Done with `test_esc_during_a_hold`. Small.
 3. **Progress:** done when `test_progress_during_a_hold` passes. Small.
-4. **`holds --wait`:** done when `test_holds_wait` passes. Small.
+4. **`holds --wait` and `--bell`:** done when `test_holds_wait`, `test_holds_wait_bell` and `holds_wait_bell.txt` pass. Small.
 5. **Classes in `pending` and `approve`:** done when `test_pending_shows_classes` and the remaining golden rows pass. Small.
 6. **Reference check of the example config:** `test_example_config_matches_reference_servers`, run locally with `POLARIZER_REFERENCE=1`. Small.
 7. **Docs:** MANUAL-CHECK.md's M2a section, QUICKSTART-DRAFT.md's `--no-holds` and the threat model, STAGE6 and STAGE7 notes with claims tables. Small.
 
 **Stop for review,** then the owner's manual check, including the long wait in section 9.
 
-## 16. Open questions
+## 16. Decided
 
-1. **Removing a built-in pattern.** The built-in write and read lists can't be removed in M2a, like Parallax's forbidden directories. `.env*` holds a write to `.env.example`, and the read list holds a read of it. Is a removal key wanted, or is `--no-holds` the only way around them?
-2. **The read hold list.** Holding reads of secret stores goes beyond "reads run" (section 17, deviation 2). Keep it, shrink it to `~/.ssh/**` and `.env*`, or drop it until M2b's taint?
-3. **Nested path arguments.** M2a names only top-level argument keys. The Filesystem server's `edit_file` takes its path at the top level, but other servers nest paths (a list of edits with a path each). Add a small path syntax (`edits[].path`) in M2b, or now?
-4. **Relative paths.** Every relative path is held, because Polarizer can't know the upstream's working directory or rules. If that holds too much in practice, a per-upstream `relative_to` key could name the directory to resolve against. Not added.
-5. **Recording the allow rule.** `call.sent` doesn't record which rule let an unheld call run (`local-read`, `inside-roots`). The policy hash in `policy.loaded` and the config reproduce it. M5 may want it per call.
-6. **Session lock files** accumulate, one empty file per serve start. A cleanup (the process that proves a session ended removes its file) is easy but deletes files from code; left for the owner.
-7. **The cap of 16 open holds per session.** Enough?
-8. **M3's done-when** says approve, deny, timeout and cancel are "fsynced before acting". This spec fsyncs decisions and not expiries or cancels, by decision 4. M3's row is unchanged here; should it say so?
-9. **Claude Code configuration in the write list.** `.claude/**`, `.mcp.json` and `~/.claude*` are held because writing them can give an agent hooks, permissions or MCP servers that bypass Polarizer. `CLAUDE.md` is not in the list, since agents edit it routinely. Agree?
-10. **The workspace roots from the client.** Claude Code advertises the roots capability (verified-facts.md, Capabilities advertised). Asking it for roots would save configuring them, but it is a request to the client, which M0 never makes, and the answer comes from the same session the hold guards. Not done.
+The owner answered the spec round's questions on Oct 4, 2026, and added question 11 (the bell). Each answer is in the sections above; in one line each:
+
+1. **Removing a built-in pattern:** no removal key; `--no-holds` is the only way around the built-in patterns (section 3).
+2. **The read hold list:** kept as it is (section 3, deviation 2).
+3. **Nested path arguments** (`edits[].path`): in M2b, not now; the README states the limit (sections 3 and 14).
+4. **Relative paths:** kept held; no `relative_to` key (section 3).
+5. **Recording the allow rule:** `call.sent` gains the optional `allowed_by`, the rule that let a call run or `"hold"` (section 5).
+6. **Session lock files:** left in place, one empty file per session; no cleanup (section 7).
+7. **The cap of 16 open holds per session:** 16 is fine (section 6); a canary counts toward it (section 12).
+8. **M3's done-when:** milestones.md's M3 row now says decisions are fsynced before acting and expiries and cancels are not, as section 5 does.
+9. **Claude Code configuration in the write list:** agreed; `CLAUDE.md` stays out of it (section 3).
+10. **Workspace roots from the client:** Polarizer does not ask the client for roots (section 2).
+11. **A bell for `holds --wait`:** the optional `--bell`, a convenience only (section 8).
+
+The owner also decided, with the same answers: after an allow, serve forwards the arguments read back from the side file and checked against `args_commit`, never its in-memory copy (section 6, Allow); a hold allowed and then orphaned by its session's death is documented in section 7 and the README text (section 14); and `holds_mixed.txt`'s ledger is built from named pieces (section 8, Golden files).
 
 ## 17. Deviations and guesses
 
@@ -755,13 +773,13 @@ Given with the round's brief on Oct 4, 2026; "decision <n>" above refers to thes
 1. **milestones.md says "Unknown tools are denied"** for M2a; decision 2 says unclassified tools are held. Decided: held, and the second commit changes milestones.md's M2a row to say so.
 2. **docs/PLAN.md doesn't exist.** CLAUDE.md lists it "if it exists", and decision 10 cites "PLAN.md, M6". This spec uses milestones.md's M5 + M6 row.
 3. **LEDGER-SPEC.md's fsync policy** lists "later milestones' holds and decisions" as security-state entries, while decision 4 fsyncs only entries that can make Polarizer do more. Decided by decision 4 (deviation 5).
-4. **milestones.md's M3 row** says timeout and cancel are fsynced before acting; left as it is, with question 8.
+4. **milestones.md's M3 row** said timeout and cancel are fsynced before acting. The owner decided to change the row to match this spec (section 16, decision 8).
 5. **Decision 5 cites the idle timeout as headless;** verified-facts.md has it from the binary, and the headless observation is that it did not fire (deviation 9).
 
 ### Deviations from the decisions and the existing documents
 
 1. **Built-in patterns can't be removed,** and the config adds to them, like `ledger_forbidden_paths` and Parallax's directories. Decision 2 listed defaults without saying.
-2. **Reads of secret stores are held** (the built-in read list), beyond decision 2's "reads run". Reason: a read of `~/.ssh/id_ed25519` puts the key in the model's context, from where the agent's shell (outside Polarizer) or an egress call a tired person allows can carry it out, and M2b's taint doesn't exist yet. Question 2.
+2. **Reads of secret stores are held** (the built-in read list), beyond decision 2's "reads run". Reason: a read of `~/.ssh/id_ed25519` puts the key in the model's context, from where the agent's shell (outside Polarizer) or an egress call a tired person allows can carry it out, and M2b's taint doesn't exist yet. Kept (section 16, decision 2).
 3. **The write list adds** `.git/config`, Claude Code's configuration and Polarizer's own files (`ledger_dir`, the `--config` file) to decision 2's list. Reason: each lets a write run code or remove the guard: `core.fsmonitor`, a Claude Code hook or MCP server, or a rewritten class.
 4. **Relative paths and `~` are held,** not resolved. Decision 2 said to resolve with the real path; that is done for absolute paths, and the rest can't be resolved the way the upstream would.
 5. **`hold.created`, `hold.expired` and `hold.abandoned` are not fsynced;** `hold.decided` and `policy.loaded` are, as decision 4 asks. The second commit of this round changes only LEDGER-SPEC.md's kinds table, where each new row says whether it is fsynced. Its fsync policy sentence ("later milestones' holds and decisions") and its files table (`sessions/`) are updated in stage 6, with the code; until then this file wins.
@@ -784,3 +802,6 @@ Given with the round's brief on Oct 4, 2026; "decision <n>" above refers to thes
 22. **Windows path rules** (stream colons, trailing dots and spaces, device names, `\\?\`) are from reading Windows' naming rules, not run here; `test_windows_names_are_held` runs only on the Windows CI runner.
 23. **`--reason` on `deny` refuses an empty reason** rather than recording null, so a typo isn't recorded as a reason.
 24. **The writer's conditional append** is a new facility in `writer.py`; no format change.
+25. **`allowed_by` on `call.sent`** (owner's decision, section 16, decision 5): an optional field naming the rule that let a call run, or `"hold"`.
+26. **Forwarded arguments come from the side file** (owner's decision): after an allow, serve checks the side file against `args_commit` and forwards what it parses from it; a failed check refuses the call with a fixed reason (section 6, Allow). The four `<problem>` texts are this spec's choice.
+27. **`holds --wait --bell`** (owner's decision, section 16, decision 11). The owner's wording was to ring for each new hold "then keep waiting as before"; `--wait` ends at the first open hold of a running session, so the bell is written just before that listing, one per such hold found at that read (section 8).
