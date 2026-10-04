@@ -610,6 +610,17 @@ Checked while making upstream text safe and looking at upstream processes at shu
 - **pydantic's error type for a string `inputSchema` over stdio is `model_type`** (executed, through `polarizer serve`), and `dict_type` when `ListToolsResult.model_validate` is called on a dict directly.
 - **Probes left running by `test_signal_during_startup`** (seen): 22 probe processes started 01:05 to 01:42 UTC, about 86 s apart, each with `PROBE_DELAY=5` and a `test_signal_during_startup0` log path, each with one thread waiting. Each had read `server/discover` from its stdin after serve had exited, failed to answer, and lost its reader thread to `BrokenPipeError`. This session's runs added two, stopped by their pids; the 22 were left for the owner (STAGE5-NOTES.md, Follow-up).
 
+## M1a check, interactive (Oct 4, 2026, observed by the owner)
+
+Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/m1a-check.sh` (docs/MANUAL-CHECK.md's M1a section at the time). These are the owner's results, from that script's results file; no development session saw the run.
+
+- **Approving the first run's group while a session was open** (`approve`): the answer was `y`. `/mcp` showed the tools without a reconnect.
+- **Approving the changed definition while a session was open** (`approve-changed`): the answer was `y`. `/mcp` listed `probe__wait` again without a reconnect.
+- **The ledger** (`finish`): 53 entries, verified intact.
+- **The `rugpull` step** of `m1a-check.sh` was skipped, so that run recorded nothing about `/mcp` after the rug pull or about what Claude said when asked to call `probe__wait`. `scripts/rugpull-check.sh` now checks the rug pull headless (docs/MANUAL-CHECK.md, M1a).
+
+So for Claude Code 2.1.289, interactive Claude Code lists the tools again after Polarizer's change notice, without a reconnect, for both a first approval and an approval of a changed definition (PIN-SPEC.md, decision 9).
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

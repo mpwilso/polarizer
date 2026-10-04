@@ -193,6 +193,18 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 
 `scripts/m1a-check.sh` (parsing in `scripts/m1a_check.py`) replaces MANUAL-CHECK.md's M1a steps, which had placeholders for the group id and hashes, with five commands that find them from `polarizer pending`, ask the owner only what `/mcp` and Claude showed, and record everything in `/tmp/m1a-check-results.txt`; its claims are the table's last rows, run in the final `scripts/test.sh` of that change (524 passed, 7 skipped, in 121.5 s).
 
+## The rug-pull check script
+
+`scripts/rugpull-check.sh` (helpers in `scripts/rugpull_check.py`) replaces MANUAL-CHECK.md's M1a steps with one headless run that asks nothing. `scripts/m1a-check.sh` stays, marked superseded; the owner ran it interactively on 2026-10-04 (verified-facts.md, M1a check, interactive).
+
+- **Why:** the probe's `PROBE_RUGPULL` switched on its second start, so any extra start (a reconnect, a priming run, a second session) changed what the check saw. The probe now also takes `PROBE_PHASE` (`original` or `changed`), which takes precedence over `PROBE_RUGPULL` when set; `PROBE_RUGPULL` alone behaves as before.
+- **How:** one temp directory with its own `polarizer.toml` (the probe as the only upstream, `PROBE_PHASE = "${PROBE_PHASE}"`) and two mcp configs that differ only in `PROBE_PHASE`. Priming reuses `live_check.py`'s; the approval between runs B and C uses `Decider.approve_one`, as `polarizer approve probe wait <hash>` does. Three `claude -p` runs (haiku, `--strict-mcp-config`, `--allowedTools=mcp__pz__probe__wait`, `--permission-mode default`, `--no-session-persistence`, stdin from `/dev/null`, `MCP_TOOL_TIMEOUT` unset).
+- **What decides the result:** nine checks read from the ledger, the probe's log and `polarizer verify`, each run's part being what was appended between its start and end marks. The model's replies are printed only. A run whose claude exits non-zero fails its checks with the first lines of its output, and a run B in which Polarizer never started fails its two no-call checks instead of passing them.
+- **Tests:** a stub claude (`tests/helpers/fake_claude.py`, named by `CLAUDE_BIN` only under `POLARIZER_CHECK_TESTING=1`) starts the Polarizer its config names and calls `probe__wait` only if it is listed. Its modes make B reach the probe (it approves the new definition mid-run, standing in for a Polarizer that lets it through), stop the drift (the probe kept in its original phase), tamper with the ledger after run C, and exit 1 in run B.
+- **Repeated runs:** `tests/test_rugpull_check.py`, five times in a row: 12 passed each time, in 32.4 to 32.6 s, with no probe or serve process left running after any of them.
+- **Pre-push scan:** every tracked file in the commit (`git grep --cached`), and the commit's message, author and committer, searched case-insensitively for the eight private strings the owner listed. Counts only: all 0.
+- **Not run:** the script with real Claude Code (the owner runs it), CI, and shellcheck (not installed; `bash -n` passed).
+
 ## Claims
 
 "Yes" means run locally on Linux (WSL2, Python 3.12.3, mcp 2.2.0), in the final run of `scripts/test.sh` (509 passed, 7 skipped: stage 1's 4 platform skips and the 3 reference tests), unless the row says otherwise. The rows from "Upstream text" on are the follow-up's, run in its final `scripts/test.sh` (515 passed, 7 skipped, in 112.8 s).
@@ -223,8 +235,8 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 | The new and changed tests pass five times in a row and once under load | the loop in Repeated runs | yes, 5 of 5 and 1 of 1 |
 | The whole suite, ruff and the docs check | `scripts/test.sh` | yes: 509 passed, 7 skipped |
 | The live check passes after priming | `scripts/live-check.sh` | no: for the owner, from a plain terminal |
-| Interactive Claude Code lists the tools again after an approval, without a reconnect | docs/MANUAL-CHECK.md, M1a: `scripts/m1a-check.sh approve` and `approve-changed` | no: for the owner |
-| The rug-pull check in an interactive session | docs/MANUAL-CHECK.md, M1a: `scripts/m1a-check.sh rugpull` | no: for the owner |
+| Interactive Claude Code lists the tools again after an approval, without a reconnect | `scripts/m1a-check.sh approve` and `approve-changed` | yes, by the owner, interactively, on 2026-10-04 with Claude Code 2.1.289: `y` and `y` (verified-facts.md, M1a check, interactive) |
+| The rug-pull check in an interactive session | `scripts/m1a-check.sh rugpull` | no: the owner skipped it on 2026-10-04; `scripts/rugpull-check.sh` checks the rug pull headless instead |
 | All of the above on Windows and macOS | CI | no |
 | Upstream text: `safe()` escapes, folds, cuts to 200 characters, never splits an escape, and changes nothing the second time; `describe()` never quotes pydantic's input | `pytest tests/test_upstream_text.py::test_safe_escapes_folds_and_cuts tests/test_upstream_text.py::test_describe_is_safe_and_quotes_no_pydantic_input` | yes |
 | A log record, the SDK's included, reaches stderr as one safe line with no traceback | `pytest tests/test_upstream_text.py::test_log_records_are_one_safe_line` | yes |
@@ -243,4 +255,17 @@ Every tracked file in the commit (`git grep --cached`), and the commit's message
 | `scripts/m1a_check.py` reads `pending`'s real output, the golden files, the toml and the ledger | the other six tests in `tests/test_m1a_check.py` | yes |
 | The new tests pass five times in a row and leave no process running | `pytest tests/test_m1a_check.py`, five times | yes, 5 of 5 |
 | shellcheck on `scripts/m1a-check.sh` | `shellcheck scripts/m1a-check.sh` | no: not installed; `bash -n` passed |
-| The script in a real check, with Claude Code | `scripts/m1a-check.sh reset`, then each step | no: for the owner |
+| The script in a real check, with Claude Code | `scripts/m1a-check.sh reset`, then each step | yes, by the owner, on 2026-10-04, except the rugpull step; the 53-entry ledger verified intact |
+| The probe's `PROBE_PHASE` serves the original or the changed `wait` on every start, takes precedence over `PROBE_RUGPULL` (whose file it neither reads nor creates), and refuses other values; `PROBE_RUGPULL` alone is unchanged | `pytest tests/test_rugpull_check.py -k probe` | yes |
+| rugpull-check's two mcp configs differ only in `PROBE_PHASE`, and its toml passes it to the probe | `pytest tests/test_rugpull_check.py::test_setup_configs_differ_only_in_phase` | yes |
+| With a stub claude, all nine checks pass, the temp directory is removed, the results file holds the whole output, and claude got the stated arguments, stdin from `/dev/null`, the temp directory as working directory and no `MCP_TOOL_TIMEOUT` | `pytest tests/test_rugpull_check.py::test_all_checks_pass` | yes (POSIX only) |
+| A run B that reaches the probe fails exactly B's two no-call checks | `pytest tests/test_rugpull_check.py::test_b_calling_the_tool_fails` | yes (POSIX only) |
+| No drift fails the drift and approval checks | `pytest tests/test_rugpull_check.py::test_no_drift_fails` | yes (POSIX only) |
+| A tampered ledger fails only the verify check | `pytest tests/test_rugpull_check.py::test_tampered_ledger_fails` | yes (POSIX only) |
+| A claude that exits non-zero fails its run's checks, with the first lines of its output, and the temp directory is kept | `pytest tests/test_rugpull_check.py::test_claude_exiting_nonzero_fails` | yes (POSIX only) |
+| A run B with no Polarizer start fails its no-call checks rather than passing them | `pytest tests/test_rugpull_check.py::test_b_without_polarizer_proves_nothing` | yes |
+| Under `POLARIZER_CHECK_TESTING=1`, the script needs `CLAUDE_BIN` and `POLARIZER_CHECK_RESULTS` and writes nothing without them | `pytest tests/test_rugpull_check.py::test_testing_needs_both_overrides` | yes (POSIX only) |
+| The new test file passes five times in a row and leaves no process running | `pytest tests/test_rugpull_check.py`, five times | yes, 5 of 5 |
+| The whole suite, ruff and the docs check, with the rug-pull check | `scripts/test.sh` | yes: 536 passed, 7 skipped, in 148.1 s |
+| shellcheck on `scripts/rugpull-check.sh` | `shellcheck scripts/rugpull-check.sh` | no: not installed; `bash -n` passed |
+| The rug pull end to end with real headless Claude Code | `scripts/rugpull-check.sh` | no: for the owner |

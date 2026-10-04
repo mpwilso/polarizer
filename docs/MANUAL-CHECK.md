@@ -1,8 +1,8 @@
 # Manual check (M0 and M1a)
 
-**Which code this checks.** Steps 1 to 8 describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run steps 1 to 8 as written, check out commit 4eaa61a. The M1a section at the end runs on the current code: the first run, approving while a session is open, and a rug pull.
+**Which code this checks.** Steps 1 to 8 describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run steps 1 to 8 as written, check out commit 4eaa61a. The M1a section at the end runs on the current code: a headless, scripted rug-pull check that asks nothing.
 
-Run this in a real, interactive Claude Code session. It covers what no headless run can: `/mcp`, Esc to cancel, and normal use of two upstreams through Polarizer. Each step gives the command, what to expect, and what to paste back if it differs. Run every command from `~/code/polarizer`, in a terminal. Never run the manual check from inside another Claude Code session: that session's tools and settings would be mixed into what you observe.
+Run steps 1 to 8 in a real, interactive Claude Code session. They cover what no headless run can: `/mcp`, Esc to cancel, and normal use of two upstreams through Polarizer. Each step gives the command, what to expect, and what to paste back if it differs. Run every command from `~/code/polarizer`, in a terminal. Never run the manual check from inside another Claude Code session: that session's tools and settings would be mixed into what you observe.
 
 ## 1. Prepare
 
@@ -117,14 +117,21 @@ Expect no changes in the guarded repos, Parallax's directories or the MCP config
 
 ## M1a: pins (current code)
 
-Run this on the current code, from `~/code/polarizer`, in a plain terminal, never from inside another Claude Code session. It answers one open question, whether interactive Claude Code lists the tools again after Polarizer's change notice without a reconnect (docs/PIN-SPEC.md, decision 9), and checks the first run and a rug pull (sections 7 and 9). `scripts/m1a-check.sh` does every step except starting Claude Code and looking at `/mcp`. Run its commands in a second terminal, in `~/code/polarizer`, in this order; each one says what to do in terminal A, asks what you saw, and records it.
+Run `scripts/rugpull-check.sh` from `~/code/polarizer` in a plain terminal, then paste the output of `cat /tmp/rugpull-check-results.txt`.
 
-1. `scripts/m1a-check.sh reset`: takes a guard snapshot, runs `uv sync --locked` and the Filesystem pre-warm, removes `/tmp/polarizer-rugpull` and `~/.local/share/polarizer-m1a-check`, writes `polarizer.toml` from the example with the check's ledger and the probe's rug-pull mode, and prints the command that starts Claude Code in terminal A.
-2. `scripts/m1a-check.sh approve`: checks that `pending` lists exactly a first run's 21 new definitions, approves their group when you type `yes`, and asks whether `/mcp` shows the tools without reconnecting.
-3. `scripts/m1a-check.sh rugpull`: after you reconnect `polarizer` from `/mcp`, shows the changed `probe__wait`, asks what `/mcp` lists and what Claude said when asked to call it, and records the drift count and the last refusal.
-4. `scripts/m1a-check.sh approve-changed`: approves the changed definition by name when you type `yes`, and asks whether `/mcp` lists `probe__wait` again without reconnecting.
-5. `scripts/m1a-check.sh finish`: after you exit Claude Code, runs `verify`, writes `polarizer.toml` back from the example, removes `/tmp/polarizer-rugpull`, lists leftover probe or Filesystem server processes, and runs `scripts/guard.sh check`.
+It asks nothing and runs headless `claude -p` (haiku) three times, so it costs a few cents. Everything lives in a new temp directory with its own ledger; it never touches `polarizer.toml`, `manual/mcp.json` or any other ledger. Each run gets an mcp config that differs only in `PROBE_PHASE`, so the probe's definitions depend on the run, not on how many times anything started. Pass or fail is read from the ledger and the probe's log, never from what the model says. What each part proves:
 
-`scripts/m1a-check.sh status` says which step is next. A blank answer or Ctrl+C stops a step and says what was done; running the same step again carries on from there.
+- **Priming** (no model) records the probe's original definitions and approves them as a group, as a person's first run does. It proves nothing by itself.
+- **Run A** (original, approved): an approved tool works through real Claude Code. The probe receives `tools/call wait`, and the ledger has `call.sent` and `call.returned` with outcome `ok`.
+- **Run B** (changed description, not approved): a definition changed after approval is caught. The ledger has `tool.drift` for probe wait with different `approved_hash` and `live_hash`, the probe receives no `tools/call wait`, and B's session has no `call.sent` for `probe__wait`.
+- **The approval** (no model, through the library code `polarizer approve probe wait <hash>` runs): the ledger has `tool.approved` for the new hash.
+- **Run C** (changed, approved): approving the new definition by name brings the tool back. The call reaches the probe again, with `call.sent` and `call.returned` outcome `ok`.
+- **verify:** the ledger is intact at the end.
 
-When done, run `cat /tmp/m1a-check-results.txt` and paste it.
+What it does not prove:
+
+- **Mid-session re-listing in one live session.** Each run is a new Claude Code process with a new Polarizer, and B's change is there from the probe's first listing. That was answered interactively on 2026-10-04 with `scripts/m1a-check.sh`: approving while a session was open showed the tools in `/mcp` without a reconnect, both for the first approval and for approving the changed definition (docs/verified-facts.md, M1a check, interactive).
+- **A definition that changes during a session.** Only the tests cover that (`tests/test_pins.py::test_drift_mid_session_handshake`).
+- **Anything interactive,** such as `/mcp`, Esc, or what a person sees.
+
+`scripts/m1a-check.sh`, the interactive check it replaces, stays in the repo, marked superseded.
