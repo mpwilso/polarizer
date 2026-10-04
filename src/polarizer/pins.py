@@ -21,6 +21,7 @@ CAP_PROBLEM = f"more than {CAP} definitions since the last decision"
 GROUP_PREFIX = b"POLARIZER-GROUP/1\n"
 DECISIONS = ("tool.approved", "tool.rejected")
 NOT_IN_GROUP = "not in a group, because this tool has a decision; approve it by name"
+SEVERAL = "more than one definition waits for this tool; approve one by name"
 BLOCK_KINDS = ("new", "changed", "unservable")
 
 # state -> (the reason after `upstream <p> tool "<t>" ` in call.refused, the client's <why>)
@@ -175,10 +176,13 @@ class Block:
     copy: dict | None = None  # the stored copy, when it passed its check
     copy_problem: str | None = None  # why the stored copy failed its check
     decided: bool = False  # the tool has a decision, so it is never grouped
+    several: bool = False  # no decision, and more than one definition waits: never grouped
 
     @property
     def groupable(self) -> bool:
-        return self.kind == "new" and not self.decided and self.copy is not None
+        return (
+            self.kind == "new" and not self.decided and not self.several and self.copy is not None
+        )
 
 
 def blocks(pins: PinState, ledger_dir: Path, upstream: str | None = None) -> list[Block]:
@@ -188,14 +192,16 @@ def blocks(pins: PinState, ledger_dir: Path, upstream: str | None = None) -> lis
         if upstream is not None and key[0] != upstream:
             continue
         tp = pins.get(*key)
+        waiting = [h for h in tp.observed if h != tp.decided_hash]  # the decision covers the rest
         for def_hash, seq in tp.observed.items():
-            if def_hash == tp.decided_hash:
-                continue  # the decision covers it
+            if def_hash not in waiting:
+                continue
             if tp.decision == "approved":
                 block = Block("changed", *key, def_hash, seq, approved=tp.decided_hash)
             else:
                 block = Block("new", *key, def_hash, seq, rejected=tp.decided_hash)
             block.decided = tp.decision is not None
+            block.several = not block.decided and len(waiting) > 1
             try:
                 block.copy = defhash.read_copy(ledger_dir, def_hash)
             except defhash.CopyProblem as e:
@@ -226,35 +232,59 @@ def group(found: list[Block]) -> tuple[list[Block], str | None]:
     return members, hashlib.sha256(GROUP_PREFIX + rfc8785.dumps(triples)).hexdigest()
 
 
+def printable(text: str) -> str:
+    """Text from the ledger as `pending` prints it: every character outside printable ASCII
+    (0x20 to 0x7e) written as an escape, \\xNN below 0x100 and \\uNNNN above, one per UTF-16
+    code unit past U+FFFF. A ledger can't send terminal escapes to the person's terminal."""
+    out = []
+    for ch in str(text):
+        code = ord(ch)
+        if 0x20 <= code <= 0x7E:
+            out.append(ch)
+        elif code < 0x100:
+            out.append(f"{chr(0x5C)}x{code:02x}")
+        elif code <= 0xFFFF:
+            out.append(f"{chr(0x5C)}u{code:04x}")
+        else:
+            code -= 0x10000
+            for unit in (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF)):
+                out.append(f"{chr(0x5C)}u{unit:04x}")
+    return "".join(out)
+
+
 def render(found: list[Block]) -> list[str]:
-    """`pending`'s stdout for an intact ledger, line by line."""
+    """`pending`'s stdout for an intact ledger, line by line. Every name, hash and problem
+    taken from the ledger goes through printable()."""
     if not found:
         return ["pending: nothing waits for a decision"]
     new, changed, unservable = (sum(b.kind == k for b in found) for k in BLOCK_KINDS)
     lines = [f"pending: {new} new, {changed} changed, {unservable} unservable"]
     for b in found:
         lines.append("")
-        name = f"{b.upstream}__{b.tool}"
+        name = printable(f"{b.upstream}__{b.tool}")
+        def_hash = printable(b.def_hash or "-")
         if b.kind == "unservable":
-            lines.append(f"unservable {name} {b.def_hash or '-'}: {b.problem}")
+            lines.append(f"unservable {name} {def_hash}: {printable(b.problem)}")
             continue
         if b.kind == "changed":
-            lines.append(f"changed {name} {b.def_hash}, approved {b.approved}")
+            lines.append(f"changed {name} {def_hash}, approved {printable(b.approved)}")
         elif b.rejected is not None:
-            lines.append(f"new {name} {b.def_hash}, after rejecting {b.rejected}")
+            lines.append(f"new {name} {def_hash}, after rejecting {printable(b.rejected)}")
             lines.append(NOT_IN_GROUP)
         else:
-            lines.append(f"new {name} {b.def_hash}")
+            lines.append(f"new {name} {def_hash}")
+            if b.several:
+                lines.append(SEVERAL)
         if b.copy is not None:
             lines.extend(defhash.render(b.copy).split("\n"))
         else:
-            where = defhash.copy_name(b.def_hash)
-            lines.append(f"stored copy {where} {b.copy_problem}; it cannot be approved")
+            where = printable(f"{defhash.copy_name(b.def_hash)} {b.copy_problem}")
+            lines.append(f"stored copy {where}; it cannot be approved")
     members, group_id = group(found)
     if members:
         lines.append("")
         lines.append(
             f"group {group_id} covers the {len(members)} new definitions above "
-            "for tools with no decision yet"
+            "for tools with no decision yet and one definition waiting"
         )
     return lines

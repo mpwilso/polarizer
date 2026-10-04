@@ -1,6 +1,8 @@
 """Listing: paging and its limits, and a fresh upstream list on every client tools/list
 (docs/PROXY-SPEC.md, Listing)."""
 
+import os
+
 import anyio
 from helpers import rig
 from helpers.fakes import FakeUpstream
@@ -22,8 +24,14 @@ def test_paging_follows_cursor(tmp_path):
     assert _connected(tmp_path / "ledger")["f"]["tools"] == len(fake.names)
 
 
-def test_paging_limits(tmp_path):
-    """100 pages and 1,000 tools are allowed; one more page or tool refuses the upstream."""
+def test_paging_limits(tmp_path, monkeypatch):
+    """100 pages and 1,000 tools are allowed; one more page or tool refuses the upstream.
+
+    The 1,100 tools each get a stored copy and an approval, about 2,200 fsyncs, which say
+    nothing about paging and cost minutes where fsync is slow (Windows CI). fsync is a no-op
+    in this test only; test_writer and test_defhash cover durability."""
+    fsyncs = []
+    monkeypatch.setattr(os, "fsync", fsyncs.append)
     upstreams = {
         "pages100": FakeUpstream(names=[f"t{i}" for i in range(100)], page_size=1),
         "pages101": FakeUpstream(names=[f"t{i}" for i in range(101)], page_size=1),
@@ -51,6 +59,7 @@ def test_paging_limits(tmp_path):
     assert refused.is_error
     (entry,) = rig.kinds(tmp_path / "ledger", "call.refused")
     assert entry["data"]["reason"] == "upstream pages101 did not connect"
+    assert len(fsyncs) > 2000  # the patch was in effect for the ledger and the copies
 
 
 def test_every_client_list_refreshes(tmp_path):

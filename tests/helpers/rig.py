@@ -59,13 +59,15 @@ def approve_all(ledger_dir: Path, upstream: str | None = None) -> int:
 
 def approve_changed(ledger_dir: Path) -> int:
     """Approve, one by one as `polarizer approve <prefix> <tool> <hash>` does, every definition
-    a group leaves out: changed ones, and new ones after a rejection."""
+    a group leaves out: changed ones, new ones after a rejection, and the definitions of a tool
+    with more than one waiting. They go in listing order, so for a tool with several, the most
+    recently seen becomes its latest decision."""
     from polarizer.pins import blocks
 
     decider = Decider.open(ledger_dir)
     try:
         found = [b for b in blocks(decider.pins, ledger_dir) if b.kind != "unservable"]
-        todo = [b for b in found if b.decided and b.copy is not None]
+        todo = [b for b in found if (b.decided or b.several) and b.copy is not None]
         for b in todo:
             decider.approve_one(b.upstream, b.tool, b.def_hash, lambda line: None)
         return len(todo)

@@ -19,6 +19,15 @@ from polarizer.upstream import describe
 
 PREFIX = b"POLARIZER-TOOLDEF/1\n"
 DEFS = "defs"
+# A definition whose canonical bytes are longer is never stored or served (section 2).
+MAX_DEFINITION_BYTES = 262144
+TOO_LARGE = f"definition larger than {MAX_DEFINITION_BYTES} bytes"
+# Why a definition can't be hashed, chosen by the exception's type and never taken from its
+# message, which can quote the upstream's definition (section 2).
+NOT_A_TOOL = "not a valid tool definition"
+BIG_INTEGER = "integer outside the safe range"
+BAD_TEXT = "text that is not valid Unicode"
+NOT_CANONICAL = "could not be canonicalized"
 FORM_VERSION = "2026-07-28"
 # Required by the 2026-07-28 result model; they don't touch the tool.
 ENVELOPE = {"resultType": "complete", "ttlMs": 0, "cacheScope": "private"}
@@ -26,7 +35,7 @@ _BINARY = getattr(os, "O_BINARY", 0)
 
 
 class Unhashable(Exception):
-    """A definition that can't be hashed. The message is one line."""
+    """A definition that can't be hashed. The message is one of the four fixed reasons."""
 
 
 class CopyProblem(Exception):
@@ -36,16 +45,22 @@ class CopyProblem(Exception):
 
 def canonical(tool: types.Tool) -> bytes:
     """The canonical bytes of a tool's hashed form (section 2, steps 2 to 4)."""
-    mono = tool.model_dump(by_alias=True, mode="json", exclude_none=True, exclude={"meta"})
     try:
+        mono = tool.model_dump(by_alias=True, mode="json", exclude_none=True, exclude={"meta"})
         form = serialize_server_result("tools/list", FORM_VERSION, {"tools": [mono], **ENVELOPE})
         form = form["tools"][0]
-    except Exception as e:
-        raise Unhashable(describe(e)) from None
+    except Exception:
+        raise Unhashable(NOT_A_TOOL) from None
     try:
         return rfc8785.dumps(form)
-    except (rfc8785.CanonicalizationError, ValueError, TypeError, RecursionError) as e:
-        raise Unhashable(describe(e)) from None
+    except rfc8785.IntegerDomainError:
+        raise Unhashable(BIG_INTEGER) from None
+    except rfc8785.CanonicalizationError as e:
+        # rfc8785 reports a lone surrogate as its base error, raised from the UnicodeError.
+        reason = BAD_TEXT if isinstance(e.__cause__, UnicodeError) else NOT_CANONICAL
+        raise Unhashable(reason) from None
+    except (ValueError, TypeError, RecursionError):
+        raise Unhashable(NOT_CANONICAL) from None
 
 
 def hash_of(canon: bytes) -> str:
@@ -118,6 +133,8 @@ def write_copy(ledger_dir: Path, def_hash: str, canon: bytes) -> bool:
 def read_copy(ledger_dir: Path, def_hash: str) -> dict:
     """Read a stored copy and check it: present, readable, rehashing to its name, and a valid
     tool. Returns the stored object. Raises CopyProblem."""
+    if not is_hash(def_hash):
+        raise CopyProblem("missing")  # a name from a hand-edited ledger is never used as a path
     path = Path(ledger_dir) / DEFS / f"{def_hash}.json"
     try:
         raw = path.read_bytes()
@@ -143,5 +160,7 @@ def served(obj: dict, exposed_name: str) -> types.Tool:
 
 
 def render(obj: dict) -> str:
-    """A definition as `pending` and `approve` print it: every non-ASCII character escaped."""
-    return json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True)
+    """A definition as `pending` and `approve` print it: every character outside printable
+    ASCII escaped. ensure_ascii leaves DEL as it is, so it is escaped here."""
+    text = json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True)
+    return text.replace(chr(0x7F), chr(0x5C) + "u007f")

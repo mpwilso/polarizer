@@ -102,9 +102,10 @@ class Gateway:
             for spec in specs
         }
         # From each upstream's latest successful listing: its tool name -> live hash, or None
-        # when the definition can't be hashed (the problem is in _unhashable).
+        # when the definition can't be served at all: it can't be hashed or is too large (the
+        # problem is in _live_problem).
         self._live: dict[str, dict[str, str | None]] = {}
-        self._unhashable: dict[tuple[str, str], str] = {}
+        self._live_problem: dict[tuple[str, str], str] = {}
         self._unservable_recorded: set = set()  # (prefix, tool, def_hash, problem), per process
         self._failing: set[str] = set()  # prefixes in a run of failed refreshes, recorded
         self._observe_lock = anyio.Lock()
@@ -316,8 +317,14 @@ class Gateway:
                 except defhash.Unhashable as e:
                     live[name] = None
                     problem = f"cannot be hashed: {e}"
-                    self._unhashable[(prefix, name)] = problem
+                    self._live_problem[(prefix, name)] = problem
                     await self._unservable(prefix, name, None, problem)
+                    continue
+                if len(canon) > defhash.MAX_DEFINITION_BYTES:
+                    # Never stored, seen or counted toward the cap; recorded once, hidden.
+                    live[name] = None
+                    self._live_problem[(prefix, name)] = defhash.TOO_LARGE
+                    await self._unservable(prefix, name, def_hash, defhash.TOO_LARGE)
                     continue
                 live[name] = def_hash
                 tp = self.pins.get(prefix, name)
@@ -347,7 +354,7 @@ class Gateway:
         An approved tool's copy is read and rehashed every time."""
         live = self._live.get(prefix, {}).get(name)
         if live is None:
-            return "unservable", self._unhashable.get((prefix, name), "cannot be hashed"), None
+            return "unservable", self._live_problem.get((prefix, name), "cannot be hashed"), None
         st, problem = pins.state(self.pins.get(prefix, name), live)
         if st != "approved":
             return st, problem, None

@@ -7,6 +7,7 @@ import sys
 import anyio
 import mcp_types as types
 import pytest
+import rfc8785
 from helpers import probe_server, rig
 from helpers.fakes import FakeUpstream
 from mcp_types.methods import serialize_server_result
@@ -241,7 +242,7 @@ BIG = types.Tool(
 
 
 def test_unhashable_definition_hidden(tmp_path, capsys):
-    with pytest.raises(defhash.Unhashable, match="exceeds safe integer domain"):
+    with pytest.raises(defhash.Unhashable, match="^integer outside the safe range$"):
         defhash.definition(BIG)
     fake = FakeUpstream(definitions=[BIG, tool(WAIT)])
 
@@ -256,9 +257,11 @@ def test_unhashable_definition_hidden(tmp_path, capsys):
     assert refused.content[0].text == "polarizer: f__big is not available: it cannot be served"
     (entry,) = rig.kinds(tmp_path / "ledger", "tool.unservable")
     assert entry["data"]["def_hash"] is None
-    assert entry["data"]["problem"].startswith("cannot be hashed: ")
+    assert entry["data"]["problem"] == "cannot be hashed: integer outside the safe range"
     (call,) = rig.kinds(tmp_path / "ledger", "call.refused")
-    assert call["data"]["reason"].startswith('upstream f tool "big" cannot be served: cannot be')
+    assert call["data"]["reason"] == (
+        'upstream f tool "big" cannot be served: cannot be hashed: integer outside the safe range'
+    )
     # approve can't approve it: no hash was ever seen for it.
     ledger_dir = str(tmp_path / "ledger")
     capsys.readouterr()  # serve's own stderr lines
@@ -267,6 +270,115 @@ def test_unhashable_definition_hidden(tmp_path, capsys):
     out, err = capsys.readouterr()
     assert code == 2 and out == ""
     assert err == f"polarizer: Polarizer has not seen f__big with definition {'0' * 64}\n"
+
+
+# An ESC and 5,000 characters of text: what an upstream could put in a definition to reach a
+# terminal through an exception's message.
+HOSTILE = chr(27) + "[2J" + "A" * 5000
+
+
+def test_unhashable_message_is_fixed(tmp_path, capsys, monkeypatch):
+    """Each reason comes from the exception's type, never its message. A hostile definition
+    that fails to hash leaves none of its text in the ledger or in pending's output."""
+    big_schema = {"type": "object", "properties": {"n": {"maximum": 2**63 - 1}}}
+    not_a_tool = tool({"name": "t", "inputSchema": {"type": HOSTILE}})
+    cases = [
+        (not_a_tool, defhash.NOT_A_TOOL),
+        (
+            tool({"name": "t", "description": HOSTILE, "inputSchema": big_schema}),
+            defhash.BIG_INTEGER,
+        ),
+        (tool({**WAIT, "description": HOSTILE + chr(0xD800)}), defhash.BAD_TEXT),
+    ]
+    for definition, reason in cases:
+        with pytest.raises(defhash.Unhashable) as caught:
+            defhash.definition(definition)
+        assert str(caught.value) == reason
+    # Stage 4 recorded the exception's own message, which quotes the definition.
+    mono = not_a_tool.model_dump(by_alias=True, mode="json", exclude_none=True)
+    with pytest.raises(Exception) as raw:
+        serialize_server_result("tools/list", "2026-07-28", {"tools": [mono], **defhash.ENVELOPE})
+    assert "A" * 10 in str(raw.value)
+    for error in (rfc8785.CanonicalizationError(HOSTILE), RecursionError(HOSTILE)):
+
+        def failing(obj, error=error):
+            raise error
+
+        with monkeypatch.context() as patch:
+            patch.setattr(defhash.rfc8785, "dumps", failing)
+            with pytest.raises(defhash.Unhashable) as caught:
+                defhash.definition(tool(WAIT))
+        assert str(caught.value) == defhash.NOT_CANONICAL
+
+    hostile = tool({"name": "big", "description": HOSTILE, "inputSchema": big_schema})
+    fake = FakeUpstream(definitions=[hostile, tool(WAIT)])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)], approve=False) as (c, _):
+            return (await c.list_tools()).tools
+
+    assert anyio.run(scenario) == []
+    (entry,) = rig.kinds(ledger_dir, "tool.unservable")
+    assert entry["data"]["problem"] == "cannot be hashed: integer outside the safe range"
+    capsys.readouterr()
+    assert cli.main(["pending", "--ledger-dir", str(ledger_dir)]) == 0
+    out, err = capsys.readouterr()
+    assert "unservable f__big -: cannot be hashed: integer outside the safe range" in out
+    ledger = (ledger_dir / "ledger.jsonl").read_text(encoding="utf-8")
+    for text in (ledger, out, err):
+        assert chr(27) not in text and "A" * 10 not in text
+
+
+def _sized(name: str, n: int) -> types.Tool:
+    """A tool whose canonical bytes are exactly n long."""
+    schema = {"type": "object"}
+    base = len(defhash.canonical(types.Tool(name=name, description="", input_schema=schema)))
+    return types.Tool(name=name, description="x" * (n - base), input_schema=schema)
+
+
+def test_oversized_definition_unservable(tmp_path, capsys):
+    """A definition over 262144 canonical bytes is not stored, records one tool.unservable
+    with its hash, stays hidden however often it is listed, and can't be approved. One of
+    exactly 262144 bytes is served."""
+    limit = defhash.MAX_DEFINITION_BYTES
+    fits = _sized("fits", limit)
+    assert len(defhash.canonical(fits)) == limit
+    large = _sized("large", limit + 1)
+    large_hash, canon = defhash.definition(large)
+    assert len(canon) == limit + 1
+    fake = FakeUpstream(definitions=[large, fits])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, [rig.spec("f", fake.server)]) as (client, _):
+            listed = [[t.name for t in (await client.list_tools()).tools] for _ in range(3)]
+            refused = await client.call_tool("f__large", {})
+            return listed, refused
+
+    listed, refused = anyio.run(scenario)
+    assert listed == [["f__fits"]] * 3
+    assert refused.content[0].text == "polarizer: f__large is not available: it cannot be served"
+    (entry,) = rig.kinds(ledger_dir, "tool.unservable")
+    assert (entry["data"]["tool"], entry["data"]["def_hash"]) == ("large", large_hash)
+    assert entry["data"]["problem"] == "definition larger than 262144 bytes"
+    assert [e["data"]["tool"] for e in rig.kinds(ledger_dir, "tool.seen")] == ["fits"]
+    assert not (ledger_dir / "defs" / f"{large_hash}.json").exists()
+    (call,) = rig.kinds(ledger_dir, "call.refused")
+    assert call["data"]["reason"] == (
+        'upstream f tool "large" cannot be served: definition larger than 262144 bytes'
+    )
+    capsys.readouterr()
+    argv = ["approve", "--ledger-dir", str(ledger_dir), "f", "large", large_hash]
+    assert cli.main([*argv, "--allow-no-terminal"]) == 2
+    assert capsys.readouterr().err == (
+        f"polarizer: Polarizer has not seen f__large with definition {large_hash}\n"
+    )
+    assert cli.main(["pending", "--ledger-dir", str(ledger_dir)]) == 0
+    assert capsys.readouterr().out == (
+        "pending: 0 new, 0 changed, 1 unservable\n\n"
+        f"unservable f__large {large_hash}: definition larger than 262144 bytes\n"
+    )
 
 
 def test_written_copy_never_replaces(tmp_path):

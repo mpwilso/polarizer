@@ -103,3 +103,50 @@ Nothing needed the owner: no gap touched the ledger format, a hash form beyond d
 | The new and changed tests pass repeatedly | five runs of the pin, proxy, era, listing, stdout, fidelity, outcome and startup tests | yes, 5 of 5 |
 | All of the above on Windows and macOS | CI | no |
 | Approving while an interactive session is open | docs/MANUAL-CHECK.md (stage 5) | no |
+
+## Review fixes
+
+After the stage 4 review, two commits: "spec: stage4 review fixes" (PIN-SPEC.md sections 2, 3, 4, 5, 6, 7, 10 and 13, and one sentence each in PROXY-SPEC.md and LEDGER-SPEC.md), then "stage4: review fixes". No change to the ledger format, the hash chain, a status or an exit code.
+
+### What changed
+
+1. **Fixed reasons for a definition that can't be hashed.** `defhash.canonical` maps the exception's type to one of `not a valid tool definition`, `integer outside the safe range`, `text that is not valid Unicode` and `could not be canonicalized`, and never uses its message. rfc8785 reports a lone surrogate as its base `CanonicalizationError`, raised from a `UnicodeEncodeError`, so the cause's type picks the third reason. `test_unhashable_message_is_fixed` covers each reason and a hostile definition (an ESC and 5,000 characters) that leaves no trace in the ledger, in `pending`'s output or on stderr.
+2. **`pending` escapes ledger text.** `pins.printable` writes every character outside 0x20 to 0x7e as `\xNN` below 0x100 and `\uNNNN` above (a surrogate pair past U+FFFF). It is applied to every name, hash and problem `pending` takes from the ledger, including the operating system's message in a stored-copy problem. `defhash.render` also writes DEL as `\u007f`. `test_pending_escapes_problem_text`.
+3. **A size cap.** Nothing in `upstream.py`, `proxy.py` or the SDK's stdio transport limited the size of one listed definition; M0's only limits are 100 pages and 1,000 tools per upstream. `defhash.MAX_DEFINITION_BYTES` is 262144 on the canonical bytes. A larger definition is not stored, gets no `tool.seen`, records one `tool.unservable` per process with its hash and `definition larger than 262144 bytes`, and is hidden. `test_oversized_definition_unservable` also checks that 262144 bytes exactly is served.
+4. **Group approval and several waiting hashes.** A tool with no decision and more than one hash observed since its latest decision is left out of the group and its id. Each of its blocks prints `more than one definition waits for this tool; approve one by name` on the line after its header, where a decided tool prints its own line (decided: the prompt said each block is "followed by" the line; the place after the header matches the existing line, so the reason is read before the definition). The group line now ends `for tools with no decision yet and one definition waiting`. New golden row `pending_several_waiting.txt`; `pending_mixed.txt`, `pending_one_upstream.txt` and `pending_capped.txt` changed only in the group line, and `pending_mixed.txt` in the unhashable reason. `test_group_skips_tools_with_several_waiting_hashes`.
+5. **`test_listing::test_paging_limits`** replaces `os.fsync` with a no-op for that test only (monkeypatch), which covers the writer, `ledger.head` and the stored copies, and asserts that more than 2,000 fsyncs were skipped. The `FileOps` hook alone would not reach the stored copies, which call `os.fsync` themselves. On WSL2 the test took 7.36 s before and 0.89 s and 1.06 s after (two runs, `--durations=1`).
+6. **Small additions:** `read_copy` treats a name that isn't 64 lowercase hex characters as a missing copy, so a hand-edited ledger never supplies a path; `rig.approve_changed` also approves, one by one, the definitions of a tool with several waiting.
+
+### Tests changed, and why
+
+- `test_defhash::test_unhashable_definition_hidden`: it matched rfc8785's message; it now checks the fixed reason exactly, in the exception, the ledger and the refusal reason.
+- `tests/helpers/pinledger.py`, `mixed()`: its hand-written `tool.unservable` used the old message; it now holds `cannot be hashed: integer outside the safe range`.
+- The three golden files in item 4.
+- No test relied on a group approving several definitions of one tool; none had to change for item 4.
+
+### Where exception text built from upstream data can go
+
+Checked for item 1. "Upstream text" means a message that may quote what an upstream sent.
+
+1. `defhash.canonical` (fixed by item 1): into `tool.unservable` and `pending`.
+2. `upstream.py`, `Upstream.run`: a failed connect sets `error = describe(e)`. For a tool list the SDK can't parse, that is pydantic's `ValidationError`, which quotes part of the definitions (STAGE3-NOTES.md, guess 6). It reaches `upstream.connected`'s `error` (folded, cut to 1 KiB) and serve's stderr line `did not connect: <error>`. Not stdout, not the client.
+3. `Upstream.refresh`: the same message as `list_error`, into `upstream.refresh_failed`'s `error` and serve's stderr line `listing failed (<why>)`.
+4. `Upstream.lose`, from `run` and `check_closed`: an `MCPError` -32000 message, which an upstream can send itself, into `upstream.refresh_failed` (`connection-lost`) and stderr.
+5. `Upstream._follow_changes`: a failed listen stream's message, to stderr only.
+6. `proxy.py`, `_call_tool`: a protocol error's message goes to `call.returned`'s `error` and back to the client as the JSON-RPC error's message, by design (PROXY-SPEC.md, Outcomes). A transport error's message, and any other exception's except pydantic's, goes into the client's one line and the ledger.
+7. `approve`'s refusal `stored copy defs/<hash>.json unreadable: <message>` carries the operating system's message to stderr, unescaped. Not upstream text.
+
+None reaches stdout except through `pending`, which item 2 now escapes. Items 2 to 5 can carry an ESC to serve's stderr, which Claude Code logs and which a person sees when running `serve < /dev/null` in a terminal. Not changed here, because no review item asked for it; a fixed line for listing failures, like stage 3's for results, and escaping serve's stderr, would close them.
+
+### The two reference tests stage 4 changed but didn't run
+
+`POLARIZER_REFERENCE=1` set for that command only, with `PATH` starting at a scratch directory whose `npx` script runs the real `npx --offline`, so npm could not reach the registry:
+
+    POLARIZER_REFERENCE=1 uv run --locked pytest -s -rA "tests/test_reference.py::test_sdk_clients" "tests/test_reference.py::test_raw_wire"
+
+Both passed, in 7.97 s. Everything and Filesystem 2026.8.31 answered at 2025-11-25; all 27 tools differed only by `execution`, on both sides, and the three results only by the serverInfo stamp (SDK clients) or an added `"isError": false` (raw). The npx cache's three package directories held no entry newer than the run's start; two of npm's index files for those two packuments were rewritten, with their newest records dated before this session.
+
+### Stated limits
+
+- **`defs/` needs hard links on POSIX.** A stored copy is moved into place with `os.link`, so it never replaces an existing file. On a filesystem without hard links (some network or FUSE mounts, FAT), every copy fails with `stored copy could not be written: <message>`, and no tool can be exposed. The default ledger directory, `~/.local/share/polarizer`, is on the home filesystem, which has them. Windows uses `os.rename`, which fails if the target exists.
+- **`pending` lists every definition seen since the latest decision,** including ones the upstream no longer serves. It reads only the ledger and `defs/` and never starts an upstream, so it can't tell what is live. A definition an upstream served once and then dropped stays listed until the tool gets a decision; approving it is harmless, because exposure needs the live hash to match.

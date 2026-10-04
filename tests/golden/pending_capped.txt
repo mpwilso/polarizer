@@ -19,4 +19,4 @@ new probe__wait ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b
 
 unservable probe__wait cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc: more than 16 definitions since the last decision
 
-group f3521beff41c5e8ffcf97a6448329efbc7607398470c99fcb56c3516dc19e7eb covers the 1 new definitions above for tools with no decision yet
+group f3521beff41c5e8ffcf97a6448329efbc7607398470c99fcb56c3516dc19e7eb covers the 1 new definitions above for tools with no decision yet and one definition waiting

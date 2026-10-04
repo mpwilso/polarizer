@@ -74,6 +74,93 @@ def test_group_is_bound_to_what_was_printed(tmp_path, capsys, fake_home):
     assert [(b.upstream, b.tool) for b in members] == [("probe", "note"), ("probe", "wait")]
 
 
+def test_group_skips_tools_with_several_waiting_hashes(tmp_path, capsys, fake_home):
+    """A tool with no decision and two definitions waiting is left out of the group line and
+    the group id, each of its blocks says to approve one by name, and approving one by name
+    gives it a decision."""
+    from polarizer.pins import SEVERAL
+
+    directory = pinledger.several(tmp_path / "ledger")
+    assert cli.main(["pending", "--ledger-dir", str(directory)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    v1, v2, wait = (pinledger.hashed(k) for k in ("echo_v1", "echo_v2", "wait"))
+    for h in (v1, v2):
+        header = lines.index(f"new probe__echo {h}")
+        assert lines[header + 1] == SEVERAL
+    assert lines[lines.index(f"new probe__wait {wait}") + 1] == "{"
+    assert lines[-1].endswith(
+        "covers the 1 new definitions above for tools with no decision yet and one definition "
+        "waiting"
+    )
+    decider = Decider.open(directory)
+    try:
+        members, gid = decider.pending_group()
+    finally:
+        decider.close()
+    assert [(b.tool, b.def_hash) for b in members] == [("wait", wait)]
+    assert lines[-1].split()[1] == gid
+    assert run("approve", "--ledger-dir", str(directory), "--group", gid) == 0
+    approved = [e["data"] for e in entries(directory) if e["kind"] == "tool.approved"]
+    assert [(d["tool"], d["def_hash"], d["group"]) for d in approved] == [("wait", wait, gid)]
+    capsys.readouterr()
+    assert cli.main(["pending", "--ledger-dir", str(directory)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("pending: 2 new, 0 changed, 0 unservable\n") and "group " not in out
+    assert run("approve", "--ledger-dir", str(directory), "probe", "echo", v2) == 0
+    capsys.readouterr()
+    assert cli.main(["pending", "--ledger-dir", str(directory)]) == 0
+    assert capsys.readouterr().out == "pending: nothing waits for a decision\n"
+
+
+def test_pending_escapes_problem_text(tmp_path, capsys, monkeypatch):
+    """Control characters, DEL and non-ASCII text from the ledger print as escapes: in a
+    problem, in the operating system's message of a stored-copy problem, and in names. A
+    definition's DEL prints as an escape too."""
+    import mcp_types as types
+    from conftest import build_chain
+
+    from polarizer import defhash
+
+    bs, esc, delete = chr(92), chr(27), chr(0x7F)
+    session = {"session": pinledger.SESSION}
+    odd = types.Tool(name="odd", description="a" + delete + "b", input_schema={"type": "object"})
+    odd_hash, canon = defhash.definition(odd)
+    unreadable = pinledger.hashed("wait")
+    problem = "cannot be hashed: " + esc + "[2J" + delete + chr(0xE9) + chr(0x200B) + chr(0x1F600)
+    specs = [
+        ("tool.seen", {**session, "upstream": "p", "tool": "odd", "def_hash": odd_hash}),
+        ("tool.unservable", {**session, "upstream": "p", "tool": "t" + esc, "def_hash": None,
+                             "problem": problem}),
+        ("tool.unservable", {**session, "upstream": "p", "tool": "w", "def_hash": unreadable,
+                             "problem": "stored copy unreadable: then"}),
+    ]  # fmt: skip
+    directory = tmp_path / "ledger"
+    build_chain(directory, specs, head_at=0)
+    defhash.write_copy(directory, odd_hash, canon)
+    real = defhash.read_copy
+
+    def read_copy(ledger_dir, def_hash):
+        if def_hash == unreadable:
+            message = "Acc" + chr(0xE8) + "s refus" + chr(0xE9) + esc + "[0m"
+            raise defhash.CopyProblem(f"unreadable: {message}")
+        return real(ledger_dir, def_hash)
+
+    monkeypatch.setattr(defhash, "read_copy", read_copy)
+    assert cli.main(["pending", "--ledger-dir", str(directory)]) == 0
+    out = capsys.readouterr().out
+    assert all(" " <= ch <= "~" or ch == "\n" for ch in out), out
+    lines = out.splitlines()
+    assert f'  "description": "a{bs}u007fb",' in lines
+    assert (
+        f"unservable p__t{bs}x1b -: cannot be hashed: {bs}x1b[2J{bs}x7f{bs}xe9{bs}u200b"
+        f"{bs}ud83d{bs}ude00"
+    ) in lines
+    assert (
+        f"unservable p__w {unreadable}: stored copy defs/{unreadable}.json unreadable: "
+        f"Acc{bs}xe8s refus{bs}xe9{bs}x1b[0m"
+    ) in lines
+
+
 def test_approve_only_what_serve_saw(tmp_path, capsys, fake_home):
     directory = pinledger.mixed(tmp_path / "ledger")
     pinledger.store(directory, "add")  # a stored copy alone is not enough

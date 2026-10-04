@@ -1,6 +1,6 @@
 pending: 4 new, 1 changed, 1 unservable
 
-unservable every__big -: cannot be hashed: 9223372036854775807 exceeds safe integer domain for JSON floats
+unservable every__big -: cannot be hashed: integer outside the safe range
 
 changed every__echo e0dd65c078ecbb8f1e44ababf3a8fe225573505a985f9cb79ac430caee6dbc6e, approved a65b57e9bd59678c4775549c9d1eeff991f2a6f617c0e651fa9d1cf3ca87b3f3
 {
@@ -50,4 +50,4 @@ new probe__wait ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b
   "name": "wait"
 }
 
-group 6e3b7999c91e822e04ffeec5bc734bd13a55abf8c644dff63ec84b130a777f8f covers the 2 new definitions above for tools with no decision yet
+group 6e3b7999c91e822e04ffeec5bc734bd13a55abf8c644dff63ec84b130a777f8f covers the 2 new definitions above for tools with no decision yet and one definition waiting

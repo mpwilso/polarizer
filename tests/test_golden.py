@@ -234,6 +234,7 @@ PENDING = {
     "pending_mixed": (pinledger.mixed, [], 0),
     "pending_one_upstream": (pinledger.mixed, ["--upstream", "probe"], 0),
     "pending_capped": (pinledger.capped, [], 0),
+    "pending_several_waiting": (pinledger.several, [], 0),
     "pending_tampered": (fixture("broken/edit_value"), [], 1),
     "pending_invalid": (fixture("broken/insert_float"), [], 3),
     "pending_torn_tail": (fixture("broken/tear_last_line"), [], 5),

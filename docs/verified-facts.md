@@ -580,6 +580,16 @@ Checked while building M1a's pins at rest, on mcp 2.2.0, mcp-types 2.2.0, pydant
 - **rfc8785's errors** (executed): `IntegerDomainError` and `FloatDomainError` are subclasses of `CanonicalizationError`, itself a `ValueError`. The message for 9223372036854775808 is `9223372036854775808 exceeds safe integer domain for JSON floats`.
 - **The reference servers under pins** (`POLARIZER_REFERENCE=1 uv run --locked pytest -s "tests/test_reference.py::test_reference_tools_hash_and_serve"`, run once, on Linux): Everything 2026.8.31 lists 13 tools and Filesystem 2026.8.31 lists 14. All 27 hashed, none has `_meta`, none was unservable, and the largest integer in any schema is 10. Two priming runs into separate ledgers gave the same 27 hashes. Approved, every tool reached an SDK client (2026-07-28) and a raw client (2025-11-25) exactly as its stored copy, renamed. The servers ran with the pinned commands under Pinned fetches. Afterwards, of npx's two cache directories for them (`~/.npm/_npx/68b53d3fd47bf8db` and `a705c79b42eea4c8`, each holding version 2026.8.31), only the directories' own mtimes had changed; none of the 9,132 entries inside was newer than the session's guard snapshot, so nothing was fetched and nothing new was pinned.
 
+## Stage 4 review (Oct 4, 2026, UTC)
+
+Checked while fixing the stage 4 review items, on mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5 and rfc8785 0.1.4, in `.venv`, with throwaway scripts in the session scratch directory and then in tests. No Claude Code, no model.
+
+- **rfc8785 and a lone surrogate** (read and executed): `dumps` raises its base `CanonicalizationError` with the message `input contains non-UTF-8 codepoints`, raised from the `UnicodeEncodeError` (`rfc8785/_impl.py`, around line 93). It has no subclass of its own, so only the cause tells it apart.
+- **pydantic's messages quote their input** (executed): a tool whose `inputSchema` has `"type"` set to an ESC and 5,000 characters fails the 2026-07-28 result model with a `ValidationError` whose message holds a cut-down part of that text, with the ESC shown as `\x1b`. Such a tool can't reach the hash through an upstream: the 2025-11-25 result model, which the SDK client checks first on older-era connections, also requires `"type": "object"`.
+- **A NaN in a schema** (executed): `model_dump(mode="json")` writes it as `null`, so the definition hashes, with `null` in its place.
+- **Nothing limits one definition's size** (read): `mcp/client/stdio.py` splits stdout into lines with no length limit, and Polarizer's only listing limits are 100 pages and 1,000 tools.
+- **The reference servers, offline.** `npx --offline -y <package>@2026.8.31 ...` ran both pinned servers from npx's cache; `--offline` makes npm refuse any registry request, and a version not in the cache failed with `notarget`. The two reference tests ran through a scratch `npx` script that adds `--offline` (STAGE4-NOTES.md, Review fixes). Nothing new was fetched or pinned.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

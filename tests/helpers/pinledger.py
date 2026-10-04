@@ -70,8 +70,8 @@ def mixed(ledger_dir: Path) -> Path:
         _seen("every", "echo", "echo_v1"),
         _seen("every", "add", "add"),
         ("tool.unservable", {"session": SESSION, "upstream": "every", "tool": "big",
-                             "def_hash": None, "problem": "cannot be hashed: 9223372036854775807 "
-                             "exceeds safe integer domain for JSON floats"}),
+                             "def_hash": None,
+                             "problem": "cannot be hashed: integer outside the safe range"}),
         _decision("tool.rejected", "probe", "fail", "fail_v1", reason="reads files"),
         _decision("tool.approved", "every", "echo", "echo_v1", group=None),
         _decision("tool.approved", "every", "add", "add", group=None),
@@ -107,4 +107,17 @@ def capped(ledger_dir: Path) -> Path:
                                       "def_hash": "c" * 64, "problem": CAP_PROBLEM}))  # fmt: skip
     build_chain(ledger_dir, specs, head_at=0)
     store(ledger_dir, "wait")
+    return ledger_dir
+
+
+def several(ledger_dir: Path) -> Path:
+    """probe/echo, never decided, seen with two definitions; probe/wait seen with one. The
+    group covers only probe/wait."""
+    specs = [
+        _seen("probe", "echo", "echo_v1"),
+        _seen("probe", "wait", "wait"),
+        _seen("probe", "echo", "echo_v2"),
+    ]
+    build_chain(ledger_dir, specs, head_at=0)
+    store(ledger_dir, "echo_v1", "echo_v2", "wait")
     return ledger_dir
