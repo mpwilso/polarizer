@@ -13,7 +13,7 @@ from helpers import rig
 from helpers.fakes import FakeUpstream
 from mcp.shared.subscriptions import ToolsListChanged
 
-from polarizer import defhash
+from polarizer import cli, defhash
 from polarizer.decisions import Decider
 from polarizer.pins import PinState
 from polarizer.writer import FileOps, LedgerWriter
@@ -250,3 +250,54 @@ def test_watch_reads_only_new_bytes(tmp_path):
     for size, (idle, grown, read) in counts.items():
         assert idle == 0, size
         assert read == grown, size  # three entries' bytes, at either size
+
+
+class RejectionFails(PinState):
+    """serve's pin state, with a fold that raises on a rejection."""
+
+    def apply(self, entry):
+        if entry.get("kind") == "tool.rejected":
+            raise RuntimeError("fold broke")
+        super().apply(entry)
+
+
+def test_rejection_that_cannot_fold_stops_exposing(tmp_path, capfd):
+    """Another process rejects an approved tool, and serve's fold of that rejection raises.
+    Pin state would still say approved, so the writer stops: the first list after the
+    rejection is empty, the call is refused as unrecordable, the client is told once, and the
+    stop is one line on stderr. The watch is slowed so the client's own list does the
+    catch-up."""
+    fake = FakeUpstream(names=["echo"])
+    ledger_dir = tmp_path / "ledger"
+    specs = [rig.spec("f", fake.server)]
+    options = {"state": RejectionFails(), "watch_interval": 3600}
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, specs, **options) as (c, gw):
+            before = names((await c.list_tools()).tools)
+            async with c.listen(tools_list_changed=True) as subscription:
+                argv = ["reject", "--ledger-dir", str(ledger_dir), "f", "echo", echo_hash(fake)]
+                argv += ["--reason", "r", "--allow-no-terminal"]
+                assert await anyio.to_thread.run_sync(cli.main, argv) == 0
+                after = names((await c.list_tools()).tools)
+                stopped = gw.writer.stopped
+                refused = await c.call_tool("f__echo", {})
+                assert isinstance(await rig.next_notice(subscription), ToolsListChanged)
+                quiet = await rig.no_notice(subscription)
+                again = names((await c.list_tools()).tools)
+            return before, after, stopped, refused, quiet, again, names(await gw.exposed())
+
+    before, after, stopped, refused, quiet, again, exposed = anyio.run(scenario)
+    seq = rig.kinds(ledger_dir, "tool.rejected")[0]["seq"]
+    line = f"polarizer: stopped writing the ledger: could not fold seq {seq} into pin state: "
+    assert before == ["f__echo"]
+    assert after == [] and again == [] and exposed == []
+    assert stopped == line + "fold broke"
+    assert refused.content[0].text == (
+        "polarizer: f__echo was not called: the ledger could not record it"
+    )
+    assert quiet
+    err = capfd.readouterr().err.splitlines()
+    assert err.count(stopped) == 1
+    assert f"polarizer: refused f__echo: could not record it: {stopped}" in err
+    assert not rig.kinds(ledger_dir, "call.sent")

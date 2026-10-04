@@ -251,6 +251,9 @@ def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
         print(warning, file=sys.stderr)
     try:
         outcome = writer.repair(ledger_dir)
+    except writer.LedgerError as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
     except OSError as e:
         return _err(f"polarizer: cannot repair {e.filename or ledger_dir}: {e.strerror}")
     for line in outcome.lines:

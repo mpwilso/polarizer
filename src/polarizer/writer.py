@@ -11,6 +11,7 @@ import hashlib
 import os
 import queue
 import secrets
+import stat
 import sys
 import threading
 import time
@@ -210,9 +211,10 @@ class LedgerWriter:
     process wrote but may not have made durable.
 
     A listener that raises at open refuses the open (LedgerError, exit 1): pin state could not
-    be folded. Once open, the entry is already in the ledger when the listener runs, so a
-    failure there is one warning line on stderr; the append or catch-up still succeeds, and
-    the remaining adopted entries are still handed over.
+    be folded. Once open, the entry is already in the ledger when the listener runs, so the
+    append or catch-up that wrote or adopted it still resolves; but pin state now lacks it, so
+    the writer stops, as for a ledger that changed under it, and nothing acts on that state
+    again (docs/PIN-SPEC.md, section 8).
     """
 
     def __init__(self, ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync, on_entry=None):
@@ -402,6 +404,8 @@ class LedgerWriter:
         self._lock.acquire(None)
         try:
             self._catch_up()
+            if self._stopped:  # a fold in that catch-up failed; this entry is not written
+                raise Stopped(self._stopped, 1)
             state = self._state
             entry, line = make_entry(state.lines, now_ts(), kind, data, state.last_hash)
             self._ops.write(self._fd, line)
@@ -454,22 +458,30 @@ class LedgerWriter:
                 except OSError as e:
                     self._stop(f"could not fsync an approval another process wrote: {e}")
             for entry in adopted:
-                self._hand_over(entry)
+                if not self._hand_over(entry):
+                    break
         return len(adopted)
 
-    def _hand_over(self, entry: dict) -> None:
+    def _hand_over(self, entry: dict) -> bool:
         """Give an entry already in the ledger to on_entry. A failure there can't undo the
-        write or the adoption, so it is reported on one line and the writer carries on."""
+        write or the adoption, but pin state now lacks the entry, so the writer stops without
+        raising: the append or catch-up in progress still resolves. False if it stopped."""
         if self._on_entry is None:
-            return
+            return True
         try:
             self._on_entry(entry)
         except Exception as e:
-            print(f"polarizer: warning: {_fold_failed(entry, e)}", file=sys.stderr)
+            self._halt(f"polarizer: stopped writing the ledger: {_fold_failed(entry, e)}")
+            return False
+        return True
+
+    def _halt(self, line: str) -> None:
+        """Stop for good: every later append and catch-up raises Stopped with line."""
+        self._stopped = line
+        print(line, file=sys.stderr)
 
     def _stop(self, why: str) -> None:
-        self._stopped = f"polarizer: stopped writing the ledger: {why}; run polarizer verify"
-        print(self._stopped, file=sys.stderr)
+        self._halt(f"polarizer: stopped writing the ledger: {why}; run polarizer verify")
         raise Stopped(self._stopped, 1)
 
 
@@ -519,16 +531,46 @@ def _refused(result: Result) -> str:
     return f"refused: ledger is {result.status} at line {result.line}{end}"
 
 
+def _save_torn(path: Path, torn: bytes, ops: FileOps) -> bool:
+    """Save the torn bytes to path, created exclusively, and fsync it. If path already holds
+    exactly these bytes (a repair that crashed before its truncate), it is fsynced and reused,
+    never written; True then. Anything else there is refused with LedgerError, exit 2."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        try:
+            ops.write(fd, torn)
+            ops.fsync(fd)
+        finally:
+            os.close(fd)
+        return False
+    # O_RDWR, never truncating, because Windows can only fsync a file opened for writing.
+    fd = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) | _BINARY)
+    try:
+        same = (
+            stat.S_ISREG(os.fstat(fd).st_mode)
+            and ops.size(fd) == len(torn)
+            and ops.read_at(fd, 0, len(torn)) == torn
+        )
+        if not same:
+            raise LedgerError(
+                f"polarizer: cannot repair: {path} already exists and its contents differ "
+                "from the ledger's torn tail; nothing was changed",
+                2,
+            )
+        ops.fsync(fd)
+    finally:
+        os.close(fd)
+    return True
+
+
 def _repair_torn(ledger_dir: Path, data: bytes, result: Result, ops: FileOps) -> str:
     torn = data[result.complete_bytes :]
     next_seq = result.state.lines
     name = f"{LEDGER}.torn-{next_seq}-{hashlib.sha256(torn).hexdigest()[:12]}"
-    fd = os.open(ledger_dir / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
-    try:
-        ops.write(fd, torn)
-        ops.fsync(fd)
-    finally:
-        os.close(fd)
+    reused = _save_torn(ledger_dir / name, torn, ops)
     _fsync_dir(ledger_dir)
     fd = os.open(ledger_dir / LEDGER, os.O_RDWR | _BINARY)
     try:
@@ -546,4 +588,6 @@ def _repair_torn(ledger_dir: Path, data: bytes, result: Result, ops: FileOps) ->
     finally:
         os.close(fd)
     moved = f"moved {len(torn)} bytes to {name}"
+    if reused:
+        moved += " (an earlier repair had saved them)"
     return f"repaired: {moved}; appended ledger.repaired at seq {entry['seq']}"

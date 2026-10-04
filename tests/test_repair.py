@@ -1,6 +1,9 @@
 """Lock waits (2 s, then refuse with exit 7), and repair, which fixes only a torn tail."""
 
+import hashlib
 import json
+import os
+import sys
 import threading
 import time
 
@@ -176,8 +179,8 @@ def torn_names(directory):
 
 def test_crash_after_saving_the_torn_bytes(tmp_path, capsys):
     """The ledger and ledger.head are untouched and the side file holds the torn bytes. A
-    second repair picks the same name, so its exclusive create fails: exit 2, one line, nothing
-    changed. Once a person removes the side file, repair runs to the end."""
+    second repair picks the same name, finds the bytes equal, and reuses the file as it is
+    (same inode, same bytes) to finish the repair."""
     directory = install_fixture("broken/tear_last_line", tmp_path / "l")
     data = (directory / LEDGER).read_bytes()
     head = (directory / "ledger.head").read_bytes()
@@ -189,16 +192,118 @@ def test_crash_after_saving_the_torn_bytes(tmp_path, capsys):
     (name,) = torn_names(directory)
     assert name.startswith("ledger.jsonl.torn-12-")
     assert (directory / name).read_bytes() == torn
+    saved = os.stat(directory / name)
     capsys.readouterr()
+    assert cli.main(["repair", "--ledger-dir", str(directory)]) == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert out == (
+        f"repaired: moved {len(torn)} bytes to {name} (an earlier repair had saved them); "
+        "appended ledger.repaired at seq 12\n"
+    )
+    assert torn_names(directory) == [name]
+    assert (directory / name).read_bytes() == torn
+    assert (os.stat(directory / name).st_ino, os.stat(directory / name).st_mtime_ns) == (
+        saved.st_ino,
+        saved.st_mtime_ns,
+    )
+    check_repaired(directory, data[: len(data) - len(torn)], torn, name)
+
+
+def check_repaired(directory, complete, torn, name):
+    """The ledger is complete + ledger.repaired naming the side file, and verifies intact."""
+    after = (directory / LEDGER).read_bytes()
+    assert after.startswith(complete)
+    last = json.loads(after.splitlines()[-1])
+    assert last["kind"] == "ledger.repaired"
+    assert last["data"] == {
+        "bytes": len(torn),
+        "sha256": hashlib.sha256(torn).hexdigest(),
+        "file": name,
+    }
+    assert verify_bytes(after, (directory / "ledger.head").read_bytes()).status == "intact"
+
+
+def side_file_name(data):
+    """The side file name repair picks for a ledger's torn tail."""
+    torn = data[data.rfind(b"\n") + 1 :]
+    seq = data.count(b"\n")
+    return f"{LEDGER}.torn-{seq}-{hashlib.sha256(torn).hexdigest()[:12]}", torn
+
+
+@pytest.mark.parametrize("fixture", ["broken/tear_last_line", "broken/torn_genesis"])
+def test_repair_reuses_a_side_file_that_matches(tmp_path, fixture):
+    """A side file under repair's name whose bytes equal the torn bytes is reused: not
+    created again, not written, and the repair runs to the end."""
+    directory = install_fixture(fixture, tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    name, torn = side_file_name(data)
+    (directory / name).write_bytes(torn)
+    os.chmod(directory / name, 0o600)
+    saved = os.stat(directory / name)
+    outcome = repair(directory)
+    assert outcome.exit_code == 0
+    assert outcome.lines[0].startswith(
+        f"repaired: moved {len(torn)} bytes to {name} (an earlier repair had saved them); "
+    )
+    assert torn_names(directory) == [name]
+    assert (directory / name).read_bytes() == torn
+    now = os.stat(directory / name)
+    assert (now.st_ino, now.st_mtime_ns, now.st_size) == (
+        saved.st_ino,
+        saved.st_mtime_ns,
+        saved.st_size,
+    )
+    check_repaired(directory, data[: len(data) - len(torn)], torn, name)
+
+
+DIFFERENT = {
+    "a part of the torn bytes": lambda torn: torn[: len(torn) // 2],
+    "empty": lambda torn: b"",
+    "same length, other bytes": lambda torn: bytes(b ^ 1 for b in torn),
+    "the torn bytes and more": lambda torn: torn + b"x",
+}
+
+
+@pytest.mark.parametrize("contents", list(DIFFERENT), ids=list(DIFFERENT))
+def test_repair_refuses_a_side_file_that_differs(tmp_path, capsys, contents):
+    """A side file under repair's name with other bytes (a crash in the middle of saving them,
+    or a change by hand) is refused: one line naming the file, exit 2, nothing changed."""
+    directory = install_fixture("broken/tear_last_line", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    name, torn = side_file_name(data)
+    (directory / name).write_bytes(DIFFERENT[contents](torn))
+    before = {p.name: p.read_bytes() for p in directory.iterdir() if p.name != LOCK}
+    saved = os.stat(directory / name)
     assert cli.main(["repair", "--ledger-dir", str(directory)]) == 2
     out, err = capsys.readouterr()
     assert out == ""
-    assert err == f"polarizer: cannot repair {directory / name}: File exists\n"
-    assert (directory / LEDGER).read_bytes() == data
-    assert torn_names(directory) == [name]
-    (directory / name).unlink()
-    outcome = repair(directory)
-    assert outcome.exit_code == 0 and f"to {name};" in outcome.lines[0]
+    assert err == (
+        f"polarizer: cannot repair: {directory / name} already exists and its contents differ "
+        "from the ledger's torn tail; nothing was changed\n"
+    )
+    after = {p.name: p.read_bytes() for p in directory.iterdir() if p.name != LOCK}
+    assert after == before
+    assert os.stat(directory / name).st_mtime_ns == saved.st_mtime_ns
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_repair_does_not_follow_a_side_file_link(tmp_path, capsys):
+    """A symlink under repair's name is refused even when its target holds the torn bytes:
+    exit 2, the target untouched, nothing changed."""
+    directory = install_fixture("broken/tear_last_line", tmp_path / "l")
+    data = (directory / LEDGER).read_bytes()
+    name, torn = side_file_name(data)
+    target = tmp_path / "elsewhere"
+    target.write_bytes(torn)
+    (directory / name).symlink_to(target)
+    before = {p.name: p.read_bytes() for p in directory.iterdir() if p.name != LOCK}
+    assert cli.main(["repair", "--ledger-dir", str(directory)]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith(f"polarizer: cannot repair {directory / name}: ")
+    assert len(err.splitlines()) == 1
+    assert {p.name: p.read_bytes() for p in directory.iterdir() if p.name != LOCK} == before
+    assert target.read_bytes() == torn and (directory / name).is_symlink()
 
 
 def test_crash_after_the_truncate(tmp_path):

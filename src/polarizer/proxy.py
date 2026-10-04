@@ -439,6 +439,8 @@ class Gateway:
     async def _check_stopped(self) -> None:
         if self.writer.stopped and not self._stop_announced:
             self._stop_announced = True
+            # Nothing is exposed from now on, so the notifier has nothing more to tell.
+            self._announced = _dump([])
             await self._notify_clients()
 
     async def _upstream_lost(self, upstream: Upstream) -> None:

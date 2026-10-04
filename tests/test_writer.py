@@ -242,35 +242,41 @@ def ledger_entries(directory):
     return [json.loads(x) for x in (directory / LEDGER).read_bytes().splitlines()]
 
 
+FOLD_STOPPED = "polarizer: stopped writing the ledger: could not fold seq {} into pin state: "
+
+
 @pytest.mark.parametrize("kind", ["call.sent", "tool.approved"])
-def test_listener_failure_on_append_still_resolves(tmp_path, capsys, kind):
+def test_listener_failure_on_append_resolves_then_stops(tmp_path, capsys, kind):
     """The line is written (and fsynced for a security kind) before the listener runs, so the
-    append resolves to it; the failure is one escaped stderr line and the writer goes on."""
+    append resolves to it. Pin state now lacks that entry, so the writer stops: one escaped
+    stderr line, and every later append and catch-up raises Stopped."""
     seen = []
     w = LedgerWriter.open(tmp_path / "l", on_entry=failing_listener(seen))
     capsys.readouterr()
     data = {"upstream": "p", "tool": "t", "def_hash": "0" * 64, "boom": True}
     got = w.append(kind, data).result(timeout=5)
-    later = w.append(*note(2)).result(timeout=5)
+    stopped = FOLD_STOPPED.format(1) + HOSTILE_SAFE
+    assert w.stopped == stopped
+    for later in (w.append(*note(2)), w.catch_up()):
+        with pytest.raises(Stopped) as raised:
+            later.result(timeout=5)
+        assert raised.value.line == stopped
     w.close()
     entries = ledger_entries(tmp_path / "l")
     assert got == Appended(1, entries[1]["hash"])
     assert entries[1]["kind"] == kind and entries[1]["data"] == data
-    assert later == Appended(2, entries[2]["hash"])
-    assert seen == [1, 2]  # a genesis written at first run is not handed over
-    assert w.stopped is None
-    assert capsys.readouterr().err.splitlines() == [
-        f"polarizer: warning: could not fold seq 1 into pin state: {HOSTILE_SAFE}"
-    ]
+    assert seen == [1]  # a genesis written at first run is not handed over
+    assert capsys.readouterr().err.splitlines() == [stopped]
     result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
-    assert (result.status, result.state.lines) == ("intact", 3)
+    assert (result.status, result.state.lines) == ("intact", 2)
 
 
 @pytest.mark.parametrize("via", ["catch_up", "append"])
-def test_listener_failure_on_catch_up_adopts_every_entry(tmp_path, capsys, via):
-    """Another writer appends three entries, the middle one failing in the listener. Every one
-    is adopted and handed over, the catch-up (or the append that ran it) succeeds, and later
-    appends chain."""
+def test_listener_failure_on_catch_up_stops_the_writer(tmp_path, capsys, via):
+    """Another writer appends three entries, the middle one failing in the listener. All three
+    are adopted; the writer stops at the failing one, and the entry after it is not handed
+    over. A catch-up still resolves to the count it adopted; an append whose catch-up stopped
+    writes nothing and raises Stopped. Nothing is written afterwards."""
     seen = []
     w = LedgerWriter.open(tmp_path / "l", on_entry=failing_listener(seen))
     other = LedgerWriter.open(tmp_path / "l")
@@ -279,20 +285,22 @@ def test_listener_failure_on_catch_up_adopts_every_entry(tmp_path, capsys, via):
     other.append(*note(3)).result(timeout=5)
     other.close()
     capsys.readouterr()
+    stopped = FOLD_STOPPED.format(2) + HOSTILE_SAFE
     if via == "catch_up":
         assert w.catch_up().result(timeout=5) == 3
-        assert seen == [1, 2, 3]
     else:
-        assert w.append(*note(4)).result(timeout=5).seq == 4
-        assert seen == [1, 2, 3, 4]
-    assert w.append(*note(5)).result(timeout=5).seq == 4 + (via == "append")
+        with pytest.raises(Stopped) as raised:
+            w.append(*note(4)).result(timeout=5)
+        assert raised.value.line == stopped
+    assert seen == [1, 2]
+    assert w.stopped == stopped
+    with pytest.raises(Stopped):
+        w.append(*note(5)).result(timeout=5)
     w.close()
-    assert w.stopped is None
-    assert capsys.readouterr().err.splitlines() == [
-        f"polarizer: warning: could not fold seq 2 into pin state: {HOSTILE_SAFE}"
-    ]
-    result = verify_bytes((tmp_path / "l" / LEDGER).read_bytes(), None)
-    assert result.status == "intact"
+    assert capsys.readouterr().err.splitlines() == [stopped]
+    raw = (tmp_path / "l" / LEDGER).read_bytes()
+    result = verify_bytes(raw, None)
+    assert (result.status, result.state.lines) == ("intact", 4)  # genesis and the three
 
 
 @pytest.mark.parametrize("head_at", [2, None])
