@@ -116,7 +116,7 @@ The code changed twice after the series, without changing behavior on Linux: `pa
 
 ## Found, not changed
 
-- **`verify --args` reports the side files of holds that were never forwarded as orphaned.** LEDGER-SPEC.md Part 3 counts only `call.sent` as a reference, and a denied, expired or abandoned hold's side file has only its `hold.created`. Orphans don't fail the check (exit 0), and the file is the arguments a person saw, so nothing is lost; but "orphaned" then reads as "a crash left this" when it means "held and never forwarded". Counting `hold.created` as a reference too would change `verify --args`' lines for ledgers with holds, though no status or exit code. Left for the owner.
+- **`verify --args` reports the side files of holds that were never forwarded as orphaned.** LEDGER-SPEC.md Part 3 counts only `call.sent` as a reference, and a denied, expired or abandoned hold's side file has only its `hold.created`. Orphans don't fail the check (exit 0), and the file is the arguments a person saw, so nothing is lost; but "orphaned" then reads as "a crash left this" when it means "held and never forwarded". Counting `hold.created` as a reference too would change `verify --args`' lines for ledgers with holds, though no status or exit code. Left for the owner. (Done in the follow-up below, at the owner's request; a tampered side file of such a hold now exits 8.)
 
 ## Claims
 
@@ -157,3 +157,72 @@ The code changed twice after the series, without changing behavior on Linux: `pa
 | The pre-push scan finds none of the owner's private strings | `git grep --cached -i -c` per string, and the commit's message, author and committer | yes: every count 0 |
 
 The final `scripts/test.sh` on the committed code: ruff (lint and format) clean, the docs check 17 files with 0 findings, and pytest 739 passed, 8 skipped (stage 1's 4 platform skips, the 3 reference tests, and the Windows names test) in 187.03 s; 3 min 11 s in all.
+
+## Follow-up: CI platform fixes and the M2a review
+
+CI for commit 4b7385e failed on macOS (1 test) and Windows (4 tests); the three Linux jobs (Python 3.11, 3.12, 3.13) passed. Each failure was a test that assumed Linux, not a defect in a rule. This follow-up fixed those tests so each checks what it claims on every platform, built the review changes that the commit "spec: m2a review" added to HOLD-SPEC.md (section 17, The M2a review), and made `verify --args` count `hold.created` as a reference. No rule was weakened. No format, status or exit code changed; the one result that changes for an existing ledger (a tampered side file of a never-forwarded hold now exits 8, as any tampered side file does) was put to the owner first, who chose it.
+
+### The CI failures
+
+| Test | Where | What it got | Cause | Fix |
+|---|---|---|---|---|
+| `test_rules.py::test_rule_table`, row 14 | macOS | `('allow', 'open-world', None)` | The row read the hard-coded `/home/me/.aws/credentials` against `~/.aws/**`, with `~` the made-up home `/home/me`. The real resolver ran on it, and on macOS `/home` exists as a system mount point, so the resolved path was presumably no longer under `/home/me` (the CI output shows only the verdict). | The path is built from the policy's own home, `where / "home"`, which the test passes as `Policy(home=...)`, so it is absolute and under the expanded `~` on every platform. |
+| the same row | Windows | `('hold', 'path-unresolvable', 'argument "url": not an absolute path')` | `/home/...` has no drive, so it is rightly not absolute on Windows. | As above. |
+| `test_config.py::test_example_config_uses_the_manual_ledger` and `::test_example_config_policy` | Windows | the config error for `workspace_roots` | `polarizer.example.toml` names `/tmp/polarizer-manual`, which has no drive; the error is correct. | A helper substitutes `(tmp_path / "manual").as_posix()` for it before loading, on every platform, and the policy test compares the root with that path. QUICKSTART-DRAFT.md and MANUAL-CHECK.md say in one line that the example uses POSIX paths and that on native Windows each must be edited to a real absolute path. |
+| `test_policy_config.py::test_no_holds_from_the_command_line` | Windows | the warning line not found | serve's stderr is a text stream, which writes `\r\n` on Windows. | The test replaces `\r\n` with `\n` in the captured bytes. serve's stderr handling is unchanged. |
+
+### Hard-coded paths in the policy and hold tests
+
+Every test in `test_rules.py`, `test_paths.py`, `test_policy_config.py` and `test_holds.py` was read for `/home`, `/tmp`, `/Users` and `"/x"` paths and for "/" joined to a platform path.
+
+**Changed:**
+- `test_rules.py`: row 14's path (above). The built-in pattern listings `WRITE_PATHS` and `READ_PATHS` held `/home/me/...` against the made-up home `(None, ("home", "me"))`. They passed everywhere, because the resolver is replaced there and neither side has a drive, but on Windows that compared a driveless path with a driveless home, which no real call can send. They now hold `<home>/...` and `<root>/...` placeholders, joined under the fixture's home and root with the platform's separator, and `~` expands to that same home (`home(where)`), with its drive on Windows. The fixture `where` gains the `home` directory.
+- `test_paths.py`: `p(root) + "/../outside/x"`, `"/a/../b"`, `"/new/../../x"` and `"/a" + NUL + "b"` joined "/" to a Windows path. They use `os.path.join`, so each test checks the platform's own form of the path.
+- `test_config.py`: the two example tests (above).
+
+**Kept, with the reason:**
+- `test_paths.py`'s `PATTERN_CASES` (`/etc/...`, `/home/me/...`, `/x/...`, `/q/...`): string fixtures for `paths.matches`, with `paths.WINDOWS` turned off by `test_pattern_matching`, so they mean the same on every platform and touch no file system. A comment now says so.
+- `test_paths.py::test_path_arg_not_a_string_is_held`'s `{"p": "/x"}` and `["/a", 5]`: refused by type before anything is resolved (comment added).
+- `test_policy_config.py`'s 33 roots `/r0` to `/r32`: the count check comes before the absolute check, so the line under test is the same everywhere (it passed on Windows).
+- `test_holds.py`'s `/secret/place`, `/safe/place` and `/somewhere/else`: argument values of a tool with no `path_args`, never resolved; they check that details stay out of the model's line and that the side file's arguments are forwarded.
+- `test_rules.py`'s other rows were already built from `tmp_path`.
+
+**Skips:** `test_unreadable_part_is_held` is skipped on Windows with its reason, `test_windows_names_are_held` runs only on Windows, and the symlink tests skip with the operating system's message where `os.symlink` is refused. No silent skip was found, and none was added.
+
+**Subprocess output compared as bytes.** Of the stage 6 subprocess tests, only `test_no_holds_from_the_command_line` compares serve's output. `holds`, `allow` and `deny` set `\n` newlines on stdout and stderr themselves (`cli._set_up_streams`), which `test_hold_commands_subprocess` checks with `b"\r" not in done.stdout`; so it, `test_concurrent_allows_write_one_decision`, `test_allow_runs_on_a_terminal` and `test_hold_durability.py::test_allow_from_second_process` need no change, and all passed on Windows CI.
+
+### The review changes
+
+1. **Destructive and egress calls name a path.** The hold and the rule are unchanged. When the tool has `path_args`, `policy._paths_hold` evaluates its paths as for the other classes and the first rule that would hold is appended after `; `. Guess: a destructive tool's paths are judged as `local-write`'s (Polarizer's files, write patterns, roots) and an egress tool's as `local-read`'s (the ledger directory, read patterns), since what egress sends out is read; HOLD-SPEC.md section 4 says so. The example config's `move_file` therefore says `is outside every workspace root` for a destination outside the manual directory. Rows 3 and 4 of `test_rule_table` gained a case each (a move onto `~/.ssh/authorized_keys`, a move inside the root with the plain reason, and an egress read of `.env`), and `test_destructive_and_egress_name_the_path` covers the rest.
+2. **The annotations line.** `Gateway._log_unclassified` writes `polarizer: <n> of <m> listed tools take their class from annotations (trust_annotations is on for <prefixes>)` after the unclassified line. Guesses: `<prefixes>` are only the trusted upstreams with at least one tool counted, in config order; nothing is written under `--no-holds`, where no class is used.
+3. **The resolver cap.** `paths.Stuck` counts resolutions past their bound whose threads still run; `paths.STUCK` is the process's count, shared by every `Policy` unless a test passes its own (`Policy.stuck`). With 8 stuck, `resolve_bounded` raises `too many path resolutions are stuck` before starting a thread. A thread that returns after its bound takes itself off the count under the same lock that put it there, so a return racing the timeout is never counted. Destructive and egress paths, now resolved for the reason, count too. With the cap reached, those calls are still held, with the cap's reason appended.
+4. **Known limits** are written down (HOLD-SPEC.md section 3 and the README draft in section 14), not changed: superscript device names on Windows, `CLAUDE_CONFIG_DIR`, and `~` following the process's `HOME`.
+5. **`verify --args`** (this file's "Found, not changed"): `VerifyState.holds_created` collects `(seq, args_commit)` of every `hold.created`, and `sidefiles.check_args` checks those as it checks `call.sent`'s. A commitment that a `call.sent` also names (an allowed hold) is counted once, at the `call.sent`'s seq, so a ledger without holds prints exactly what it did.
+
+### Known fallback: Ctrl+C in the M1a check test on macOS
+
+On the macOS runner, `test_m1a_check.py::test_ctrl_c_and_blank_answers_stop_cleanly` warns `could not see m1a-check.sh asleep in its read on darwin; typed Ctrl+C anyway`. Before typing Ctrl+C, the test waits until bash is asleep in its `read` (STAGE5-NOTES.md, Ctrl+C in the M1a check test). Linux shows that in `/proc/<pid>/syscall`; elsewhere the test looks for the BSD wait channel `ttyin` in `ps -o wchan=`. On the macOS runner it didn't find it. So after 5 s (`UNSURE_WAIT`) it typed Ctrl+C anyway, and the test passed. This is the intended fallback, left as it is. On macOS the race it guards against is narrowed by time only: Ctrl+C comes 5 s after the prompt, not once the read is seen. What `ps` shows there was not looked into.
+
+### Repeated runs
+
+The changed test files (`test_rules.py`, `test_paths.py`, `test_config.py`, `test_policy_config.py`, `test_args.py`) ran five times in a row: 109 passed and 1 skipped (the Windows names test) each time, in 3.0 to 5.2 s. No probe or serve process of this session was left running.
+
+### Not run in the follow-up
+
+- **Windows and macOS.** Every fix above is for a failure seen only on CI, and none has run on either platform here. Only Linux (WSL2, Python 3.12.3) ran it. Python 3.11 and 3.13 did not run either.
+- **Claude Code and any model.** Nothing here ran `claude`.
+
+### Claims
+
+| Claim | Command | Run? |
+|---|---|---|
+| Row 14 and the built-in pattern listings use the policy's own home; rows 3 and 4 name a path | `pytest tests/test_rules.py` | yes, Linux |
+| Destructive and egress reasons name the first path rule that would hold, with the rule unchanged | `pytest tests/test_rules.py::test_destructive_and_egress_name_the_path` | yes |
+| With 8 resolutions stuck, the next path is held at once and starts no thread; the count drops as they return | `pytest tests/test_paths.py::test_stuck_resolutions_are_capped` | yes |
+| serve writes the annotations line once, naming the trusted prefixes; nothing with none or under `--no-holds` | `pytest tests/test_policy_config.py::test_annotation_class_line` | yes |
+| The example config loads with a real root on every platform | `pytest tests/test_config.py -k example` | yes, Linux |
+| serve's `--no-holds` warning is found with `\r\n` normalized | `pytest tests/test_policy_config.py::test_no_holds_from_the_command_line` | yes, Linux |
+| Denied and expired holds' side files are matching, not orphaned; an allowed hold's is counted once; deleted and altered ones are missing and tampered (exit 8) | `pytest tests/test_args.py::test_hold_side_files_are_not_orphaned` | yes |
+| The five CI failures pass on Windows and macOS | CI | no |
+
+The final `scripts/test.sh` on the follow-up's code: ruff (lint and format) clean, the docs check 17 files with 0 findings, and pytest 743 passed, 8 skipped (the same 8 as before) in 197.65 s; 3 min 22 s in all.

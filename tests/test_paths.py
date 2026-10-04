@@ -3,6 +3,7 @@ and the case rule, through the rule function where the claim is about a verdict.
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -64,15 +65,15 @@ def test_symlink_escape_is_held(root, tmp_path):
 
 def test_dotdot_escape_is_held(root, tmp_path):
     (tmp_path / "outside").mkdir()
-    v = verdict(write_policy(root), "write", p(root) + "/../outside/x")
+    v = verdict(write_policy(root), "write", os.path.join(p(root), "..", "outside", "x"))
     assert (v.action, v.rule) == ("hold", "outside-roots")
     (root / "a").mkdir()
-    v = verdict(write_policy(root), "write", p(root) + "/a/../b")
+    v = verdict(write_policy(root), "write", os.path.join(p(root), "a", "..", "b"))
     assert (v.action, v.rule, v.reason) == ("allow", "inside-roots", None)
 
 
 def test_dotdot_after_missing_part_is_held(root):
-    v = verdict(write_policy(root), "write", p(root) + "/new/../../x")
+    v = verdict(write_policy(root), "write", os.path.join(p(root), "new", "..", "..", "x"))
     assert (v.action, v.rule) == ("hold", "path-unresolvable")
     assert v.reason == 'argument "path": ".." after a part that does not exist'
 
@@ -125,7 +126,7 @@ def test_relative_tilde_nul_are_held(root):
         ("a/b", "not an absolute path"),
         ("./a", "not an absolute path"),
         ("~/x", "starts with ~, which the server may expand"),
-        (p(root) + "/a" + chr(0) + "b", "contains a NUL character"),
+        (os.path.join(p(root), "a" + chr(0) + "b"), "contains a NUL character"),
     ]
     for value, reason in cases:
         v = verdict(write_policy(root), "write", value)
@@ -151,8 +152,54 @@ def test_slow_resolution_is_held(root):
     )
 
 
+def test_stuck_resolutions_are_capped(root):
+    """A resolver that blocks (a hung mount): each path passes the bound and its thread stays
+    stuck; with 8 stuck, the next path is held at once and its resolver never runs; once the
+    threads return, the count drops and paths resolve again."""
+    release = threading.Event()
+    started = []
+
+    def blocking(path):
+        started.append(path)
+        release.wait(30)
+        return path
+
+    stuck = paths.Stuck()
+    pol = write_policy(root, resolver=blocking, resolve_bound=0.05, stuck=stuck)
+    try:
+        for i in range(paths.MAX_STUCK):
+            v = verdict(pol, "write", p(root / f"f{i}"))
+            assert v.reason == 'argument "path": took longer than 2 s to resolve', i
+        assert (stuck.count, len(started)) == (8, 8)
+        v = verdict(pol, "write", p(root / "ninth"))
+        assert (v.action, v.rule, v.reason) == (
+            "hold",
+            "path-unresolvable",
+            'argument "path": too many path resolutions are stuck',
+        )
+        assert len(started) == 8  # no thread was started for the ninth
+        # The cap applies to destructive and egress paths too (they are resolved for the reason).
+        pol.upstreams["fs"].tools["move"] = config.ToolRule("destructive", ("path",))
+        v = policy.evaluate(pol, "fs", "move", {"path": p(root / "x")}, {})
+        assert v.reason == (
+            "class destructive is held on every call; "
+            'argument "path": too many path resolutions are stuck'
+        )
+    finally:
+        release.set()
+    deadline = time.monotonic() + 10
+    while stuck.count and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert stuck.count == 0
+    pol.resolver = paths.resolve
+    assert verdict(pol, "write", p(root / "after")).rule == "inside-roots"
+    # serve's policies share one count per process.
+    assert policy.Policy().stuck is paths.STUCK
+
+
 def test_path_arg_not_a_string_is_held(root):
     pol = write_policy(root)
+    # Never resolved: the type is checked first, so these strings need no real path.
     for value in (5, None, {"p": "/x"}, ["/a", 5]):
         v = verdict(pol, "write", value)
         assert (v.rule, v.reason) == (
@@ -172,6 +219,8 @@ def test_more_than_256_paths_is_held(root):
     assert (v.rule, v.reason) == ("path-unresolvable", 'argument "path": more than 256 paths')
 
 
+# Pure string matching under the POSIX split (test_pattern_matching turns paths.WINDOWS off),
+# so these fixed POSIX paths mean the same on every platform; no file system is touched.
 HOME = (None, ("home", "me"))
 PATTERN_CASES = [
     # (pattern, path, exact match, folded match)

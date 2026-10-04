@@ -193,7 +193,9 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
     code = result.exit_code
     if with_args and result.status == "intact":
         try:
-            report = sidefiles.check_args(ledger_dir, result.state.calls_sent)
+            report = sidefiles.check_args(
+                ledger_dir, result.state.calls_sent, result.state.holds_created
+            )
         except OSError as e:
             return _err(f"polarizer: cannot read {e.filename}: {e.strerror}")
         for line in report.lines:

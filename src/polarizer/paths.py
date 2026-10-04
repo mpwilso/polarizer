@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from polarizer.text import safe
 
 RESOLVE_BOUND = 2.0  # seconds per path
+MAX_STUCK = 8  # resolutions past their bound and still running; more holds paths at once
 MAX_LINKS = 40
 MAX_PATTERN = 1024
 WINDOWS = sys.platform == "win32"
@@ -34,6 +35,7 @@ NUL = "contains a NUL character"
 DOTDOT_AFTER_MISSING = '".." after a part that does not exist'
 TOO_MANY_LINKS = "too many symbolic links"
 TOO_SLOW = "took longer than 2 s to resolve"
+TOO_MANY_STUCK = "too many path resolutions are stuck"
 WINDOWS_NAME = "a Windows name Polarizer does not resolve"
 CANNOT_EXAMINE = "cannot be examined: {why}"
 
@@ -178,11 +180,36 @@ def _resolve_windows(path: str) -> str:
         raise _examine_failed(e) from None
 
 
-def resolve_bounded(path: str, bound: float = RESOLVE_BOUND, resolver=resolve) -> str:
+class Stuck:
+    """How many resolutions passed their bound and are still running on their threads. A
+    thread blocked in the file system (a hung mount) can't be stopped, so this caps how many
+    such threads Polarizer leaves behind (HOLD-SPEC.md, section 3)."""
+
+    def __init__(self, limit: int = MAX_STUCK):
+        self.limit = limit
+        self.count = 0
+        self.lock = threading.Lock()
+
+    def full(self) -> bool:
+        with self.lock:
+            return self.count >= self.limit
+
+
+STUCK = Stuck()  # the process's count, shared by every policy unless a test gives its own
+
+
+def resolve_bounded(
+    path: str, bound: float = RESOLVE_BOUND, resolver=resolve, stuck: Stuck = STUCK
+) -> str:
     """resolver(path) on a daemon thread of its own, waiting at most `bound` seconds. A path
-    that takes longer is Unresolvable (TOO_SLOW); its thread is left to finish on its own."""
+    that takes longer is Unresolvable (TOO_SLOW), and its thread, left to finish on its own,
+    counts in `stuck` until it does. While `stuck` is full, a path is Unresolvable
+    (TOO_MANY_STUCK) at once, with no thread started."""
+    if stuck.full():
+        raise Unresolvable(TOO_MANY_STUCK)
     box: dict = {}
     done = threading.Event()
+    state = {"finished": False, "stuck": False}  # under stuck.lock
 
     def run():
         try:
@@ -192,10 +219,18 @@ def resolve_bounded(path: str, bound: float = RESOLVE_BOUND, resolver=resolve) -
         except Exception as e:  # a resolver must never take the call down; hold it instead
             box["error"] = _examine_failed(e)
         finally:
+            with stuck.lock:
+                state["finished"] = True
+                if state["stuck"]:
+                    stuck.count -= 1
             done.set()
 
     threading.Thread(target=run, name="polarizer-resolve", daemon=True).start()
     if not done.wait(bound):
+        with stuck.lock:
+            if not state["finished"]:
+                state["stuck"] = True
+                stuck.count += 1
         raise Unresolvable(TOO_SLOW)
     if "error" in box:
         raise box["error"]

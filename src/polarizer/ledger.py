@@ -94,6 +94,7 @@ class ChainState:
     sessions: int = 0
     calls: int = 0
     calls_sent: list = field(default_factory=list)  # (seq, args_commit) for verify --args
+    holds_created: list = field(default_factory=list)  # (seq, args_commit), likewise
     watch_seq: int | None = None  # remember the hash at this seq (the head's)
     watched_hash: str | None = None
     last_entry: dict | None = None  # the line check_line adopted last, parsed
@@ -145,6 +146,8 @@ class ChainState:
         elif kind == "call.sent":
             self.calls += 1
             self.calls_sent.append((entry["seq"], entry["data"].get("args_commit")))
+        elif kind == "hold.created":
+            self.holds_created.append((entry["seq"], entry["data"].get("args_commit")))
 
     def _check_v1(self, e: dict, raw: bytes, n: int) -> Problem | None:
         seq = e.get("seq") if type(e.get("seq")) is int else None

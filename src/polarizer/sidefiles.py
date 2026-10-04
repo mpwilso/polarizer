@@ -88,8 +88,11 @@ class ArgsReport:
     tampered: int
 
 
-def check_args(ledger_dir: Path, calls_sent: list) -> ArgsReport:
-    """verify --args: classify every side file. calls_sent is [(seq, args_commit), ...]."""
+def check_args(ledger_dir: Path, calls_sent: list, holds_created: list = ()) -> ArgsReport:
+    """verify --args: classify every side file. calls_sent and holds_created are
+    [(seq, args_commit), ...]. A hold.created refers to its side file as a call.sent does, so
+    the file of a hold that was never forwarded isn't orphaned; a file both refer to (an
+    allowed hold) is counted once, at its call.sent (HOLD-SPEC.md, section 5)."""
     directory = Path(ledger_dir) / ARGS
     try:
         present = {entry.name for entry in os.scandir(directory)}
@@ -98,7 +101,9 @@ def check_args(ledger_dir: Path, calls_sent: list) -> ArgsReport:
     counts = {"matching": 0, "missing": 0, "tampered": 0}
     problems = []
     referenced = set()
-    for seq, commit in calls_sent:
+    sent = {commit for _, commit in calls_sent if isinstance(commit, str)}
+    held = [(seq, c) for seq, c in holds_created if not (isinstance(c, str) and c in sent)]
+    for seq, commit in sorted([*calls_sent, *held], key=lambda ref: ref[0]):
         name = f"{commit}.bin" if isinstance(commit, str) and _COMMIT.fullmatch(commit) else None
         if name is None or name not in present:
             counts["missing"] += 1

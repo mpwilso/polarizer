@@ -253,6 +253,46 @@ def test_unclassified_line_once_after_listing(tmp_path, capsys):
         assert "listed tools have no class" not in capsys.readouterr().err
 
 
+def test_annotation_class_line(tmp_path, capsys):
+    """Trusted upstreams' tools without a tools entry take their class from annotations, so the
+    unclassified line never counts them; serve says so in one line, once, naming the trusted
+    prefixes in config order. Nothing with none of them, or with --no-holds."""
+    fakes = {prefix: FakeUpstream() for prefix in ("a", "b", "c")}
+    specs = [rig.spec(prefix, fake.server) for prefix, fake in fakes.items()]
+    every = rig.classified(specs).upstreams
+    trusting = policy.Policy(
+        upstreams={
+            "a": policy.UpstreamPolicy(True, {"echo": config.ToolRule("local-read")}),
+            "b": policy.UpstreamPolicy(True, {}),
+            "c": every["c"],
+        }
+    )
+
+    def start(p):
+        async def main():
+            async with rig.gateway(tmp_path / "ledger", specs, approve=False, policy=p):
+                pass
+
+        capsys.readouterr()
+        anyio.run(main)
+        return capsys.readouterr().err
+
+    err = start(trusting)
+    n = len(fakes["a"].names) - 1 + len(fakes["b"].names)
+    m = sum(len(fake.names) for fake in fakes.values())
+    line = (
+        f"polarizer: {n} of {m} listed tools take their class from annotations "
+        "(trust_annotations is on for a, b)\n"
+    )
+    assert err.count(line) == 1
+    assert "have no class" not in err
+    # A trusted upstream whose every tool has an entry adds nothing; nor does --no-holds.
+    all_set = dict(every, a=policy.UpstreamPolicy(True, every["a"].tools))
+    off = policy.Policy(holds=False, upstreams=trusting.upstreams)
+    for quiet in (policy.Policy(upstreams=all_set), rig.classified(specs), off):
+        assert "from annotations" not in start(quiet)
+
+
 class _Events(FileOps):
     """Records each line written (by kind) and each fsync, in order."""
 
@@ -319,7 +359,9 @@ def test_no_holds_from_the_command_line(tmp_path):
         timeout=120,
     )
     assert done.returncode == 0, done.stderr
-    assert b"polarizer: warning: started with --no-holds; no call is held\n" in done.stderr
+    # serve's stderr is a text stream, so Windows writes "\r\n"; compare lines, not newlines.
+    stderr = done.stderr.replace(b"\r\n", b"\n")
+    assert b"polarizer: warning: started with --no-holds; no call is held\n" in stderr
     loaded = rig.kinds(tmp_path / "ledger", "policy.loaded")
     assert [e["data"]["holds"] for e in loaded] == ["off"]
 

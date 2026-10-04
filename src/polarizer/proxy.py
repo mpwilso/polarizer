@@ -235,7 +235,8 @@ class Gateway:
 
     def _log_unclassified(self) -> None:
         """Once per process, after startup has listed the upstreams: how many listed tools, in
-        any pin state, have no class (HOLD-SPEC.md, section 2). Nothing with --no-holds."""
+        any pin state, have no class, and how many take theirs from annotations (HOLD-SPEC.md,
+        section 2). Nothing with --no-holds."""
         if not self.policy.holds:
             return
         listed = [(u.prefix, name) for u in self.upstreams.values() for name in self._listed(u)]
@@ -244,6 +245,15 @@ class Gateway:
             log(
                 f"polarizer: {unclassified} of {len(listed)} listed tools have no class in "
                 "polarizer.toml; every call to them is held"
+            )
+        # A trusted upstream's tools all get a class, so the line above never names them: a
+        # server with trust_annotations chooses its own class, and this says so.
+        trusted = [(p, n) for p, n in listed if self.policy.class_from_annotations(p, n)]
+        if trusted:
+            prefixes = ", ".join(dict.fromkeys(p for p, _ in trusted))
+            log(
+                f"polarizer: {len(trusted)} of {len(listed)} listed tools take their class from "
+                f"annotations (trust_annotations is on for {prefixes})"
             )
 
     async def _run_background(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:

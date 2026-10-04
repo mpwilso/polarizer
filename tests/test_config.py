@@ -65,26 +65,36 @@ def test_defaults(tmp_path, fake_home):
     )
 
 
+def example(tmp_path, fake_home) -> str:
+    """polarizer.example.toml filled in as docs/MANUAL-CHECK.md step 2 does, with its POSIX
+    /tmp/polarizer-manual replaced by a directory under tmp_path. The example's paths are POSIX
+    only; on Windows "/tmp/..." has no drive and is rightly not absolute, so every platform
+    gets a real absolute path here (docs/QUICKSTART-DRAFT.md says to edit them by hand)."""
+    text = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
+    assert '"/tmp/polarizer-manual"' in text
+    text = text.replace("/tmp/polarizer-manual", (tmp_path / "manual").as_posix())
+    return text.replace("/home/<you>", fake_home.as_posix())
+
+
 def test_example_config_uses_the_manual_ledger(tmp_path, fake_home):
     """polarizer.example.toml, filled in as docs/MANUAL-CHECK.md step 2 does, parses, and its
     ledger is the manual check's own directory, not the default."""
-    example = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
-    cfg = load(write(tmp_path, example.replace("/home/<you>", fake_home.as_posix())))
+    cfg = load(write(tmp_path, example(tmp_path, fake_home)))
     assert cfg.ledger_dir == fake_home / ".local/share/polarizer-manual"
     assert [u.prefix for u in cfg.upstreams] == ["probe", "fs"]
 
 
 def test_example_config_policy(tmp_path, fake_home):
     """The example's policy (docs/HOLD-SPEC.md, section 11): the probe's seven tools local-read,
-    the Filesystem tools classified, /tmp/polarizer-manual the root. So the manual check holds
-    fs__write_file outside the directory and fs__move_file always, and nothing of the probe."""
+    the Filesystem tools classified, /tmp/polarizer-manual the root (here a directory under
+    tmp_path). So the manual check holds fs__write_file outside the directory and fs__move_file
+    always, and nothing of the probe."""
     import os
 
     from polarizer import policy
 
-    example = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
-    cfg = load(write(tmp_path, example.replace("/home/<you>", fake_home.as_posix())))
-    assert cfg.policy.workspace_roots == (Path("/tmp/polarizer-manual"),)
+    cfg = load(write(tmp_path, example(tmp_path, fake_home)))
+    assert cfg.policy.workspace_roots == (tmp_path / "manual",)
     assert cfg.policy.hold_timeout_seconds == 300
     probe, fs = cfg.upstreams
     assert sorted(probe.tools) == sorted(

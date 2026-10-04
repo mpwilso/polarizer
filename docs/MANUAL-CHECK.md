@@ -26,6 +26,8 @@ git status --short
 .venv/bin/polarizer verify --config "$HOME/code/polarizer/polarizer.toml"
 ```
 
+`polarizer.example.toml` uses POSIX paths (`/home/<you>/...`, `/tmp/polarizer-manual`); on native Windows, the `sed` lines don't apply: edit each path to a real absolute path with a drive.
+
 Expect:
 - `ledger_forbidden_paths` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr`;
 - `git status --short` prints nothing, because both files are gitignored;

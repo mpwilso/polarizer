@@ -76,3 +76,65 @@ def test_a_malformed_commit_is_missing_never_a_path(tmp_path, capsys):
     build_chain(d, [call("../../etc/passwd", 0)], head_at=0)
     code, out = run_verify_args(d, capsys)
     assert code == 0 and out[-1] == "missing   seq 1  args/../../etc/passwd.bin"
+
+
+def test_hold_side_files_are_not_orphaned(tmp_path, capsys):
+    """hold.created refers to its side file as call.sent does (HOLD-SPEC.md, section 5): the
+    files of a denied and an expired hold are matching, never orphaned; an allowed hold's file,
+    referred to by both, is counted once, at its call.sent; a stray file is still orphaned. A
+    held file deleted is missing and one altered is tampered, exit 8, as for any call."""
+    d = tmp_path / "l"
+    d.mkdir()
+    plain, denied, expired, allowed = (write_args(d, {"i": i}) for i in range(4))
+    session = "s" * 16
+
+    def created(hold, commit):
+        return ("hold.created", {"session": session, "hold": hold, "tool": "p__t",
+                                 "args_commit": commit, "class": "egress", "class_from": "config",
+                                 "rule": "egress", "reason": "r", "timeout_seconds": 300})  # fmt: skip
+
+    def decided(hold, commit, decision):
+        return ("hold.decided", {"hold": hold, "args_commit": commit, "decision": decision,
+                                 "actor": "person", "reason": None})  # fmt: skip
+
+    def refused(hold, reason):
+        return (
+            "call.refused",
+            {"session": session, "tool": "p__t", "reason": reason, "hold": hold},
+        )
+
+    sent = call(allowed, 9)
+    sent[1].update({"hold": "c" * 16, "allowed_by": "hold"})
+    build_chain(d, [
+        call(plain, 0),                                                         # seq 1
+        created("a" * 16, denied), decided("a" * 16, denied, "deny"),           # seq 2, 3
+        refused("a" * 16, f"hold {'a' * 16} was denied"),                       # seq 4
+        created("b" * 16, expired),                                             # seq 5
+        ("hold.expired", {"session": session, "hold": "b" * 16, "reason": "timeout after 300 s"}),
+        refused("b" * 16, f"hold {'b' * 16} expired: timeout after 300 s"),     # seq 7
+        created("c" * 16, allowed), decided("c" * 16, allowed, "allow"),        # seq 8, 9
+        sent,                                                                   # seq 10
+    ], head_at=0)  # fmt: skip
+    code, out = run_verify_args(d, capsys)
+    assert code == 0 and out[-1] == "args: 4 matching, 0 missing, 0 tampered, 0 orphaned"
+    (d / "args" / "stray.bin").write_bytes(b"x")
+    code, out = run_verify_args(d, capsys)
+    assert code == 0
+    assert out[-2:] == [
+        "args: 4 matching, 0 missing, 0 tampered, 1 orphaned",
+        "orphaned           args/stray.bin",
+    ]
+    (d / "args" / f"{denied}.bin").unlink()
+    (d / "args" / f"{allowed}.bin").unlink()
+    path = d / "args" / f"{expired}.bin"
+    path.write_bytes(path.read_bytes() + b" ")
+    code, out = run_verify_args(d, capsys)
+    assert code == 8
+    summary = next(i for i, line in enumerate(out) if line.startswith("args: "))
+    assert out[summary:] == [
+        "args: 1 matching, 2 missing, 1 tampered, 1 orphaned",
+        f"missing   seq 2  args/{denied}.bin",
+        f"tampered  seq 5  args/{expired}.bin",
+        f"missing   seq 10  args/{allowed}.bin",
+        "orphaned           args/stray.bin",
+    ]

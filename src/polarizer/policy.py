@@ -68,6 +68,7 @@ class Policy:
     fold: bool = paths.FOLD
     resolver: object = paths.resolve
     resolve_bound: float = paths.RESOLVE_BOUND
+    stuck: paths.Stuck = paths.STUCK  # resolutions past their bound; one count per process
     home: tuple | None = None  # (drive, parts) to expand "~" with; None: the real home
     write_patterns: tuple = ()  # compiled: the built-in ones, then the configured ones
     read_patterns: tuple = ()
@@ -126,6 +127,12 @@ class Policy:
         annotations (every annotation set suggests one)."""
         upstream = self.upstreams.get(prefix)
         return upstream is not None and (tool in upstream.tools or upstream.trust_annotations)
+
+    def class_from_annotations(self, prefix: str, tool: str) -> bool:
+        """Whether a listed tool takes its class from annotations: no configured entry, on an
+        upstream with trust_annotations (HOLD-SPEC.md, section 2)."""
+        upstream = self.upstreams.get(prefix)
+        return upstream is not None and upstream.trust_annotations and tool not in upstream.tools
 
 
 def build(cfg: Config, *, holds: bool = True) -> Policy:
@@ -196,7 +203,7 @@ def _arg(name: str) -> str:
 def _path_hold(policy: Policy, cls: str, arg: str, value: str) -> tuple[str, str] | None:
     """(rule, reason) if this one path holds the call, in section 4's order."""
     try:
-        resolved = paths.resolve_bounded(value, policy.resolve_bound, policy.resolver)
+        resolved = paths.resolve_bounded(value, policy.resolve_bound, policy.resolver, policy.stuck)
     except paths.Unresolvable as e:
         return "path-unresolvable", f"{_arg(arg)}: {e}"
     shown = safe(resolved, REASON_LIMIT)
@@ -225,6 +232,28 @@ def _same(resolved: str, policy: Policy) -> bool:
         return False
 
 
+def _paths_hold(policy: Policy, cls: str, path_args, arguments) -> tuple[str, str] | None:
+    """(rule, reason) of the first path rule that holds the call, judging each configured
+    argument in order, and each of its paths in order, as class `cls`; None if none does."""
+    for arg in path_args:
+        if not isinstance(arguments, dict) or arg not in arguments:
+            return "path-missing", f"{_arg(arg)} is missing"
+        value = arguments[arg]
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, list) and all(isinstance(v, str) for v in value):
+            values = value
+        else:
+            return "path-not-string", f"{_arg(arg)} is not a string or a list of strings"
+        if len(values) > MAX_PATHS:
+            return "path-unresolvable", f"{_arg(arg)}: more than {MAX_PATHS} paths"
+        for one in values:
+            held = _path_hold(policy, cls, arg, one)
+            if held:
+                return held
+    return None
+
+
 def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> Verdict:
     """Section 4: allow or hold one call to an approved tool. `definition` is the approved
     stored copy (a dict), whose annotations count only for a trusted upstream."""
@@ -244,27 +273,19 @@ def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> V
         return _hold("unclassified", f"{prefix}__{tool} has no class in polarizer.toml", None, None)
     assert cls in CLASSES
     if cls in ("destructive", "egress"):
-        return _hold(cls, f"class {cls} is held on every call", cls, class_from)
+        # Held on every call; the paths only add to the reason (rows 3 and 4): a destructive
+        # tool's are judged as local-write's, an egress tool's as local-read's.
+        reason = f"class {cls} is held on every call"
+        as_cls = "local-write" if cls == "destructive" else "local-read"
+        held = _paths_hold(policy, as_cls, path_args, arguments)
+        if held:
+            reason += f"; {held[1]}"
+        return _hold(cls, reason, cls, class_from)
     if cls == "local-write" and not path_args:
         reason = "class local-write has no path_args, so its paths cannot be checked"
         return _hold("write-unchecked", reason, cls, class_from)
-    for arg in path_args:
-        if not isinstance(arguments, dict) or arg not in arguments:
-            return _hold("path-missing", f"{_arg(arg)} is missing", cls, class_from)
-        value = arguments[arg]
-        if isinstance(value, str):
-            values = [value]
-        elif isinstance(value, list) and all(isinstance(v, str) for v in value):
-            values = value
-        else:
-            reason = f"{_arg(arg)} is not a string or a list of strings"
-            return _hold("path-not-string", reason, cls, class_from)
-        if len(values) > MAX_PATHS:
-            reason = f"{_arg(arg)}: more than {MAX_PATHS} paths"
-            return _hold("path-unresolvable", reason, cls, class_from)
-        for one in values:
-            held = _path_hold(policy, cls, arg, one)
-            if held:
-                return _hold(*held, cls, class_from)
+    held = _paths_hold(policy, cls, path_args, arguments)
+    if held:
+        return _hold(*held, cls, class_from)
     allow = {"local-write": INSIDE_ROOTS, "local-read": LOCAL_READ, "open-world": OPEN_WORLD}
     return Verdict("allow", allow[cls], None, cls, class_from)
