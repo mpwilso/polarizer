@@ -255,7 +255,7 @@ The output below is exact; placeholders are in angle brackets. Every exit code, 
 - **Counting:** in the first `intact` line, sessions are `session.started` entries and calls are `call.sent` entries.
 - **v0 ledgers:** messages drop the `(seq <q>)` part, since v0 has no seq. The not-canonical reason is `stored bytes are not the v0 line form`, and a torn tail prints `torn tail: <b> bytes after line <l>` with no repair hint, because repair refuses v0 ledgers. Only the first four invalid rules, `unknown key` and `missing key` apply to v0.
 
-**`verify --args`** prints the chain result first, including the `ledger.head: missing` line when there is one. If the chain is intact, it adds one summary line and then one line per side file that isn't matching: missing and tampered files in seq order, then orphans by name.
+**`verify --args`** prints the chain result first, including the `ledger.head: missing` line when there is one. If the chain is intact, it adds one summary line and then one line per side file that isn't matching: missing and tampered files in seq order, then orphans by name. A file's seq is that of the `call.sent` that refers to it or, for a hold that was never forwarded, of its `hold.created` (HOLD-SPEC.md, section 5).
 
 ```
 args: <m> matching, <x> missing, <t> tampered, <o> orphaned

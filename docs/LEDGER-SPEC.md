@@ -271,6 +271,6 @@ The name settles a collision a seq-based name would have. A crash after the side
 - **matching**;
 - **missing**, the normal state after a deletion;
 - **tampered**, when its bytes don't match the name;
-- **orphaned**, when no `call.sent` refers to it.
+- **orphaned**, when no `call.sent` or `hold.created` refers to it. A held call's side file is written before its `hold.created` (HOLD-SPEC.md, section 6), so the side file of a hold that was never forwarded is checked like any other.
 
 It never deletes anything. The exact output and exit codes are in PROXY-SPEC.md. A tampered side file exits 8. Missing and orphaned files don't fail the check.

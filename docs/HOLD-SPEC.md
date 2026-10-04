@@ -39,9 +39,9 @@ docs/PLAN.md does not exist in the repo, so nothing here relies on it. Where thi
 |---|---|---|
 | `local-read` | reads local data and changes nothing | runs, logged; held when a path argument matches a read hold pattern (section 3) |
 | `local-write` | changes local files | runs when every path argument resolves inside a workspace root and matches no write hold pattern; held otherwise |
-| `destructive` | deletes, moves or overwrites, or changes something hard to undo | held on every call |
+| `destructive` | deletes, moves or overwrites, or changes something hard to undo | held on every call; a path argument that a path rule would hold is named in the reason (section 4) |
 | `open-world` | reads from outside the machine (web pages, issues, mail) | runs, logged (taint is M2b) |
-| `egress` | sends data outside the machine, or acts there | held on every call |
+| `egress` | sends data outside the machine, or acts there | held on every call; a path argument that a path rule would hold is named in the reason (section 4) |
 
 A tool with no class is **unclassified** and held on every call (fail closed).
 
@@ -144,6 +144,16 @@ The pattern error's reason is one of: `"**" must be a whole part`, `an empty par
 - **`polarizer serve --config <path> --no-holds`** runs with the hold rules off: every call that routes to an approved tool runs, whatever its class or paths. It is a command-line flag only. There is no config key for it, and a key such as `holds = false` is an unknown key. It is never the default. At every start with it, serve records `policy.loaded` with `holds` `"off"` (section 5), fsynced before anything is served, and writes `polarizer: warning: started with --no-holds; no call is held` to stderr. Pins, routing and the ledger are unchanged by it. The idea of a switch that exists only as a flag, never in the policy file, is credited to mcpclerk by name (CLAUDE.md, Clean room); nothing else of it is used.
 - **The manual check and the scripts** classify their tools (section 11), so they keep working without `--no-holds`.
 
+### Classes taken from annotations
+
+A tool of an upstream with `trust_annotations = true` that has no entry under `tools` takes the class its annotations suggest (section 4). Every annotation set suggests a class, so such a tool never counts toward the unclassified line above: a trusted server chooses its own class, and nothing else would say so. Once per process, right after the unclassified line (or where it would be), serve writes:
+
+```
+polarizer: <n> of <m> listed tools take their class from annotations (trust_annotations is on for <prefixes>)
+```
+
+`<m>` counts every tool the upstreams listed, in any pin state, as in the unclassified line. `<n>` counts the listed tools of trusted upstreams that have no `tools` entry. `<prefixes>` are the prefixes of the trusted upstreams those tools belong to, in config order, separated by `, `. With `<n>` at 0 nothing is written, and nothing is written under `--no-holds`, where no class is used. The line is informational: it changes no verdict, and a configured class still wins.
+
 ## 3. Paths
 
 ### Which values are paths
@@ -169,9 +179,12 @@ A path is resolved before any comparison. Resolution never asks the upstream and
 | more than 40 symbolic links followed, or a loop | `too many symbolic links` |
 | a part that can't be examined (permission denied, an I/O error) | `cannot be examined: <the operating system's message, through safe()>` |
 | resolution takes longer than 2 s (a hung network mount) | `took longer than 2 s to resolve` |
+| 8 earlier resolutions in this process are still stuck (below) | `too many path resolutions are stuck` |
 | Windows only: a `:` after the drive (an alternate data stream), a part ending in a dot or a space, a reserved device name (`CON`, `NUL`, `COM1` and the rest, with or without an extension), or a `\\?\` or `\\.\` prefix | `a Windows name Polarizer does not resolve` |
 
 Otherwise the path is resolved as POSIX `realpath` does, part by part: each part that exists is examined with `lstat`; a symbolic link is replaced by its target (relative targets against the link's directory) and resolution continues there; `..` applies to the path resolved so far. Once a part does not exist, the rest is appended as written, which is how a call that creates a file is checked. Resolution runs in a worker thread, so a slow file system never blocks the event loop, and the 2 s bound is measured there.
+
+**Stuck resolutions.** Each path is resolved on a daemon thread of its own. A thread blocked in the file system can't be stopped, so a resolution that passes its bound is left running and counts as **stuck** until it returns. While 8 are stuck, every further path is held at once as `path-unresolvable` with the reason `too many path resolutions are stuck`, and no thread is started for it. The count drops as stuck threads return, and paths are resolved again once it is below 8. The count is per process, over every call. This bounds the threads a hung mount can leave behind.
 
 The result is the **resolved path**. It is what every comparison below uses, and what the record shows.
 
@@ -208,6 +221,13 @@ The config's lists are added after the built-in ones. The built-in lists can't b
 - **Windows.** Paths are resolved with Python's `os.path.realpath`, which follows symbolic links and junctions and returns long names for existing parts (no `PROGRA~1`). The names in section 3's table that Polarizer does not resolve are held. Drive-relative (`C:a`) and root-relative (`\a`) paths are not absolute. A UNC path (`\\server\share\x`) is absolute and is compared like any other; it is outside every root unless a root is on that share. Case is compared with `normcase`, as for `ledger_forbidden_paths`.
 - **Which tests run where** is in section 13: the signal tests are POSIX only, the symlink tests are skipped where Windows refuses `os.symlink`, the permission test is POSIX only, and the Windows names test runs only on Windows. Nothing in this section has run on Windows or macOS; the CI runners are the first.
 
+### Known limits
+
+Found in the M2a review (Oct 4, 2026), and stated in the README draft (section 14):
+- **Windows device names with superscript digits.** Windows also reserves `COM` and `LPT` followed by a superscript one, two or three (U+00B9, U+00B2, U+00B3). The reserved-name check knows only the ASCII digits, so such a name is not held as a Windows name: it is resolved like any other name and judged by the roots and patterns.
+- **Claude Code's configuration directory can be moved.** Claude Code reads its configuration from the directory named by `CLAUDE_CONFIG_DIR` when that variable is set. The built-in patterns name `~/.claude/**`, `~/.claude.json` and the project's `.claude/**` and `.mcp.json` only, and Polarizer does not follow the variable, so a moved directory is not covered unless the config adds it to `write_hold_patterns`.
+- **`~` is the process's home.** `~` in a pattern is expanded once, at start, with `os.path.expanduser`, which reads the serve process's `HOME` on POSIX (`USERPROFILE` on Windows), not the account's home directory from the system's user database. A serve started with another `HOME` applies the `~/` patterns, built-in and configured, to that directory.
+
 ## 4. The rule function
 
 ### Order
@@ -221,7 +241,7 @@ The tiers are deny, then hold, then allow. M2a has no deny rule of its own: ever
 3. **The hold tier,** first match wins:
    - no class: `unclassified`;
    - `destructive`: `destructive`;
-   - `egress`: `egress`;
+   - `egress`: `egress`. Both are unconditional; when the tool has `path_args`, its paths are still evaluated so that the reason can name one (below);
    - `local-write` with no `path_args`: `write-unchecked`;
    - then, for `local-write`, `local-read` and `open-world`, each configured argument in order, each of its paths in order: `path-missing`, `path-not-string`, `path-unresolvable`, `polarizer-files`, then for `local-write` `write-pattern` and `outside-roots`, and for the other two `read-pattern`.
 4. **The allow tier:** `local-write` with every path inside a root, `inside-roots`; `local-read`, `local-read`; `open-world`, `open-world`.
@@ -232,8 +252,8 @@ The tiers are deny, then hold, then allow. M2a has no deny rule of its own: ever
 |---|---|---|---|---|---|---|
 | 1 | any | any | serve started with `--no-holds` | allow | `holds-off` | none recorded |
 | 2 | none | any | any | hold | `unclassified` | `<prefix>__<tool> has no class in polarizer.toml` |
-| 3 | `destructive` | any | any | hold | `destructive` | `class destructive is held on every call` |
-| 4 | `egress` | any | any | hold | `egress` | `class egress is held on every call` |
+| 3 | `destructive` | any | any | hold | `destructive` | `class destructive is held on every call`; with `path_args`, `; ` and the reason of the first of rows 6 to 12 that applies, as for `local-write` |
+| 4 | `egress` | any | any | hold | `egress` | `class egress is held on every call`; with `path_args`, `; ` and the reason of the first of rows 6 to 9 and 14 that applies, as for `local-read` |
 | 5 | `local-write` | none | any | hold | `write-unchecked` | `class local-write has no path_args, so its paths cannot be checked` |
 | 6 | `local-write`, `local-read`, `open-world` | yes | a named argument is missing | hold | `path-missing` | `argument "<a>" is missing` |
 | 7 | the same | yes | a named argument is not a string or a list of strings | hold | `path-not-string` | `argument "<a>" is not a string or a list of strings` |
@@ -252,6 +272,14 @@ The tiers are deny, then hold, then allow. M2a has no deny rule of its own: ever
 | 20 | any held row | any | 16 holds of this session already open | refused at once, no hold | `too-many-holds` | `too many held calls: 16 already wait in this session` |
 
 `<resolved>` and `<a>` go through `safe()`, and the whole reason is cut to 1 KiB. `<pattern>` is printed as configured, `~` unexpanded.
+
+**Paths of destructive and egress calls** (rows 3 and 4). The hold doesn't depend on them, but a person deciding a move should see that its destination is `~/.ssh/authorized_keys`. So when the tool has `path_args`, the paths are evaluated in the same order as for the other classes: a `destructive` tool's as `local-write` (Polarizer's files, the write patterns, the roots) and an `egress` tool's as `local-read` (the ledger directory, the read patterns), since what egress sends out is read. The first rule that would have held is appended to the reason after `; `, with that rule's own reason; a path that can't be resolved appends its fixed reason the same way. The rule stays `destructive` or `egress`, the action stays `hold`, and when no path rule applies the reason is the plain one. For example:
+
+```
+class destructive is held on every call; argument "destination": /home/me/.ssh/authorized_keys matches ~/.ssh/**
+```
+
+A class from annotations has no `path_args`, so its reason is always the plain one with the suffix of row 19.
 
 ### Annotations
 
@@ -286,6 +314,8 @@ The format, the hash, the statuses and the exit codes don't change. LEDGER-SPEC.
 - **`call.sent`** also has `allowed_by` (decided, section 16, decision 5): the rule that let a call run without a hold (`holds-off`, `inside-roots`, `local-read` or `open-world`), or `"hold"` for a call that was allowed from a hold. A call that never passed through the rule function has no `allowed_by` key; in M2a every forwarded call passes through it, and every `call.sent` written before M2a has neither key.
 - **`call.refused`** that ends a held call has `hold`. Its `reason` is `hold <id> was denied`, `hold <id> expired: <hold.expired's reason>`, `the client cancelled the call before it was forwarded`, `hold <id> was allowed, but its side file <problem>` (section 6, Allow), or, when a decision arrived but routing has changed since (section 6), M1a's reason for the hidden tool. A refusal for `too-many-holds` has no `hold` (no hold was created) and the reason in row 20. LEDGER-SPEC.md's description of `call.refused` widens from "a name that matches no listed tool" to "a call Polarizer never forwarded".
 - **`session.started`** is unchanged.
+
+**`verify --args`** counts `hold.created`'s `args_commit` as a reference to its side file, as it counts `call.sent`'s (LEDGER-SPEC.md, Part 3). So the side file of a hold that was denied, expired or abandoned is matching, missing or tampered like any other, never orphaned, and a tampered one exits 8. A file that both a `call.sent` and a `hold.created` refer to (an allowed hold) is counted once, at the `call.sent`'s seq, as before. The output's format, the statuses and the exit codes don't change.
 
 **What the fields leave out, on purpose.** `hold.created` records nothing taken from the MCP request apart from the tool name and the arguments' commitment: no request id, no `client_call_id`, no progress token, no `_meta`. `call.sent` still records `client_call_id` once the call is forwarded. Section 12 says why.
 
@@ -596,6 +626,7 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_no_holds_is_a_flag_only` | `--no-holds` records `policy.loaded` with `holds` `"off"`, fsynced before any upstream connects (counted through `FileOps`), and writes the warning; `holds = false` in `[policy]` or at the top level is an unknown-key error. | Default |
 | `test_policy_loaded_fields` | `policy.loaded` follows `session.started`, with the policy hash of a fixed config equal to a value written in the test, the resolved roots, the count of configured entries and the timeout. | Default |
 | `test_roots_must_exist_for_serve_only` | A missing root stops serve with its line; `holds`, `pending`, `verify` with `--config` don't check it. | Default |
+| `test_annotation_class_line` | With a trusted upstream and tools without a `tools` entry, serve writes the annotations line once with `<n>`, `<m>` and the prefixes; with none, or under `--no-holds`, it writes nothing. | Default |
 | `test_example_config_matches_reference_servers` | Every tool named in `polarizer.example.toml` for `fs` is listed by the pinned Filesystem server, and every listed tool is named. | Reference |
 
 ### `tests/test_paths.py`
@@ -613,6 +644,7 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_slow_resolution_is_held` | With the resolver replaced by one that sleeps past the bound (the bound injected), the call is held, `took longer than 2 s to resolve`. | Default |
 | `test_path_arg_not_a_string_is_held` | A number, null, an object and a list holding a number are each `path-not-string`; a missing argument is `path-missing`; an empty list runs. | Default |
 | `test_more_than_256_paths_is_held` | A list of 257 strings is `path-unresolvable`. | Default |
+| `test_stuck_resolutions_are_capped` | With a resolver that blocks, 8 paths pass the bound and stay stuck; the 9th is held at once with `too many path resolutions are stuck` and its resolver never runs; once the blocked threads return, paths resolve again. | Default |
 | `test_pattern_matching` | Anchored, floating, `**` at the end, `*` and `?`, against fixed paths, with the case rule given as a parameter: exact (Linux), and casefold plus NFC (Windows and macOS). | Default |
 | `test_case_rule_on_this_platform` | On this platform's real file system, a write to `R/.GIT/hooks/x` inside a root is held on Windows and macOS (casefold) and runs on Linux, where `.GIT` is another directory. | Default |
 | `test_roots_compare_like_forbidden_paths` | Inside-root checks use `ledgerdir.is_inside`: `/a/proj2` is not inside `/a/proj`, and a differently cased root follows the platform. | Default |
@@ -629,6 +661,7 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_annotation_suggestions` | Each row of the suggestion table, plus no annotations (`destructive`) and a non-boolean hint (absent). | Default |
 | `test_contradiction_rank` | `local-read` configured and `destructive` suggested contradicts; `destructive` configured and `local-read` suggested doesn't; `local-read` against `open-world` doesn't. | Default |
 | `test_trusted_annotations_classify` | A tool with no class on a `trust_annotations` upstream takes the suggested class, recorded with `class_from` `"annotations"` and the reason suffix; a configured class wins. | Default |
+| `test_destructive_and_egress_name_the_path` | A destructive tool's path on a write pattern, outside the roots, unresolvable or missing, and an egress tool's path on a read pattern, each append that rule's reason to the class's reason, with the rule unchanged; a path that no rule holds leaves the plain reason. | Default |
 
 ### `tests/test_holds.py` (in-memory gateway unless noted)
 
@@ -690,6 +723,12 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_hold_commands_subprocess` | `python -m polarizer holds` prints the golden bytes, including arguments with non-ASCII text shown as escapes. | Default |
 | `test_pending_shows_classes` | `pending --config` prints the class lines and the classes section, and `pending --ledger-dir` prints exactly what it did before. | Default |
 
+### `tests/test_args.py`
+
+| Test | Claim | Suite |
+|---|---|---|
+| `test_hold_side_files_are_not_orphaned` | The side files of a denied hold and an expired hold are matching, not orphaned; an allowed hold's is counted once; a stray file is still orphaned; a deleted held file is missing and an altered one tampered, exit 8. | Default |
+
 ### Fixtures
 
 | Test | Claim | Suite |
@@ -702,7 +741,9 @@ Draft text, describing only M2a with M1a:
 
 > **What holding does.** You give each tool a class in `polarizer.toml`. Reads run. Writes run when every path you told Polarizer to check is inside your workspace, and isn't one of a few sensitive places such as `.git/hooks`, your shell start-up files, `~/.ssh` or Claude Code's own settings. Destructive and outgoing calls, and calls to tools you haven't classified, are held: the call waits, and nothing reaches the server until you run `polarizer allow` with the hold's id. `polarizer holds` shows each waiting call with its exact arguments, every unusual character escaped. If you deny it or don't answer within five minutes, the call is refused, and the agent sees only that it was not allowed. Every hold, decision and outcome is in the ledger.
 >
-> **What it does not do.** It sees only calls that go through Polarizer, not the agent's shell, its own file tools, or MCP servers configured directly in Claude Code. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the top-level arguments you name, and only when the call arrives; a path nested inside an argument (a list of edits, each with its own path) is not checked in this version. A tool's own annotations are shown as a hint and are trusted only if you say so. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
+> **What it does not do.** It sees only calls that go through Polarizer, not the agent's shell, its own file tools, or MCP servers configured directly in Claude Code. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the top-level arguments you name, and only when the call arrives; a path nested inside an argument (a list of edits, each with its own path) is not checked in this version. A tool's own annotations are shown as a hint and are trusted only if you say so; a server you mark with `trust_annotations` chooses its own class, so its tools' annotations decide which of its calls wait, and Polarizer says at start how many tools that covers. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
+>
+> **Known gaps in the path checks.** On Windows, the device names `COM1` to `COM3` and `LPT1` to `LPT3` written with a superscript digit are not recognized as device names. If you move Claude Code's configuration with `CLAUDE_CONFIG_DIR`, the built-in patterns don't follow it; add the new place to `write_hold_patterns`. A `~` in a pattern means the home directory in Polarizer's `HOME` when it starts, not your account's home.
 >
 > **What it relies on.** A held call lives inside the Polarizer process Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding; none of them reaches the server, and the ledger says so. If you allow a call and that process dies before it forwards it, the call does not run either: `polarizer holds` no longer lists it, because you decided it, and if the agent tries the call again you are asked again. Polarizer has no page or notification for holds yet: run `polarizer holds --wait` in another terminal to see them as they arrive (add `--bell` to have the terminal ring).
 
@@ -775,6 +816,15 @@ Given with the round's brief on Oct 4, 2026; "decision <n>" above refers to thes
 3. **LEDGER-SPEC.md's fsync policy** lists "later milestones' holds and decisions" as security-state entries, while decision 4 fsyncs only entries that can make Polarizer do more. Decided by decision 4 (deviation 5).
 4. **milestones.md's M3 row** said timeout and cancel are fsynced before acting. The owner decided to change the row to match this spec (section 16, decision 8).
 5. **Decision 5 cites the idle timeout as headless;** verified-facts.md has it from the binary, and the headless observation is that it did not fire (deviation 9).
+
+### The M2a review (Oct 4, 2026)
+
+After stage 6, the owner's review of the rule function and of CI asked for these changes, made in the commit "spec: m2a review" and built in "stage6 fixes":
+1. **Destructive and egress calls name a path** that a path rule would hold, in the reason only (section 4, rows 3 and 4).
+2. **serve says how many tools take their class from annotations** (section 2, Classes taken from annotations).
+3. **At most 8 stuck resolutions** per process; further paths are held at once (section 3).
+4. **Known limits** of the path checks are stated (section 3, Known limits, and section 14).
+5. **`verify --args` counts `hold.created` as a reference** (section 5), as stage 6's notes proposed under "Found, not changed". The owner confirmed that a tampered side file of a never-forwarded hold exits 8, as any tampered side file does.
 
 ### Deviations from the decisions and the existing documents
 
