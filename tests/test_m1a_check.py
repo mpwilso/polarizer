@@ -8,12 +8,14 @@ script writes is in the test's own directory (POLARIZER_CHECK_TESTING=1)."""
 
 import json
 import os
+import platform
 import re
 import select
 import shutil
 import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import mcp_types as types
@@ -199,11 +201,37 @@ def _take_terminal():
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
+# read(2)'s number in /proc/<pid>/syscall.
+READ_SYSCALL = {"x86_64": "0", "aarch64": "63"}
+# Where the blocked read can't be seen for sure, how long to look before typing Ctrl+C anyway.
+UNSURE_WAIT = 5
+
+
+def _reading_terminal(pid):
+    """Whether pid is asleep in read(2) on its standard input, the terminal: True or False on
+    Linux, from /proc/<pid>/syscall; elsewhere True when ps shows the BSD wait channel "ttyin",
+    and None otherwise, because that is untested here."""
+    if sys.platform == "linux" and platform.machine() in READ_SYSCALL:
+        try:
+            fields = Path(f"/proc/{pid}/syscall").read_text(encoding="ascii").split()
+        except OSError:
+            return False
+        return fields[:2] == [READ_SYSCALL[platform.machine()], "0x0"]
+    found = subprocess.run(["ps", "-o", "wchan=", "-p", str(pid)], capture_output=True, text=True)
+    return True if found.stdout.strip() == "ttyin" else None
+
+
 def drive(env, command, replies=(), timeout=60):
     """Run `scripts/m1a-check.sh <command>` on a pseudo-terminal of its own, as its controlling
     terminal, so Ctrl+C (b"\\x03") reaches it as it would from a keyboard. replies: (text, what
     to type) pairs; each is typed once its text has appeared, in order. Returns the exit code
-    and the output, with the terminal's echo of what was typed."""
+    and the output, with the terminal's echo of what was typed.
+
+    A Ctrl+C waits, as well, until the script is asleep in its read. bash runs its INT trap
+    between commands and when the signal interrupts read(2), but a SIGINT that lands inside the
+    read builtin after its last check and before read(2) blocks only sets a flag, and the
+    terminal turns ^C into the signal without queuing a byte, so nothing wakes the read: the
+    script sits there until the next key (CI run 37221165322, Linux, Python 3.13)."""
     import pty
 
     controller, terminal = pty.openpty()
@@ -213,16 +241,25 @@ def drive(env, command, replies=(), timeout=60):
         start_new_session=True, preexec_fn=_take_terminal,
     )  # fmt: skip
     os.close(terminal)
-    output, cursor, todo = b"", 0, list(replies)
+    output, cursor, todo, asked = b"", 0, list(replies), None
     deadline = time.monotonic() + timeout
     try:
         while time.monotonic() < deadline:
-            if todo:
+            if todo and asked is None:
                 at = output.find(todo[0][0].encode(), cursor)
                 if at >= 0:
                     cursor = at + len(todo[0][0])
+                    asked = time.monotonic()
+            if asked is not None:
+                ready = b"\x03" not in todo[0][1] or _reading_terminal(proc.pid)
+                if ready is None and time.monotonic() - asked > UNSURE_WAIT:
+                    unsure = f"could not see m1a-check.sh asleep in its read on {sys.platform}"
+                    warnings.warn(f"{unsure}; typed Ctrl+C anyway", stacklevel=2)
+                    ready = True
+                if ready:
                     os.write(controller, todo.pop(0)[1])
-            if select.select([controller], [], [], 0.1)[0]:
+                    asked = None
+            if select.select([controller], [], [], 0.1 if asked is None else 0.01)[0]:
                 try:
                     chunk = os.read(controller, 4096)
                 except OSError:  # EIO: everything holding the terminal has closed it
@@ -232,7 +269,12 @@ def drive(env, command, replies=(), timeout=60):
                 output += chunk
         else:
             proc.kill()
-            pytest.fail(f"m1a-check.sh {command} still running after {timeout} s:\n{output!r}")
+            waiting = (
+                f", never seen asleep in its read after {todo[0][0]!r}" if asked is not None else ""
+            )
+            pytest.fail(
+                f"m1a-check.sh {command} still running after {timeout} s{waiting}:\n{output!r}"
+            )
         code = proc.wait(timeout=30)
     finally:
         os.close(controller)
