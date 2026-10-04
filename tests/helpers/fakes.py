@@ -14,8 +14,8 @@ Tools, by name:
 - rich, rich_error (only when passed in `extra`): rich() below, with is_error false or true.
 
 `list_delay` (seconds) makes each tools/list wait first, `bump_on_list` gives every tools/list
-a new version, and `fail_list` makes tools/list answer with a JSON-RPC error: attributes tests
-set while the fake runs. `list_times` holds the time.monotonic() of each tools/list.
+a new version, and `fail_list` makes tools/list answer with a JSON-RPC error whose message is
+`fail_message`: attributes tests set while the fake runs. `list_times` holds the time.monotonic() of each tools/list.
 
 `rug_pull()` bumps every description to "Definition v<n+1>" and announces it the way the
 connection's era expects: ToolsListChanged() on the listen bus for 2026-07-28, or
@@ -99,6 +99,7 @@ class FakeUpstream:
         self.list_delay = 0.0
         self.bump_on_list = False
         self.fail_list = False
+        self.fail_message = "listing failed on purpose"
         self._last_lister = None  # (protocol version, session) of the latest tools/list
         self.log = log
         self.bus = InMemorySubscriptionBus()
@@ -140,7 +141,7 @@ class FakeUpstream:
         self.list_times.append(time.monotonic())
         self._last_lister = (ctx.protocol_version, ctx.session)
         if self.fail_list:
-            raise MCPError(code=-32603, message="listing failed on purpose")
+            raise MCPError(code=-32603, message=self.fail_message)
         if self.list_delay:
             await anyio.sleep(self.list_delay)
         if self.bump_on_list:

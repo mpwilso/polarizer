@@ -280,6 +280,9 @@ def serve(config_path: Path) -> int:
         return e.exit_code
     except OSError as e:
         return _err(f"polarizer: cannot open {e.filename or cfg.ledger_dir}: {e.strerror}")
+    from polarizer.upstream import install_log_handler
+
+    install_log_handler()  # the SDK's log records, through safe(), never raw upstream text
     try:
         anyio.run(_serve, cfg, ledger, state)
     finally:

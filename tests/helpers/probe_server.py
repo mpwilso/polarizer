@@ -21,6 +21,8 @@ Environment:
 - PROBE_LOG: a file to append every inbound line to, each prefixed with a Unix timestamp.
 - PROBE_DELAY: seconds to wait before reading the first message (a slow handshake).
 - PROBE_GATE: a path; the probe reads nothing until that file exists (after PROBE_DELAY).
+- PROBE_LINGER: seconds the probe keeps running after end of input, logging `lingering`
+  first: an upstream that ignores end of input, as Polarizer's shutdown may meet one.
 - PROBE_SNAKE: a number n; tools/list answers after the n-th spell inputSchema as
   input_schema, which the SDK client refuses (0: every listing, so it never connects).
 - PROBE_RUGPULL: a path. If the file doesn't exist, the probe creates it (empty) and serves its
@@ -96,10 +98,16 @@ _cancelled: dict = {}  # request id -> threading.Event
 
 
 def send(message: dict) -> None:
+    """Write one message. If stdout is gone (Polarizer exited), log it and exit: an exception
+    here would end the reader thread and leave the probe waiting forever."""
     line = json.dumps(message) + "\n"
     with _out:
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            log("stdout closed")
+            os._exit(0)
 
 
 def log(line: str) -> None:
@@ -227,6 +235,10 @@ def main() -> int:
     done = threading.Event()
     threading.Thread(target=read_stdin, args=(done,), daemon=True).start()
     done.wait()
+    linger = float(os.environ.get("PROBE_LINGER", "0"))
+    if linger:
+        log("lingering")
+        time.sleep(linger)
     return 0
 
 

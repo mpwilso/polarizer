@@ -29,7 +29,8 @@ def test_prefix_rules(tmp_path):
                 config.load(path)
 
     # Exposed names are <prefix>__<tool>; a name that would break ^[A-Za-z0-9._-]{1,128}$ is
-    # left out and recorded under skipped_tools.
+    # left out and recorded under skipped_tools, through safe() (escaped, at most 200
+    # characters), like all upstream text in the ledger.
     fits = "t" * (128 - len("srv__"))
     too_long = fits + "u"
     fake = FakeUpstream(names=["echo", "a.b-c_d", fits, too_long, "has space", "caf" + chr(0xE9)])
@@ -48,7 +49,7 @@ def test_prefix_rules(tmp_path):
         "prefix": "srv",
         "protocol_version": "2026-07-28",
         "tools": 3,
-        "skipped_tools": [too_long, "has space", "caf" + chr(0xE9)],
+        "skipped_tools": [too_long, "has space", "caf" + chr(0x5C) + "xe9"],
     }
 
 

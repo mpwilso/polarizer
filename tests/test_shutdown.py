@@ -4,7 +4,9 @@ with a primed ledger, and starts a 30 s wait call before stopping it."""
 
 import json
 import os
+import re
 import signal
+import subprocess
 import sys
 import time
 
@@ -173,3 +175,64 @@ def test_signal_during_startup(tmp_path):
     assert verify_bytes(data, (ledger_dir / "ledger.head").read_bytes()).status == "intact"
     kinds = [json.loads(line)["kind"] for line in data.splitlines()]
     assert "session.started" in kinds and "upstream.connected" not in kinds
+    # serve wrote server/discover before it stopped. After its delay the probe reads it, can't
+    # answer, and exits; before the probe's fix it hung there for good (STAGE5-NOTES.md).
+    pid = int(re.search(r" start (\d+)", log.read_text(encoding="utf-8"))[1])
+    try:
+        wait_for(lambda: "stdout closed" in log.read_text(encoding="utf-8"))
+        wait_for(lambda: not _running(pid))
+    finally:
+        _stop(pid)
+
+
+def _running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _stop(pid: int) -> None:
+    """Kill a process this test started, by the pid it logged, and wait until it is gone."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 10
+    while _running(pid) and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
+@POSIX_ONLY
+def test_upstream_ignoring_end_of_input_is_left_running(tmp_path):
+    """The stated limit in PIN-SPEC.md, section 8, step 2: an upstream that ignores end of
+    input doesn't hold serve past the 1 s bound, and serve leaves it running. The SDK keeps
+    each upstream's process handle to itself, so serve has nothing to stop it with; this test
+    stops the probe itself, by the pid the probe logged. POSIX only: on Windows the SDK's job
+    object should end the upstream when serve exits (not run)."""
+    log = tmp_path / "probe.log"
+    toml = (
+        f"[upstream.p]\ncommand = {rig.toml_str(sys.executable)}\n"
+        f"args = [{rig.toml_str(rig.PROBE)}]\n"
+        f'env = {{ PROBE_LOG = {rig.toml_str(log)}, PROBE_LINGER = "60" }}\n'
+    )
+    cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
+    # stderr goes to a file: the probe inherits serve's stderr, so a pipe would stay open, and
+    # a reader waiting for its end would wait for the probe, not for serve.
+    with open(tmp_path / "serve.err", "wb") as err:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "polarizer", "serve", "--config", str(cfg)],
+            stdin=subprocess.DEVNULL,  # end of input: startup, then the shutdown path
+            stdout=subprocess.DEVNULL,
+            stderr=err,
+        )
+        code = proc.wait(timeout=30)  # the probe lingers 60 s; serve doesn't wait for it
+    pid = int(re.search(r" start (\d+)", log.read_text(encoding="utf-8"))[1])
+    try:
+        assert code == 0
+        # The probe saw end of input (the SDK closed its stdin in step 2) and kept running.
+        wait_for(lambda: "lingering" in log.read_text(encoding="utf-8"))
+        os.kill(pid, 0)  # still there after serve exited; the SDK's SIGTERM never came
+    finally:
+        _stop(pid)

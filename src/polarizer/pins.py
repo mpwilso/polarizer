@@ -15,6 +15,7 @@ from pathlib import Path
 import rfc8785
 
 from polarizer import defhash
+from polarizer.text import printable
 
 CAP = 16  # distinct live hashes recorded per tool between decisions
 CAP_PROBLEM = f"more than {CAP} definitions since the last decision"
@@ -230,26 +231,6 @@ def group(found: list[Block]) -> tuple[list[Block], str | None]:
         return [], None
     triples = sorted([b.upstream, b.tool, b.def_hash] for b in members)
     return members, hashlib.sha256(GROUP_PREFIX + rfc8785.dumps(triples)).hexdigest()
-
-
-def printable(text: str) -> str:
-    """Text from the ledger as `pending` prints it: every character outside printable ASCII
-    (0x20 to 0x7e) written as an escape, \\xNN below 0x100 and \\uNNNN above, one per UTF-16
-    code unit past U+FFFF. A ledger can't send terminal escapes to the person's terminal."""
-    out = []
-    for ch in str(text):
-        code = ord(ch)
-        if 0x20 <= code <= 0x7E:
-            out.append(ch)
-        elif code < 0x100:
-            out.append(f"{chr(0x5C)}x{code:02x}")
-        elif code <= 0xFFFF:
-            out.append(f"{chr(0x5C)}u{code:04x}")
-        else:
-            code -= 0x10000
-            for unit in (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF)):
-                out.append(f"{chr(0x5C)}u{unit:04x}")
-    return "".join(out)
 
 
 def render(found: list[Block]) -> list[str]:

@@ -2,7 +2,7 @@
 
 Read after docs/STAGE4-NOTES.md. This file records what stage 5 (M1a, pins in motion and process lifetime) decided on its own: what step 0 found, the deviations, the guesses, the time bounds in the new tests, the repeated runs, what could not be run, the platform hazards, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed. PIN-SPEC.md deviations 38 to 45 summarize the decisions below that change the spec.
 
-The session first fixed the stage 4 review items (two commits; docs/STAGE4-NOTES.md, Review fixes), then built stage 5 in one commit, "stage5: pins in motion and shutdown". No change to the ledger format, the hash chain, a status or an exit code.
+The session first fixed the stage 4 review items (two commits; docs/STAGE4-NOTES.md, Review fixes), then built stage 5 in one commit, "stage5: pins in motion and shutdown". No change to the ledger format, the hash chain, a status or an exit code. A follow-up commit made upstream text safe on stderr and in the ledger, and looked at shutdown and upstream processes (Follow-up, below).
 
 ## What step 0 found
 
@@ -90,9 +90,108 @@ An earlier series, before the notice waits went to 10 s and before the stdin rea
 - **fsync failures** are simulated through `FileOps`; how Windows reports a failed `os.fsync` (`FlushFileBuffers`) wasn't tried.
 - **`test_watch_reads_only_new_bytes`** builds a 10,000-entry ledger, about 1 s on WSL2; slower disks take longer, with no time bound on that part.
 
+## Follow-up: upstream text and shutdown cleanup
+
+One more commit after the stage 5 commit, "stage5: upstream text safety and shutdown cleanup". No change to the ledger format, the hash chain, a status or an exit code. One recorded value changes form: a skipped tool name is now escaped and cut to 200 characters, like all upstream text (`caf\xe9`, not the raw name), and `test_proxy::test_prefix_rules` was changed to match. Line numbers below are in the follow-up's code.
+
+### Upstream text: every place it could reach output
+
+"Upstream text" is text an upstream sent, or an exception message built from it. Stage 4's review listed most of these (STAGE4-NOTES.md, Review fixes) and left them open. Each now goes through one function, `polarizer.text.safe` (`src/polarizer/text.py:34`): whitespace folded to one space, every other character outside printable ASCII escaped as `\xNN` or `\uNNNN`, cut to 200 characters with `...` marking the cut, never inside an escape. `describe()` (`src/polarizer/upstream.py:50`) returns its result, and describes a pydantic error by a fixed text plus pydantic's error type and location (`a message did not match the MCP schema: dict_type at tools.0.inputSchema`), never its quoted input.
+
+| # | Where | Text | Reached | Now |
+|---|---|---|---|---|
+| 1 | `upstream.py:192` (`Upstream._run`) | a failed connect: an upstream's JSON-RPC error, pydantic's listing error, or the SDK's `Unsupported protocol version from the server: <version>` (`mcp/client/session.py:667`) | stderr, `did not connect: <error>` (`proxy.py:235`); `upstream.connected`'s `error` (`proxy.py:236`) | `describe()`, and `safe()` again at the ledger |
+| 2 | `upstream.py:194` and `:240`, into `lose()` (`:216`, `:217`) | a lost connection: an `MCPError` -32000 message, which an upstream can send itself | stderr, `stopped: <why>`; `upstream.refresh_failed`, `connection-lost` (`proxy.py:454`) | `describe()`; `safe()` at the ledger |
+| 3 | `upstream.py:267` (`_refresh`) | a failed refresh, as in 1 | stderr, `listing failed (<why>)` (`:269`); `upstream.refresh_failed` (`proxy.py:454`) | `describe()`; `safe()` at the ledger |
+| 4 | `upstream.py:296` and `:298` | a failed listen stream | stderr | `describe()` |
+| 5 | `proxy.py:239` and `:249` | a tool name that isn't allowed | `upstream.connected`'s `skipped_tools`; stderr, `skipped tool <name>`, written with `repr` and never cut | `safe()` |
+| 6 | `proxy.py:713` and `:718` (`_call_tool`) | a transport error: a -32000 message, or any other exception (pydantic's already got the fixed `UNREADABLE` line) | `call.returned`'s `error` and the client's one-line result (`_reply_error`, `proxy.py:739`) | `describe()` |
+| 7 | the SDK's log records, among them `mcp/client/stdio.py:166` and `:223` and `mcp/client/session.py:1302`, `:1463` and `:1477` | messages and exceptions that quote an upstream: pydantic's message for a line the SDK can't parse quotes the line | stderr, through Python's last-resort handler, with a traceback of several lines | `SafeLog` (`upstream.py:71`), installed by `serve` (`cli.py:285`): one line per record at WARNING and above, through `safe()`, the exception through `describe()` |
+| 8 | an upstream's own stderr | anything | serve's stderr: the SDK starts each upstream with serve's stderr as its own (`stdio_client`'s `errlog`, `mcp/client/stdio.py:115`; `Client` passes none, `mcp/client/client.py:396`) | not changed; Polarizer would have to start upstreams itself to filter it. A stated limit |
+
+Not upstream text, made safe too because the same terminal shows it: the client's tool name in serve's stderr lines `refused <name>: could not record it` (`proxy.py:628` and `:668`).
+
+**Fixed reasons, unchanged, because a fixed reason is enough:** `timeout after <n> s` at connect and on a refresh (`upstream.py:206` and `:261`), `more than 100 pages` and `more than 1000 tools`, the `UNREADABLE` line for a result the SDK can't parse, `upstream <prefix> returned a tool error`, the `unsupported` line (its kinds come from the SDK's `Literal` methods, never from the upstream), stage 4's four `cannot be hashed` reasons, and `upstream.connected`'s `protocol_version` (only a version the SDK accepted).
+
+**Kept whole by design (one line, at most 1 KiB), because they are the tool's own text:**
+1. **A `protocol-error`'s message** (`proxy.py:711` and `:712`, recorded through `one_line()` at `:686`). It is the tool's own answer to the call. The client gets it unchanged, with its code (PROXY-SPEC.md, Calls: "the same code and message"), and the ledger records what the client got: folded to one line, lone surrogates replaced, cut to 1 KiB, not escaped. The ledger is JSON, and canonical JSON writes characters below 0x20 as `\u00XX`, so a raw ESC never reaches the file; C1 controls (0x80 to 0x9f) and bidi characters are stored as UTF-8, so `cat` or `tail` on the ledger passes them to the terminal. No test sends one with hostile text.
+2. **Results** (`ok` and `tool-error`) go to the client unchanged and never enter the ledger (`result_bytes` only).
+3. **Tool definitions** go to the client from their stored copies. `pending` and `approve` print them escaped (`defhash.render`), and they never reach stderr.
+
+**stdout:** serve's stdout carries only JSON-RPC (`test_stdout`), so upstream text is there only inside protocol messages, as in the three items above. `pending` escapes all it prints (stage 4), and `approve` prints names that serve recorded only after they matched `^[A-Za-z0-9._-]{1,128}$`.
+
+**Tests** (`tests/test_upstream_text.py`): `safe()` and `describe()` on their own, `SafeLog`, a hostile upstream in memory and five hostile upstreams over stdio through `polarizer serve`. The hostile text has ESC sequences, a bell, a newline that starts a fake stderr line, a carriage return, 5,000 characters, a bidi override and a lone surrogate. Every stderr line, every string in the ledger and the client's reply must be printable ASCII, without the long run, and no stderr line may start with the fake one. Over stdio a lone surrogate can't arrive in a value the SDK parses: its JSON parser refuses the whole line (verified-facts.md, Stage 5 follow-up). So `tests/helpers/hostile_server.py` sends one in a line of its own, and the SDK's log of that line is what is checked; the in-memory test carries a raw lone surrogate through the error paths. With `describe()` put back as it was and the log handler off, four of the five tests failed (checked once, then restored).
+
+### Shutdown order
+
+Every path ends in the same three steps of `cli._serve`, and `os._exit` runs only after `ledger.close()` has returned:
+- **End of input:** `_StdinLines._read` (`cli.py:368`) gets an empty read, or an `OSError`, and calls `stop.request()` on the event loop (`:390`) before it ends its stream. That sets the shutdown flag, cancels the background work and cancels the serving scope. The SDK's server cancels each call in flight, each handler records `call.returned` in a shielded scope, and `server.run` returns only after every handler has ended.
+- **SIGINT or SIGTERM (POSIX):** `_signals` calls `stop.signal()`, which does the same. During startup it cancels startup, and serving is skipped.
+- **Windows Ctrl+C:** a `signal.signal` handler calls `stop.signal` through `loop.call_soon_threadsafe`, then as above (not run).
+- **Then:** step 2, `close_upstreams(1.0)`, in a scope of its own. Step 3 (`cli.py:429`), `ledger.close()` on a worker thread inside a shielded scope: the writer thread writes everything queued, every `call.returned` above included, `close()` fsyncs if anything is unsynced, and releases the ledger, its reader and the lock. Then `_exit_now()` (`cli.py:430`) flushes stdout and stderr and calls `os._exit(0)`.
+- **A second signal** sets `hurry` and cancels step 2's scope, so step 3 starts at once. A signal during step 3 cancels nothing: its scope is shielded, and `close()` runs on a thread a cancel can't stop.
+
+Three paths don't reach `os._exit`. None is changed here, because each would change an exit code or needs the owner:
+- **The final fsync fails:** `close()` raises, `_exit_now` is never reached, and serve ends by normal teardown. `cli.serve`'s `finally` calls `close()` again, which does nothing, the exception ends the process with a traceback and exit code 1, and anyio first waits for the SDK's shielded upstream shutdown (up to about 6 s). Read, not run.
+- **An exception escapes `_serve` before step 3** (a bug): steps 2 and 3 are skipped, `cli.serve`'s `finally` still closes and fsyncs the writer, and the same teardown follows.
+- **SIGKILL, or `TerminateProcess` on Windows:** nothing runs. The ledger is as the last write left it, which section 8 of PIN-SPEC.md already covers.
+
+### Upstream processes at shutdown
+
+- **They end on their own** if they exit at end of input, which the SDK sends within about 0.5 s of step 2 and serve's exit sends anyway, or when their stdout breaks, at their next write after serve exits. The probe and the SDK's servers do the first, and so does the Filesystem server, which returns at once with stdin at `/dev/null` (MANUAL-CHECK.md, step 1); the Everything server wasn't checked.
+- **They can be left running** if they ignore end of input and never write again: `sleep 3600` in MANUAL-CHECK.md step 6, a server that its own threads keep alive, and anything such a server started. The SDK's sequence (close stdin, 2 s, SIGTERM to the process group, 2 s, SIGKILL) is cut off by `os._exit` after 1 s, before its SIGTERM. On POSIX each upstream runs in a session of its own, so no terminal hangup or signal to serve reaches it. A leftover also keeps serve's stderr open, because it writes its stderr to serve's: `subprocess.run(..., capture_output=True)` on such a serve returned after 60.7 s, when the probe's 60 s linger ended, though serve itself had exited long before (the test below waits for serve's own exit, and takes about 1.7 s in all).
+- **A bounded terminate step isn't possible with the SDK's handles.** `stdio_client` keeps the process in a local variable, and `Client` exposes neither it nor its pid (verified-facts.md, Stage 5 follow-up). Finding the process by name or by walking the process table would be a pattern, which the brief rules out. So it is a stated limit, in PIN-SPEC.md section 8, step 2, and MANUAL-CHECK.md steps 6, 8 and M6, with the commands that list leftovers. Two ways the owner could choose later, neither done: wrap the SDK's private `_create_platform_compatible_process` to keep the handles, at the cost of depending on a private function of a pinned SDK, or start upstreams with a transport of Polarizer's own.
+- **The test,** `test_shutdown::test_upstream_ignoring_end_of_input_is_left_running` (POSIX only): the probe with `PROBE_LINGER=60` ignores end of input for 60 s. serve, with stdin closed, exits 0 well before that, the probe logs end of input and `lingering`, and it is still running afterwards; the test then kills it by the pid it logged.
+- **On Windows** the SDK puts each upstream in a job object that is killed when its last handle closes, so the upstream should end with serve. Not run.
+
+### Leaked probes, found while testing this (fixed)
+
+`test_signal_during_startup` left one probe running on every run since stage 5. serve, stopped during startup, had already written `server/discover` into the probe's stdin pipe. The probe, still in its 5 s delay, read it afterwards and answered into a stdout nobody read; the `BrokenPipeError` ended its reader thread, and its main thread then waited forever. Nothing sent it SIGTERM, because serve exited at its 1 s bound: the leftover case above.
+- **Found:** 22 such probes were running when this session started. They started between 01:05 and 01:42 UTC on Oct 4, about 86 s apart, one per suite run, which matches stage 5's repeated runs. This session's first two runs of `tests/test_shutdown.py` added two more, which were stopped by their pids. The 22 older ones were not started in this session and are left for the owner: `pgrep -a -f 'tests/helpers/probe_server.py'` lists them, and `kill` with the pids it prints stops them. They hold no repo files open; each waits on a pipe.
+- **Fixed:** the probe now exits, logging `stdout closed`, when a write to stdout fails. `test_signal_during_startup` checks that the probe ends on its own and kills it by pid in a `finally`. No test upstream from this session's later runs was left running (counted after each run of the repeated runs and of `scripts/test.sh`).
+
+### Windows hazards in the stdin reader and the shutdown path
+
+Nothing here has run on Windows.
+
+| What | What differs on Windows | Test | That test on Windows |
+|---|---|---|---|
+| `os.read(0, ...)` on a daemon thread | Works on an anonymous pipe, which is what a client gives serve. End of input may come as `ERROR_BROKEN_PIPE`, an `OSError`, rather than an empty read; the reader treats both as end of input. A console as stdin would hand over lines after Enter and end at Ctrl+Z, which no client does. A daemon thread blocked in the read doesn't stop `os._exit`. | `test_shutdown::test_stdin_closed_during_call`; `test_pin_startup::test_prime_with_closed_stdin` and `test_upstream_text::test_hostile_upstream_over_stdio` also end serve by end of input | Expected to run as on Linux |
+| Line endings on stdin | A client that writes `\r\n` leaves `\r` at the end of each line, since the reader splits on `\n`. JSON allows it as whitespace. | none | None |
+| Signal handling | anyio has no signal receiver on Windows. Only SIGINT is handled, through `signal.signal` and `loop.call_soon_threadsafe`, and it comes only from Ctrl+C in a shared console. `os.kill(pid, SIGTERM)` is `TerminateProcess`, so no shutdown path runs and a call in flight reads as outcome unknown. Ctrl+Break (SIGBREAK) isn't handled and ends the process the same way. Whether the handler runs promptly while the proactor event loop waits is unverified. | the four signal tests in `tests/test_shutdown.py` | Skipped (POSIX only), as PIN-SPEC.md section 10 says; the Ctrl+C path has no test |
+| `os._exit(0)` | Ends the process at once on every platform; the operating system closes every handle (the ledger, the lock, the upstreams' pipes). The order is the same: the writer is closed and flushed (`os.fsync` is `FlushFileBuffers`) before it. | `test_shutdown::test_stdin_closed_during_call` (exit 0, ledger intact) | Expected to run |
+| Ending upstream processes | The SDK runs each upstream in a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so closing serve's handle at exit should end the upstream and its children: no leftovers. The SDK's own stop there closes stdin, waits 2 s, then kills the job outright, with no SIGTERM step. | `test_shutdown::test_upstream_ignoring_end_of_input_is_left_running` | Skipped: on Windows it would need the opposite assertion, which isn't written. Not run |
+| Upstream stderr | Inherited as on POSIX, so a leftover would keep it open, if one could be left. | `test_upstream_text::test_hostile_upstream_over_stdio` (its stub writes no stderr) | Expected to run |
+| The probe's broken stdout | A write to a closed pipe may raise `OSError` with `EINVAL` rather than `BrokenPipeError`; the probe catches any `OSError`. | `test_shutdown::test_signal_during_startup` | Skipped (POSIX only) |
+
+### Time bounds in the follow-up's tests
+
+| Test | Bound | The operation needs |
+|---|---|---|
+| `test_shutdown::test_upstream_ignoring_end_of_input_is_left_running` | serve exits within 30 s; `lingering` logged within 30 s | about 1.5 s; milliseconds after serve exits |
+| `test_shutdown::test_signal_during_startup` (added) | `stdout closed` within 30 s, then the probe gone within 30 s | about 5 s (the probe's delay); milliseconds |
+| `test_shutdown` cleanup (`_stop`) | gone within 10 s of SIGKILL (no assertion) | milliseconds |
+| `test_upstream_text::test_hostile_upstream_over_stdio` | `run_serve`'s 120 s; the stopped serve within 30 s (`RawClient.close`) | about 2 s (the `cg` stub's 1 s connect timeout, then the 1 s bound); about 1 s |
+| `test_upstream_text::test_hostile_upstream_in_memory` | `rig`'s defaults | milliseconds |
+
+### Repeated runs
+
+The changed test files (`test_upstream_text`, `test_shutdown` and `test_proxy`), and the files that exercise the changed helpers and stderr lines most (`test_defhash`, `test_listing`, `test_stdout` and `test_pins`), 64 tests, on the final code, five times in a row: 64 passed each time, in 57.7 to 71.0 s. After each run, the number of test upstream processes still running was 22, the older probes above, so none of the five left one. Not run under load this time.
+
+### Pre-push scan
+
+Every tracked file in the commit (`git grep --cached`), and the commit's message, author and committer, searched case-insensitively for each of the eight private strings the owner listed for this commit: two paths, a username, a mail domain and four names. They aren't repeated here, or the scan would find this line. Counts only: all eight were 0 in the files, and 0 in the message, author and committer.
+
+### Not run in the follow-up
+
+- CI, so nothing here has run on Windows or macOS, or on Python 3.11 or 3.13.
+- Claude Code, any model, an interactive session and `scripts/live-check.sh`.
+- The reference tests. They don't exercise any changed path except serve's stderr, which now goes through `SafeLog` too.
+- A hostile `protocol-error` message: kept whole by design, and not tested with hostile text.
+
 ## Claims
 
-"Yes" means run locally on Linux (WSL2, Python 3.12.3, mcp 2.2.0), in the final run of `scripts/test.sh` (509 passed, 7 skipped: stage 1's 4 platform skips and the 3 reference tests), unless the row says otherwise.
+"Yes" means run locally on Linux (WSL2, Python 3.12.3, mcp 2.2.0), in the final run of `scripts/test.sh` (509 passed, 7 skipped: stage 1's 4 platform skips and the 3 reference tests), unless the row says otherwise. The rows from "Upstream text" on are the follow-up's, run in its final `scripts/test.sh` (515 passed, 7 skipped, in 112.8 s).
 
 | Claim | Command | Run? |
 |---|---|---|
@@ -123,3 +222,14 @@ An earlier series, before the notice waits went to 10 s and before the stdin rea
 | Interactive Claude Code lists the tools again after an approval, without a reconnect | docs/MANUAL-CHECK.md, M1a, steps M3 and M5 | no: for the owner |
 | The rug-pull check in an interactive session | docs/MANUAL-CHECK.md, M1a, step M4 | no: for the owner |
 | All of the above on Windows and macOS | CI | no |
+| Upstream text: `safe()` escapes, folds, cuts to 200 characters, never splits an escape, and changes nothing the second time; `describe()` never quotes pydantic's input | `pytest tests/test_upstream_text.py::test_safe_escapes_folds_and_cuts tests/test_upstream_text.py::test_describe_is_safe_and_quotes_no_pydantic_input` | yes |
+| A log record, the SDK's included, reaches stderr as one safe line with no traceback | `pytest tests/test_upstream_text.py::test_log_records_are_one_safe_line` | yes |
+| A hostile upstream that fails at connect, fails a refresh and drops its connection (ESC, a newline, 5,000 characters, a raw lone surrogate) leaves nothing raw on stderr, in the ledger or in the client's transport-error line | `pytest tests/test_upstream_text.py::test_hostile_upstream_in_memory` | yes |
+| The same over stdio through `polarizer serve`, both runs' stderr, with the SDK's log of lines it can't parse, a pydantic listing error and a hostile skipped name | `pytest tests/test_upstream_text.py::test_hostile_upstream_over_stdio` | yes |
+| The new tests fail on the old `describe()` with the log handler off | the same file, with `describe()` reverted by hand | yes, once: 4 of 5 failed |
+| serve closes and fsyncs its writer before `os._exit` on every shutdown path (end of input, SIGINT, SIGTERM, a second signal) | read: Follow-up, Shutdown order; the shutdown tests check the ledger after each path | read; no new test |
+| serve exits without waiting for an upstream that ignores end of input, and leaves it running (stated limit) | `pytest tests/test_shutdown.py::test_upstream_ignoring_end_of_input_is_left_running` | yes (POSIX only) |
+| `test_signal_during_startup`'s probe ends on its own and is no longer left running | `pytest tests/test_shutdown.py::test_signal_during_startup` | yes (POSIX only) |
+| The follow-up's changed and affected test files pass five times in a row, leaving no test upstream running | the loop in Follow-up, Repeated runs | yes, 5 of 5 |
+| The whole suite, ruff and the docs check, after the follow-up | `scripts/test.sh` | yes: 515 passed, 7 skipped, in 112.8 s |
+| The pre-push scan finds none of the private strings | Follow-up, Pre-push scan | yes: every count 0 |

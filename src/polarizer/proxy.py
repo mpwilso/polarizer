@@ -39,6 +39,7 @@ from polarizer import __version__, defhash, pins
 from polarizer.canon import MAX_INT, EntryRefused
 from polarizer.pins import PinState
 from polarizer.sidefiles import write_args
+from polarizer.text import safe
 from polarizer.upstream import SEPARATOR, Upstream, UpstreamSpec, clip, describe, log, one_line
 from polarizer.writer import LedgerWriter, Stopped
 
@@ -232,10 +233,10 @@ class Gateway:
     def _connected_data(self, upstream: Upstream) -> dict:
         if not upstream.connected:
             log(f"polarizer: upstream {upstream.prefix} did not connect: {upstream.error}")
-            return {"prefix": upstream.prefix, "error": clip(upstream.error)}
+            return {"prefix": upstream.prefix, "error": safe(upstream.error)}
         skipped, budget = [], 8192
         for name in upstream.skipped:
-            name = clip(name, 256)
+            name = safe(name)
             budget -= len(name.encode("utf-8")) + 3
             if budget < 0:
                 left = len(upstream.skipped) - len(skipped)
@@ -245,7 +246,8 @@ class Gateway:
                 break
             skipped.append(name)
         for name in upstream.skipped:
-            log(f"polarizer: upstream {upstream.prefix}: skipped tool {name!r}: name not allowed")
+            name = safe(name)
+            log(f'polarizer: upstream {upstream.prefix}: skipped tool "{name}": name not allowed')
         return {
             "prefix": upstream.prefix,
             "protocol_version": clip(upstream.protocol_version, 64),
@@ -449,7 +451,7 @@ class Gateway:
             "session": self.session,
             "prefix": upstream.prefix,
             "trigger": trigger,
-            "error": one_line(error),
+            "error": safe(error),
         }
         await self._append("upstream.refresh_failed", data)
 
@@ -622,7 +624,8 @@ class Gateway:
     async def _call_tool(self, ctx, params: types.CallToolRequestParams):
         await self._catch_up()
         if self.writer.stopped:
-            log(f"polarizer: refused {params.name}: could not record it: {self.writer.stopped}")
+            name = safe(params.name)
+            log(f"polarizer: refused {name}: could not record it: {self.writer.stopped}")
             return _text_result(
                 f"polarizer: {params.name} was not called: the ledger could not record it"
             )
@@ -662,7 +665,7 @@ class Gateway:
                     },
                 )
         except (Stopped, EntryRefused, OSError) as e:
-            log(f"polarizer: refused {params.name}: could not record it: {describe(e)}")
+            log(f"polarizer: refused {safe(params.name)}: could not record it: {describe(e)}")
             return _text_result(
                 f"polarizer: {params.name} was not called: the ledger could not record it"
             )
@@ -678,6 +681,8 @@ class Gateway:
             returned["latency_ms"] = (time.monotonic_ns() - start) // 1_000_000
             returned["result_bytes"] = size
             if error is not None:
+                # Polarizer's own line, already safe, except for protocol-error: the upstream's
+                # own message, which the client gets too, kept whole up to 1 KiB by design.
                 returned["error"] = one_line(error)
             if code is not None:
                 returned["code"] = code if -MAX_INT <= code <= MAX_INT else str(code)

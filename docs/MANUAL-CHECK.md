@@ -79,6 +79,14 @@ connect_timeout_seconds = 5
 
 Start Claude Code again with the same command as in step 3, `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config`, and type `/mcp`. Expect `polarizer` connected within about 10 seconds, with the same 20 tools and no `hung__` tools. If it takes longer or fails, paste what `/mcp` shows. Then exit Claude Code and remove those four lines again.
 
+Then check for a leftover `sleep`:
+
+```
+pgrep -a -f '^sleep 3600$'
+```
+
+Expect no output. Polarizer can't stop an upstream process itself: the SDK keeps the process handle, and Polarizer gives upstreams at most 1 s to close when it shuts down (docs/PIN-SPEC.md, section 8, step 2). `sleep` ignores end of input, so it ends only when the SDK sends it SIGTERM, about 2.5 s after its connect timeout, while Polarizer is still running. If you exited Claude Code sooner than that, a `sleep 3600` is left running, and this prints its pid and command. Stop it with `kill <pid>`, and paste the output and roughly how long the session lasted.
+
 ## 7. Verify the ledger
 
 Exit Claude Code, then:
@@ -96,11 +104,14 @@ chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3, head <64 hex> at seq 30
 
 Any other first line, or a nonzero exit, means paste the output.
 
-## 8. Guard
+## 8. Leftover upstreams and the guard
 
 ```
+pgrep -a -f 'tests/helpers/probe_server.py|server-filesystem'
 scripts/guard.sh check
 ```
+
+`pgrep` lists any probe or Filesystem server still running. Expect no output once Claude Code has exited: both end when their stdin closes. If it lists any, paste it; stop each with `kill <pid>`.
 
 Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file on every run. Paste the whole output.
 
@@ -184,8 +195,9 @@ Exit Claude Code, then:
 .venv/bin/polarizer verify --config "$HOME/code/polarizer/polarizer.toml"
 sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
 rm -f /tmp/polarizer-rugpull
+pgrep -a -f 'tests/helpers/probe_server.py|server-filesystem'
 scripts/guard.sh check
 ```
 
-Expect an `intact:` first line from `verify` (the `sed` line then puts `polarizer.toml` back as in step 2, without the M1a changes), and the guard as in step 8. Paste both outputs. Claude Code updates `~/.claude.json` on every run; the guard reports its size and mtime for information only.
+Expect an `intact:` first line from `verify` (the `sed` line then puts `polarizer.toml` back as in step 2, without the M1a changes), no output from `pgrep`, as in step 8, and the guard as in step 8. Paste all three outputs. Claude Code updates `~/.claude.json` on every run; the guard reports its size and mtime for information only.
 

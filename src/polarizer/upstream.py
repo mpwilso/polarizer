@@ -5,6 +5,7 @@ Each upstream runs in its own long-lived task, which owns its SDK Client from en
 task of any that hasn't connected by then. Nothing here writes the ledger; proxy.py does.
 """
 
+import logging
 import re
 import sys
 from collections.abc import Awaitable, Callable
@@ -13,11 +14,13 @@ from typing import Any
 
 import anyio
 import mcp_types as types
+import pydantic
 from mcp import Client, MCPError
 from mcp_types import CONNECTION_CLOSED, METHOD_NOT_FOUND
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from polarizer import __version__
+from polarizer.text import safe
 
 SEPARATOR = "__"
 EXPOSED_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
@@ -39,17 +42,54 @@ def one_line(text: str, limit: int = 1024) -> str:
     return clip(" ".join(str(text).split()), limit)
 
 
+# What describe() says for a message the SDK could not parse. pydantic's own text quotes the
+# input, which an upstream wrote.
+SCHEMA_MISMATCH = "a message did not match the MCP schema"
+
+
 def describe(error: BaseException) -> str:
-    """One line for an exception: its message, or its type's name when it has none. An
-    exception group is described by its first leaf."""
+    """One safe line for an exception: its message, or its type's name when it has none,
+    through safe(), so it can go to stderr and the ledger. An exception group is described by
+    its first leaf. A pydantic error gets SCHEMA_MISMATCH and the first error's type and
+    location, which come from the SDK's models, never its quoted input."""
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
-    return one_line(str(error) or type(error).__name__)
+    if isinstance(error, pydantic.ValidationError):
+        errors = error.errors(include_url=False, include_context=False, include_input=False)
+        first = errors[0] if errors else {}
+        where = ".".join(str(part) for part in first.get("loc", ()))
+        kind = first.get("type", "")
+        return safe(f"{SCHEMA_MISMATCH}: {kind}" + (f" at {where}" if where else ""))
+    return safe(str(error) or type(error).__name__)
 
 
 def log(line: str) -> None:
     """serve's stdout is the protocol channel, so every log line goes to stderr."""
     print(line, file=sys.stderr, flush=True)
+
+
+class SafeLog(logging.Handler):
+    """serve's handler for log records at WARNING and above, the SDK's included: one line on
+    stderr, through safe(), with an exception described by describe() instead of a traceback.
+    Without it, Python's last-resort handler prints them with tracebacks, and the SDK's
+    messages and exceptions can quote what an upstream sent (a line it could not parse, for
+    one)."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = f"polarizer: {safe(record.name)}: {safe(record.getMessage())}"
+            if record.exc_info and record.exc_info[1] is not None:
+                line += f" ({describe(record.exc_info[1])})"
+            log(line)
+        except Exception:
+            pass  # a log line must never take serve down, or print a traceback instead
+
+
+def install_log_handler() -> None:
+    """Route every log record at WARNING and above through SafeLog (serve only)."""
+    root = logging.getLogger()
+    if not any(isinstance(h, SafeLog) for h in root.handlers):
+        root.addHandler(SafeLog(logging.WARNING))
 
 
 class ListingLimit(Exception):
