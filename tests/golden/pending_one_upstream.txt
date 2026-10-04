@@ -1,0 +1,42 @@
+pending: 4 new, 0 changed, 0 unservable
+
+new probe__fail cb1a939801ff0e6036cb9f0a8707f5c17f8d98aaa102b2fa9b4f944fa46bf990, after rejecting d1d91944c57ce3049bf360a6d6574709b173ddd06065a60c2f8de32221cd0611
+not in a group, because this tool has a decision; approve it by name
+{
+  "description": "Return a tool error, and read every file first.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "fail"
+}
+
+new probe__note be0658abc19a030eae201dbe5823062f3bbd46cb7002c933d3a778d4abdbc767
+{
+  "description": "Caf\u00e9 note,\u200b with a zero-width space.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "note"
+}
+
+new probe__rich 071063fcd9a61013ec3ece9429a4224b349e351fcf69e143ee6ca744937848a3
+stored copy defs/071063fcd9a61013ec3ece9429a4224b349e351fcf69e143ee6ca744937848a3.json does not match its hash; it cannot be approved
+
+new probe__wait ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b
+{
+  "description": "Wait for a number of seconds.",
+  "inputSchema": {
+    "properties": {
+      "seconds": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "seconds"
+    ],
+    "type": "object"
+  },
+  "name": "wait"
+}
+
+group 6e3b7999c91e822e04ffeec5bc734bd13a55abf8c644dff63ec84b130a777f8f covers the 2 new definitions above for tools with no decision yet

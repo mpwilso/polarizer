@@ -12,6 +12,13 @@ Tools, by name:
 - elicit: asks the client for a form with ctx.session.elicit_form (an upstream-to-client request).
 - change: bumps every description to "Definition v<n>" and announces a list change.
 - rich, rich_error (only when passed in `extra`): rich() below, with is_error false or true.
+
+`list_delay` (seconds) makes each tools/list wait first, and `bump_on_list` gives every
+tools/list a new version: both are attributes tests set while the fake runs.
+
+`definitions=` serves those fixed Tool objects instead of the generated ones (for the
+definition hash tests); `fakes.from_env` reads them from the JSON file named by
+FAKE_DEFINITIONS, so modern_server.py can serve them over stdio.
 """
 
 import json
@@ -62,8 +69,19 @@ def rich(is_error: bool) -> types.CallToolResult:
 
 class FakeUpstream:
     def __init__(
-        self, names=NAMES, *, extra=(), page_size=None, ttl_ms=None, listen=True, log=None
+        self,
+        names=NAMES,
+        *,
+        extra=(),
+        page_size=None,
+        ttl_ms=None,
+        listen=True,
+        log=None,
+        definitions=None,
     ):
+        self.definitions = list(definitions) if definitions is not None else None
+        if self.definitions is not None:
+            names = [t.name for t in self.definitions]
         self.names = list(names) + list(extra)
         self.version = 1
         self.page_size = page_size
@@ -71,6 +89,8 @@ class FakeUpstream:
         self.events: list[str] = []
         self.spans: list[tuple[float, float]] = []
         self.list_calls = 0
+        self.list_delay = 0.0
+        self.bump_on_list = False
         self.log = log
         self.bus = InMemorySubscriptionBus()
         hints = {"tools/list": CacheHint(ttl_ms=ttl_ms)} if ttl_ms else None
@@ -98,7 +118,14 @@ class FakeUpstream:
 
     async def _list(self, ctx, params) -> types.ListToolsResult:
         self.list_calls += 1
-        tools = [self.tool(n) for n in self.names]
+        if self.list_delay:
+            await anyio.sleep(self.list_delay)
+        if self.bump_on_list:
+            self.version += 1
+        if self.definitions is not None:
+            tools = list(self.definitions)
+        else:
+            tools = [self.tool(n) for n in self.names]
         if self.page_size is None:
             return types.ListToolsResult(tools=tools)
         start = int(params.cursor) if params is not None and params.cursor else 0
@@ -154,7 +181,16 @@ class FakeUpstream:
 
 
 def from_env() -> FakeUpstream:
-    """The fake as modern_server.py runs it: FAKE_TTL_MS sets a tools/list cache hint, and
-    FAKE_LOG names a file for its events."""
+    """The fake as modern_server.py runs it: FAKE_TTL_MS sets a tools/list cache hint,
+    FAKE_LOG names a file for its events, and FAKE_DEFINITIONS a JSON list of tools (by
+    alias) to serve."""
     ttl = os.environ.get("FAKE_TTL_MS")
-    return FakeUpstream(ttl_ms=int(ttl) if ttl else None, log=os.environ.get("FAKE_LOG"))
+    definitions = None
+    if os.environ.get("FAKE_DEFINITIONS"):
+        with open(os.environ["FAKE_DEFINITIONS"], encoding="utf-8") as f:
+            definitions = [types.Tool.model_validate(t, by_alias=True) for t in json.load(f)]
+    return FakeUpstream(
+        ttl_ms=int(ttl) if ttl else None,
+        log=os.environ.get("FAKE_LOG"),
+        definitions=definitions,
+    )

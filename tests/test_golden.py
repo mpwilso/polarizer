@@ -217,3 +217,181 @@ def test_usage_errors_are_one_line_on_stderr(argv, line, capsys):
         assert err.startswith(line)
     else:
         assert err == line + "\n"
+
+
+# Pin commands (docs/PIN-SPEC.md, section 7) --------------------------------------------------
+
+from helpers import pinledger  # noqa: E402
+
+
+def pin_main(argv, terminal=False):
+    """cli.main for approve and reject: --allow-no-terminal unless the case is about it."""
+    return cli.main(argv if terminal else [*argv, "--allow-no-terminal"])
+
+
+PENDING = {
+    "pending_nothing": (pinledger.quiet, [], 0),
+    "pending_mixed": (pinledger.mixed, [], 0),
+    "pending_one_upstream": (pinledger.mixed, ["--upstream", "probe"], 0),
+    "pending_capped": (pinledger.capped, [], 0),
+    "pending_tampered": (fixture("broken/edit_value"), [], 1),
+    "pending_invalid": (fixture("broken/insert_float"), [], 3),
+    "pending_torn_tail": (fixture("broken/tear_last_line"), [], 5),
+    "pending_truncated": (fixture("broken/truncated"), [], 6),
+    "pending_no_ledger": (lambda d: d, [], 2),
+}
+
+
+@pytest.mark.parametrize("case", sorted(PENDING))
+def test_pending(case, tmp_path, capsys):
+    setup, extra, want = PENDING[case]
+    directory = setup(tmp_path / "ledger")
+    code = cli.main(["pending", "--ledger-dir", str(directory), *extra])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check(case, out, code, want, tmp_path)
+
+
+def test_pending_locked(tmp_path, capsys):
+    directory = pinledger.quiet(tmp_path / "ledger")
+    lock = LedgerLock.create(directory / LOCK)
+    assert lock.acquire(0)
+    try:
+        code = cli.main(["pending", "--ledger-dir", str(directory)])
+    finally:
+        lock.close()
+    check("pending_locked", capsys.readouterr().out, code, 7, tmp_path)
+
+
+def _group_id(directory, capsys, upstream=()):
+    cli.main(["pending", "--ledger-dir", str(directory), *upstream])
+    line = capsys.readouterr().out.splitlines()[-1]
+    assert line.startswith("group ")
+    return line.split()[1]
+
+
+def test_approve_one(tmp_path, capsys, fake_home):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    h = pinledger.hashed("note")
+    code = pin_main(["approve", "--ledger-dir", str(directory), "probe", "note", h])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("approve_one", out, code, 0, tmp_path)
+
+
+def test_approve_already(tmp_path, capsys, fake_home):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    h = pinledger.hashed("add")
+    code = pin_main(["approve", "--ledger-dir", str(directory), "every", "add", h])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("approve_already", out, code, 0, tmp_path)
+
+
+def test_approve_group(tmp_path, capsys, fake_home):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    group_id = _group_id(directory, capsys)
+    code = pin_main(["approve", "--ledger-dir", str(directory), "--group", group_id])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("approve_group", out, code, 0, tmp_path)
+
+
+def _refusal_setups():
+    note = pinledger.hashed("note")
+    rich = pinledger.hashed("rich")
+    return {
+        "bad_hash": (pinledger.mixed, ["probe", "note", "ABC"], 2),
+        "not_seen": (pinledger.mixed, ["probe", "note", pinledger.hashed("echo_v2")], 2),
+        "stored_copy_altered": (pinledger.mixed, ["probe", "rich", rich], 2),
+        "group_mismatch": (pinledger.mixed, ["--group", "0" * 64], 2),
+        "broken_ledger": (fixture("broken/edit_value"), ["probe", "note", note], 1),
+        "no_terminal": (pinledger.mixed, ["probe", "note", note], 2),
+    }
+
+
+@pytest.mark.parametrize("case", sorted(_refusal_setups()))
+def test_approve_refused(case, tmp_path, capsys, fake_home, monkeypatch):
+    setup, extra, want = _refusal_setups()[case]
+    directory = setup(tmp_path / "ledger")
+    before = (directory / "ledger.jsonl").read_bytes()
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    argv = ["approve", "--ledger-dir", str(directory), *extra]
+    code = pin_main(argv, terminal=case == "no_terminal")
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.count("\n") == 1
+    check(f"approve_refused_{case}", err, code, want, tmp_path)
+    assert (directory / "ledger.jsonl").read_bytes() == before  # nothing written
+
+
+def test_reject_one(tmp_path, capsys, fake_home):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    h = pinledger.hashed("echo_v2")
+    argv = ["reject", "--ledger-dir", str(directory), "every", "echo", h, "--reason", "exfil"]
+    code = pin_main(argv)
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("reject_one", out, code, 0, tmp_path)
+
+
+def test_reject_already(tmp_path, capsys, fake_home):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    h = pinledger.hashed("fail_v1")
+    argv = ["reject", "--ledger-dir", str(directory), "probe", "fail", h, "--reason", "again"]
+    code = pin_main(argv)
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("reject_already", out, code, 0, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "case, extra, terminal",
+    [
+        ("reject_no_reason", [], False),
+        ("reject_no_reason", ["--reason", " \t\n "], False),
+        ("reject_refused_no_terminal", ["--reason", "why"], True),
+    ],
+)
+def test_reject_refused(case, extra, terminal, tmp_path, capsys, fake_home, monkeypatch):
+    directory = pinledger.mixed(tmp_path / "ledger")
+    before = (directory / "ledger.jsonl").read_bytes()
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    h = pinledger.hashed("echo_v2")
+    argv = ["reject", "--ledger-dir", str(directory), "every", "echo", h, *extra]
+    code = pin_main(argv, terminal=terminal)
+    out, err = capsys.readouterr()
+    assert out == ""
+    check(case, err, code, 2, tmp_path)
+    assert (directory / "ledger.jsonl").read_bytes() == before
+
+
+PIN_USAGE = [
+    ["pending"],
+    ["pending", "--config", "/a.toml", "--ledger-dir", "/b"],
+    ["pending", "--ledger-dir", "relative"],
+    ["pending", "--ledger-dir", "/x", "extra"],
+    ["approve", "--allow-no-terminal"],
+    ["approve", "--ledger-dir", "/x", "--allow-no-terminal"],
+    ["approve", "--ledger-dir", "/x", "p", "t", "--allow-no-terminal"],
+    ["approve", "--ledger-dir", "/x", "p", "t", "h", "--group", "g", "--allow-no-terminal"],
+    ["approve", "--ledger-dir", "/x", "p", "t", "h", "--upstream", "p", "--allow-no-terminal"],
+    ["approve", "--ledger-dir", "/x", "--group", "g"],
+    ["reject", "--ledger-dir", "/x", "p", "t", "--reason", "r", "--allow-no-terminal"],
+    ["reject", "--ledger-dir", "/x", "p", "t", "h", "--allow-no-terminal"],
+    ["reject", "--ledger-dir", "/x", "p", "t", "h", "--reason", "r"],
+    ["reject", "--config", "polarizer.toml", "p", "t", "h", "--reason", "r"],
+    ["approve", "--ledger-dir", "/x", "--bogus"],
+]
+
+
+def test_usage_pins(tmp_path, capsys, monkeypatch):
+    """Each usage error: one line on stderr, nothing on stdout, exit 2."""
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    lines = []
+    for argv in PIN_USAGE:
+        assert cli.main(argv) == 2, argv
+        out, err = capsys.readouterr()
+        assert out == "" and err.count("\n") == 1, (argv, err)
+        lines.append(err)
+    check("usage_pins", "".join(lines), 2, 2, tmp_path)

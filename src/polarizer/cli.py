@@ -1,9 +1,10 @@
-"""The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md).
+"""The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md), and
+pending, approve and reject (docs/PIN-SPEC.md, section 7).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
-verify and repair print results to stdout. Usage errors, config errors, unreadable files,
-forbidden-path refusals and the git-tree warning go to stderr, one line each; every error
-among them exits 2.
+The other commands print results to stdout. Usage errors, config errors, unreadable files,
+refusals, forbidden-path refusals and the git-tree warning go to stderr, one line each; every
+error among them exits 2, and ledger statuses keep their own codes.
 """
 
 import argparse
@@ -13,7 +14,8 @@ from pathlib import Path
 
 import anyio
 
-from polarizer import config, ledgerdir, sidefiles, writer
+from polarizer import config, defhash, ledgerdir, pins, sidefiles, writer
+from polarizer.decisions import Decider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 
 
@@ -35,12 +37,28 @@ def _parser() -> argparse.ArgumentParser:
     for name, text in [
         ("verify", "check the ledger and report its status"),
         ("repair", "remove a torn tail, and nothing else"),
+        ("pending", "list the tool definitions that wait for a decision"),
+        ("approve", "approve one tool definition, or a group that pending printed"),
+        ("reject", "reject one tool definition, with a reason"),
     ]:
         sub = commands.add_parser(name, help=text, description=text)
         sub.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
         sub.add_argument("--ledger-dir", metavar="DIR", help="absolute path to the ledger dir")
         if name == "verify":
             sub.add_argument("--args", action="store_true", help="also check side files")
+        if name in ("approve", "reject"):
+            sub.add_argument("names", nargs="*", metavar="PREFIX TOOL DEF_HASH")
+            sub.add_argument(
+                "--allow-no-terminal",
+                action="store_true",
+                help="run although stdin is not a terminal (for scripts)",
+            )
+        if name == "approve":
+            sub.add_argument("--group", metavar="ID", help="a group id that pending printed")
+        if name in ("pending", "approve"):
+            sub.add_argument("--upstream", metavar="PREFIX", help="only this upstream")
+        if name == "reject":
+            sub.add_argument("--reason", metavar="TEXT", help="why (required)")
     return parser
 
 
@@ -56,6 +74,31 @@ def _set_up_streams() -> None:
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace", newline="\n")
+
+
+def _stdin_is_terminal() -> bool:
+    try:
+        return os.isatty(sys.stdin.fileno())
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
+def _check_decision_args(args) -> None:
+    """approve's and reject's own argument rules, then the terminal check. Raises UsageError."""
+    if args.command == "approve":
+        if args.group is not None and args.names or args.group is None and len(args.names) != 3:
+            raise UsageError("approve needs <prefix> <tool> <def_hash>, or --group <group id>")
+        if args.group is None and args.upstream is not None:
+            raise UsageError("--upstream goes with --group, not with one definition")
+    else:
+        if len(args.names) != 3:
+            raise UsageError("reject needs <prefix> <tool> <def_hash>")
+        if not fold_reason(args.reason):
+            raise UsageError("reject needs --reason <text>")
+    if not args.allow_no_terminal and not _stdin_is_terminal():
+        raise UsageError(
+            f"{args.command} needs a terminal; pass --allow-no-terminal if this is a script"
+        )
 
 
 def main(argv=None) -> int:
@@ -79,6 +122,8 @@ def main(argv=None) -> int:
         if not os.path.isabs(given):
             flag = "--config" if args.config is not None else "--ledger-dir"
             raise UsageError(f"{flag} must be an absolute path, got {given}")
+        if args.command in ("approve", "reject"):
+            _check_decision_args(args)
     except UsageError as e:
         return _err(f"polarizer: {e}")
     if args.config is not None:
@@ -91,6 +136,10 @@ def main(argv=None) -> int:
         ledger_dir, forbidden = Path(args.ledger_dir), ledgerdir.always_forbidden()
     if args.command == "verify":
         return verify(ledger_dir, args.args)
+    if args.command == "pending":
+        return pending(ledger_dir, args.upstream)
+    if args.command in ("approve", "reject"):
+        return decide(args, ledger_dir, forbidden)
     return repair(ledger_dir, forbidden)
 
 
@@ -122,6 +171,73 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
     return code
 
 
+def pending(ledger_dir: Path, upstream: str | None) -> int:
+    """Read-only, like verify: the definitions waiting for a decision."""
+    try:
+        data, head = read_files(ledger_dir)
+    except Locked:
+        print(LOCKED_LINE)
+        return 7
+    except OSError as e:
+        return _err(f"polarizer: cannot read {e.filename or ledger_dir / LEDGER}: {e.strerror}")
+    if not data:
+        print(f"no ledger at {ledger_dir}")
+        return 2
+    state = pins.PinState()
+    result = verify_bytes(data, head, state.apply)
+    if result.status != "intact":
+        for line in result.output_lines():
+            print(line)
+        return result.exit_code
+    for line in pins.render(pins.blocks(state, ledger_dir, upstream)):
+        print(line)
+    return 0
+
+
+def decide(args, ledger_dir: Path, forbidden: list[Path]) -> int:
+    """approve (one or a group) and reject, after their argument checks."""
+    try:
+        warning = ledgerdir.check_location(ledger_dir, forbidden)
+    except ledgerdir.ForbiddenPath as e:
+        return _err(str(e))
+    if warning:
+        print(warning, file=sys.stderr)
+    if args.command == "reject" or args.group is None:
+        if not defhash.is_hash(args.names[2]):
+            return _err(
+                f"polarizer: {args.names[2]} is not a definition hash (64 lowercase hex characters)"
+            )
+    try:
+        decider = Decider.open(ledger_dir)
+    except Refusal as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except OSError as e:
+        return _err(f"polarizer: cannot open {e.filename or ledger_dir}: {e.strerror}")
+    try:
+        if args.command == "reject":
+            prefix, tool, def_hash = args.names
+            decider.reject(prefix, tool, def_hash, fold_reason(args.reason), print)
+        elif args.group is not None:
+            return decider.approve_group(
+                args.group, args.upstream, print, lambda line: print(line, file=sys.stderr)
+            )
+        else:
+            decider.approve_one(*args.names, print)
+        return 0
+    except Refusal as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except writer.LedgerError as e:
+        print(e.line, file=sys.stderr)
+        return e.exit_code
+    except OSError as e:
+        print(f"polarizer: could not record the decision: {e.strerror or e}", file=sys.stderr)
+        return 1
+    finally:
+        decider.close()
+
+
 def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
     try:
         warning = ledgerdir.check_location(ledger_dir, forbidden)
@@ -151,21 +267,22 @@ def serve(config_path: Path) -> int:
         return _err(str(e))
     if warning:
         print(warning, file=sys.stderr)
+    state = pins.PinState()
     try:
-        ledger = writer.LedgerWriter.open(cfg.ledger_dir)
+        ledger = writer.LedgerWriter.open(cfg.ledger_dir, on_entry=state.apply)
     except writer.LedgerError as e:
         print(e.line, file=sys.stderr)
         return e.exit_code
     except OSError as e:
         return _err(f"polarizer: cannot open {e.filename or cfg.ledger_dir}: {e.strerror}")
     try:
-        anyio.run(_serve, cfg, ledger)
+        anyio.run(_serve, cfg, ledger, state)
     finally:
         ledger.close()
     return 0
 
 
-async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter") -> None:
+async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.PinState) -> None:
     from mcp import StdioServerParameters
     from mcp.server.stdio import stdio_server
 
@@ -180,7 +297,7 @@ async def _serve(cfg: config.Config, ledger: "writer.LedgerWriter") -> None:
         )
         for u in cfg.upstreams
     ]
-    gateway = Gateway(specs, ledger, config_sha256=cfg.sha256)
+    gateway = Gateway(specs, ledger, config_sha256=cfg.sha256, pins=state)
     async with gateway.running():
         async with stdio_server() as (read_stream, write_stream):
             await gateway.server.run(

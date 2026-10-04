@@ -198,6 +198,7 @@ def test_upstream_gets_minimal_environment(tmp_path):
     )
     cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
     env = {"SECRET_VAR": "s3cret", "OTHER_VAR": "not passed on"}
+    rig.prime(cfg, env)
 
     async def scenario():
         async with Client(rig.serve_params(cfg, env)) as client:

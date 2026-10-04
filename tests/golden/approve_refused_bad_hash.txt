@@ -1,0 +1,1 @@
+polarizer: ABC is not a definition hash (64 lowercase hex characters)

@@ -123,6 +123,37 @@ def session_chain():
     )  # fmt: skip
 
 
+def pins_chain():
+    """Every kind M1a adds (docs/PIN-SPEC.md, section 3), with the data fields it specifies."""
+    tool = {"upstream": "probe", "tool": "wait"}
+    seen = {"session": SESSION, **tool}
+    return build(
+        [
+            ("session.started", {"session": SESSION, "polarizer_version": "0.1.0",
+                                 "config_sha256": "7" * 64}),
+            ("tool.seen", {**seen, "def_hash": "a" * 64}),
+            ("tool.unservable", {**seen, "tool": "big", "def_hash": None,
+                                 "problem": "cannot be hashed: 9223372036854775807 exceeds safe "
+                                            "integer domain for JSON floats"}),
+            ("tool.approved", {**tool, "def_hash": "a" * 64, "actor": "person", "group": None}),
+            ("tool.approved", {"upstream": "probe", "tool": "env", "def_hash": "e" * 64,
+                               "actor": "person", "group": "9" * 64}),
+            ("tool.drift", {**seen, "approved_hash": "a" * 64, "live_hash": "b" * 64}),
+            ("tool.unservable", {**seen, "def_hash": "b" * 64,
+                                 "problem": "stored copy does not match its hash"}),
+            ("upstream.refresh_failed", {"session": SESSION, "prefix": "probe",
+                                         "trigger": "client-list", "error": "timeout after 10 s"}),
+            ("upstream.refresh_failed", {"session": SESSION, "prefix": "every",
+                                         "trigger": "connection-lost",
+                                         "error": "Connection closed"}),
+            ("tool.rejected", {**tool, "def_hash": "b" * 64, "actor": "person",
+                               "reason": "it reads every file"}),
+            ("call.refused", {"session": SESSION, "tool": "probe__wait",
+                              "reason": 'upstream probe tool "wait" is pending approval'}),
+        ]
+    )  # fmt: skip
+
+
 def unicode_chain():
     values = {
         "controls": "".join(chr(c) for c in range(32)) + "\x7f",
@@ -324,6 +355,7 @@ def fixtures(v0_data):
     s = session_chain()
     n = len(s)  # 13 entries, seq 0 to 12
     u = unicode_chain()
+    p = pins_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -335,6 +367,7 @@ def fixtures(v0_data):
         "valid/unicode": (text(u), head_of(u[0]), expect("intact", 3, 2)),
         "valid/head_at_last": (text(s), head_of(s[-1]), expect("intact", n, n - 1)),
         "valid/no_head": (text(s), None, expect("intact", n, n - 1)),
+        "valid/pins": (text(p), head_of(p[10]), expect("intact", len(p), len(p) - 1)),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (
@@ -346,6 +379,18 @@ def fixtures(v0_data):
         "broken/bad_prev": (bad_prev(s, 8), None, expect("tampered", 9, 8, "prev")),
         "broken/bad_hash": (bad_hash(s, 2), None, expect("tampered", 3, 2, "hash")),
         "broken/bad_genesis_prev": (bad_prev(m, 0), None, expect("tampered", 1, 0, "prev")),
+        # An approval whose hash was edited, and one whose edit was re-hashed but whose head
+        # still names the original: the chain and ledger.head each catch it.
+        "broken/pins_edit_approval": (
+            change_data(p, 4, {"def_hash": "f" * 64}, rehash=False),
+            None,
+            expect("tampered", 5, 4, "hash"),
+        ),
+        "broken/pins_rehashed_rejection": (
+            change_data(p, 10, {"def_hash": "a" * 64}),
+            head_of(p[10]),
+            expect("tampered", None, 10, "head"),
+        ),
         "broken/bad_seq": (bad_seq(s, 5), None, expect("tampered", 6, 15, "seq")),
         # Invalid lines.
         "broken/insert_float": (insert_float(s, 6), None, expect("invalid", 7, 6, "structure")),

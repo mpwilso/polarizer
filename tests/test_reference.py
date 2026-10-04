@@ -7,6 +7,7 @@ clients on both sides, then with raw JSON-RPC on both sides, which shows anythin
 hides (docs/PROXY-SPEC.md, Results)."""
 
 import copy
+import json
 import os
 import shutil
 import sys
@@ -18,7 +19,7 @@ from helpers.raw import RawClient
 from mcp import Client, StdioServerParameters
 from mcp_types import SERVER_INFO_META_KEY
 
-from polarizer import __version__
+from polarizer import __version__, defhash
 
 pytestmark = [
     pytest.mark.reference,
@@ -52,7 +53,7 @@ def servers(tmp_path):
         for prefix, a in argv.items()
     )
     cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
-    return {"argv": argv, "cfg": cfg, "root": root}
+    return {"argv": argv, "cfg": cfg, "root": root, "toml": toml}
 
 
 CALLS = [
@@ -100,6 +101,7 @@ def _without_stamp(result: dict) -> dict:
 
 def test_sdk_clients(servers):
     root = servers["root"]
+    rig.prime(servers["cfg"])
 
     async def scenario():
         direct_tools, direct_results, versions = {}, [], {}
@@ -151,8 +153,11 @@ def test_sdk_clients(servers):
 
 
 def test_raw_wire(servers):
-    """Both sides at 2025-11-25 over raw JSON-RPC: the bytes a non-SDK client gets."""
+    """Both sides at 2025-11-25 over raw JSON-RPC: the bytes a non-SDK client gets. From M1a,
+    tools are served from stored copies in the 2026-07-28 form, so `execution` is gone in this
+    era too (docs/PIN-SPEC.md, section 2)."""
     root = servers["root"]
+    rig.prime(servers["cfg"])
     direct_tools, direct_results = {}, []
     for prefix, argv in servers["argv"].items():
         with RawClient(argv) as client:
@@ -174,7 +179,8 @@ def test_raw_wire(servers):
         mine = [t for t in listed if t["name"].startswith(f"{prefix}__")]
         found = _tool_differences(tools, mine, prefix)
         print(f"\n{prefix}: {len(tools)} tools, differences: {found}")
-        assert found == []
+        with_execution = [t["name"] for t in tools if "execution" in t]
+        assert found == [f"{name}: ['execution'] differ" for name in with_execution]
     for (_, tool, _), direct, proxied in zip(CALLS, direct_results, proxied_results, strict=True):
         # The one known difference: the SDK's model defaults isError to false, so a result
         # that leaves it out gains "isError": false. Absent means false in the protocol.
@@ -182,3 +188,86 @@ def test_raw_wire(servers):
         print(f"{tool}: added {added}")
         assert added in ({}, {"isError": False}), tool
         assert proxied == {**direct, **added}, tool
+
+
+def _integers(value):
+    """Every integer (not bool) anywhere in a JSON value."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _integers(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _integers(item)
+
+
+def test_reference_tools_hash_and_serve(servers, tmp_path):
+    """Every tool of the pinned servers hashes without error. Approved, each is served equal
+    to its stored copy, renamed, and two runs give the same hashes. Prints the counts the
+    owner asked for: tools hashed, tools with _meta, unservable tools and why, and the largest
+    integer in any schema."""
+    raw = {}
+    for prefix, argv in servers["argv"].items():
+        with RawClient(argv) as client:
+            client.initialize()
+            raw[prefix] = client.request("tools/list")["result"]["tools"]
+    runs = []
+    for name in ("first", "second"):
+        cfg = servers["cfg"]
+        if name == "second":
+            (tmp_path / "second").mkdir()
+            cfg = rig.serve_config(tmp_path / "second", servers["toml"], tmp_path / "ledger2")
+        ledger_dir = rig.prime(cfg)
+        seen = {
+            (e["data"]["upstream"], e["data"]["tool"]): e["data"]["def_hash"]
+            for e in rig.kinds(ledger_dir, "tool.seen")
+        }
+        unservable = [e["data"] for e in rig.kinds(ledger_dir, "tool.unservable")]
+        runs.append((cfg, ledger_dir, seen, unservable))
+    (cfg, ledger_dir, seen, unservable), (_, _, seen2, unservable2) = runs
+    total = sum(len(tools) for tools in raw.values())
+    assert seen == seen2
+    assert len(seen) + len({(u["upstream"], u["tool"]) for u in unservable}) == total
+    approved = {
+        (e["data"]["upstream"], e["data"]["tool"]): e["data"]["def_hash"]
+        for e in rig.kinds(ledger_dir, "tool.approved")
+    }
+    assert approved == seen
+
+    async def sdk_listing():
+        async with Client(rig.serve_params(cfg)) as client:
+            assert client.protocol_version == "2026-07-28"
+            return [
+                t.model_dump(by_alias=True, mode="json", exclude_none=True)
+                for t in (await client.list_tools()).tools
+            ]
+
+    sdk = anyio.run(sdk_listing)
+    serve = [sys.executable, "-m", "polarizer", "serve", "--config", str(cfg)]
+    with RawClient(serve) as client:
+        client.initialize()
+        wire = client.request("tools/list")["result"]["tools"]
+    for listed in (sdk, wire):
+        assert len(listed) == len(seen)
+        for tool in listed:
+            prefix, name = tool["name"].split("__", 1)
+            stored = defhash.read_copy(ledger_dir, seen[(prefix, name)])
+            assert tool == {**stored, "name": tool["name"]}, tool["name"]
+
+    with_meta = [f"{p}__{t['name']}" for p, tools in raw.items() for t in tools if "_meta" in t]
+    schemas = [
+        t.get(k) for tools in raw.values() for t in tools for k in ("inputSchema", "outputSchema")
+    ]
+    largest = max((n for schema in schemas for n in _integers(schema)), default=None)
+    report = {
+        "tools listed": {p: len(tools) for p, tools in raw.items()},
+        "tools hashed": len(seen),
+        "tools with _meta": with_meta,
+        "unservable": [(u["upstream"], u["tool"], u["problem"]) for u in unservable],
+        "largest integer in any schema": largest,
+    }
+    assert unservable == unservable2
+    print("\nreference report: " + json.dumps(report, sort_keys=True))

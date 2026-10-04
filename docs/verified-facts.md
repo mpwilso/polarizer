@@ -569,6 +569,17 @@ From a screenshot of `/mcp` during the manual check: all 20 tool names were show
 
 Neither is marked "only works with --print", unlike other options in the same help, so both apply to interactive sessions. The help doesn't mention claude.ai connectors. Whether `--strict-mcp-config` turns them off is not verified.
 
+## Stage 4 (Oct 3, 2026)
+
+Checked while building M1a's pins at rest, on mcp 2.2.0, mcp-types 2.2.0, pydantic 2.13.5, anyio 4.15.1 and rfc8785 0.1.4, in `.venv`. No Claude Code, no model.
+
+- **The two fixed hashes,** computed with `_meta` left out of the hashed form (the owner's decision), are unchanged: the probe's `wait` hashes to `ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b`, and with the nested description to `3462be54bba570aacd2a87ea2bb68c6806a68abac4761e0d848d1b6deb8a11b5`. First with a throwaway script in the session scratch directory, then in `tests/test_defhash.py`. The same tool with `_meta` set hashes to `5658e381...` when `_meta` is kept, and to the unchanged value when it is left out.
+- **An upstream that dies while idle** (executed: the probe's `crash` tool, and the probe killed with SIGTERM between requests): the SDK `Client` raises nothing into the task that holds it open. The upstream task keeps waiting, and `client.session` stays set. Only the next request shows it: it raises `MCPError` -32000 "Connection closed" at once, because the dispatcher closed on end of input (`mcp/shared/jsonrpc_dispatcher.py`, around lines 505 to 523, read). Polarizer therefore confirms a -32000 with a ping before it marks an upstream lost.
+- **Ping on 2026-07-28** (executed, read): `Client.send_ping` is marked deprecated ("ping is removed as of 2026-07-28; the method only works under mode='legacy'") and warns with `MCPDeprecationWarning`. `ClientSession.send_ping`, which it wraps, carries no warning, and on a closed connection it raises -32000 like any request. Polarizer uses the session's method.
+- **The 2026-07-28 result model** (executed) rejects a tool whose `inputSchema` has `"type": "string"` (step 3 of the hashed form fails with pydantic's `ValidationError`), and accepts a schema whose `properties` is not an object.
+- **rfc8785's errors** (executed): `IntegerDomainError` and `FloatDomainError` are subclasses of `CanonicalizationError`, itself a `ValueError`. The message for 9223372036854775808 is `9223372036854775808 exceeds safe integer domain for JSON floats`.
+- **The reference servers under pins** (`POLARIZER_REFERENCE=1 uv run --locked pytest -s "tests/test_reference.py::test_reference_tools_hash_and_serve"`, run once, on Linux): Everything 2026.8.31 lists 13 tools and Filesystem 2026.8.31 lists 14. All 27 hashed, none has `_meta`, none was unservable, and the largest integer in any schema is 10. Two priming runs into separate ledgers gave the same 27 hashes. Approved, every tool reached an SDK client (2026-07-28) and a raw client (2025-11-25) exactly as its stored copy, renamed. The servers ran with the pinned commands under Pinned fetches. Afterwards, of npx's two cache directories for them (`~/.npm/_npx/68b53d3fd47bf8db` and `a705c79b42eea4c8`, each holding version 2026.8.31), only the directories' own mtimes had changed; none of the 9,132 entries inside was newer than the session's guard snapshot, so nothing was fetched and nothing new was pinned.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

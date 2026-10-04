@@ -1,0 +1,8 @@
+{
+  "description": "Caf\u00e9 note,\u200b with a zero-width space.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "note"
+}
+approved probe__note be0658abc19a030eae201dbe5823062f3bbd46cb7002c933d3a778d4abdbc767 at seq 16

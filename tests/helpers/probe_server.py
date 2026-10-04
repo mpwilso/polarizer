@@ -19,6 +19,8 @@ Environment:
 - PROBE_LOG: a file to append every inbound line to, each prefixed with a Unix timestamp.
 - PROBE_DELAY: seconds to wait before reading the first message (a slow handshake).
 - PROBE_GATE: a path; the probe reads nothing until that file exists (after PROBE_DELAY).
+- PROBE_SNAKE: a number n; tools/list answers after the n-th spell inputSchema as
+  input_schema, which the SDK client refuses (0: every listing, so it never connects).
 """
 
 import json
@@ -75,6 +77,7 @@ RICH = {
 }
 INVALID = {"content": [{"type": "video", "data": "c2VjcmV0IHJlc3VsdA=="}]}
 
+_lists = [0]  # tools/list requests answered
 _out = threading.Lock()
 _log = threading.Lock()
 _cancelled: dict = {}  # request id -> threading.Event
@@ -154,7 +157,13 @@ def handle(message: dict) -> None:
         }
         send({"jsonrpc": "2.0", "id": rid, "result": result})
     elif method == "tools/list":
-        send({"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}})
+        tools = TOOLS
+        snake = os.environ.get("PROBE_SNAKE")
+        if snake is not None and _lists[0] >= int(snake):
+            tools = [{**{k: v for k, v in t.items() if k != "inputSchema"},
+                      "input_schema": t["inputSchema"]} for t in TOOLS]  # fmt: skip
+        _lists[0] += 1
+        send({"jsonrpc": "2.0", "id": rid, "result": {"tools": tools}})
     elif method == "tools/call":
         threading.Thread(target=call, args=(message,), daemon=True).start()
     elif method == "ping":

@@ -14,7 +14,7 @@ from typing import Any
 import anyio
 import mcp_types as types
 from mcp import Client, MCPError
-from mcp_types import METHOD_NOT_FOUND
+from mcp_types import CONNECTION_CLOSED, METHOD_NOT_FOUND
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from polarizer import __version__
@@ -83,27 +83,38 @@ class UpstreamSpec:
     mode: str = "auto"
 
 
+Callback = Callable[["Upstream"], Awaitable[None]]
+
+
 class Upstream:
     """One upstream server, its client and its latest tool list."""
 
-    def __init__(self, spec: UpstreamSpec, on_change: Callable[["Upstream"], Awaitable[None]]):
+    def __init__(self, spec: UpstreamSpec, on_change: Callback, on_lost: Callback | None = None):
         self.spec = spec
         self.prefix = spec.prefix
         self.client: Client | None = None  # set while its SDK client is open
         self.error: str | None = None  # why it never connected
         self.lost: str | None = None  # why a connected upstream went away
+        self.list_error: str | None = None  # why its latest refresh failed; None after a success
         self.protocol_version: str | None = None
         self.tools: dict[str, types.Tool] = {}  # the upstream's own name -> its tool, in order
         self.skipped: list[str] = []
         self._on_change = on_change
+        self._on_lost = on_lost
         self._ready = anyio.Event()
         self._scope = anyio.CancelScope()
 
     @property
     def connected(self) -> bool:
-        """Connected and listed at startup. Stays true if the upstream goes away later: its
-        tools stay listed, and calls to them fail as transport errors."""
+        """Connected and listed at startup. Stays true if the upstream goes away later; the
+        gateway then hides its tools (`lost`)."""
         return self.error is None and self.protocol_version is not None
+
+    @property
+    def list_known(self) -> bool:
+        """Connected, still there, and its latest listing succeeded (docs/PIN-SPEC.md,
+        section 6: anything else is the "list unknown" state)."""
+        return self.connected and self.client is not None and self.list_error is None
 
     async def run(self) -> None:
         """The upstream's task: connect, list, then follow change notices until cancelled."""
@@ -124,11 +135,10 @@ class Upstream:
                     await self._follow_changes(client)
             except Exception as e:
                 if self.client is None:
-                    if self.error is None:
+                    if self.error is None and self.lost is None:
                         self.error = describe(e)
                 else:
-                    self.lost = describe(e)
-                    log(f"polarizer: upstream {self.prefix} stopped: {self.lost}")
+                    await self.lose(describe(e))
             finally:
                 if self.client is not None:
                     self.client = None
@@ -144,23 +154,68 @@ class Upstream:
             self._ready.set()
             self._scope.cancel()
 
-    async def refresh(self) -> None:
-        """List again with cache_mode="refresh". A failure keeps the last good list, with one
-        line on stderr, so a client's tools/list never hangs on one upstream."""
+    async def lose(self, why: str) -> None:
+        """The connection is gone for good (M0 never reconnects): hide everything and tell the
+        gateway once."""
+        if self.client is None:
+            return
+        self.client = None
+        self.lost = why
+        log(f"polarizer: upstream {self.prefix} stopped: {why}; its tools are hidden")
+        if self._on_lost is not None:
+            await self._on_lost(self)
+
+    async def check_closed(self, error: BaseException) -> bool:
+        """After `error` from this upstream's client: if it says the connection closed, confirm
+        with a ping, which fails at once on a closed connection. An upstream that sent -32000
+        itself still answers the ping. Returns True if the connection is lost."""
+        client = self.client
+        while isinstance(error, BaseExceptionGroup) and error.exceptions:
+            error = error.exceptions[0]
+        if client is None:
+            return True
+        if not (isinstance(error, MCPError) and error.code == CONNECTION_CLOSED):
+            return False
+        try:
+            with anyio.move_on_after(self.spec.connect_timeout):
+                # The session's own ping: Client.send_ping warns on 2026-07-28 connections.
+                # Only the closed check matters here, and a closed connection fails any request.
+                await client.session.send_ping()
+        except MCPError as e:
+            if e.code != CONNECTION_CLOSED:
+                return False
+            await self.lose(describe(error))
+            return True
+        except Exception:
+            return False
+        return False
+
+    async def refresh(self) -> bool:
+        """List again with cache_mode="refresh", bounded by the connect timeout. On a failure,
+        `list_error` says why, one line goes to stderr, and the tools count as unknown until a
+        later listing succeeds. Returns True on success."""
         client = self.client
         if client is None:
-            return
+            return False
         try:
             with anyio.fail_after(self.spec.connect_timeout):
                 listed = await list_all(client)
         except TimeoutError:
-            log(f"polarizer: upstream {self.prefix}: listing timed out; kept its last list")
-            return
+            self.list_error = f"timeout after {self.spec.connect_timeout:g} s"
+            log(f"polarizer: upstream {self.prefix}: listing timed out; its tools are hidden")
+            return False
         except Exception as e:
-            why = describe(e)
-            log(f"polarizer: upstream {self.prefix}: listing failed ({why}); kept its last list")
-            return
+            if await self.check_closed(e):
+                return False
+            self.list_error = describe(e)
+            log(
+                f"polarizer: upstream {self.prefix}: listing failed ({self.list_error}); "
+                "its tools are hidden"
+            )
+            return False
         self._absorb(listed)
+        self.list_error = None
+        return True
 
     def _absorb(self, listed: list[types.Tool]) -> None:
         tools: dict[str, types.Tool] = {}
@@ -172,13 +227,6 @@ class Upstream:
                 tools.setdefault(tool.name, tool)
         self.tools = tools
         self.skipped = skipped
-
-    def exposed(self) -> list[types.Tool]:
-        """The tools as served: the upstream's own definitions, renamed <prefix>__<tool>."""
-        return [
-            tool.model_copy(update={"name": f"{self.prefix}{SEPARATOR}{name}"})
-            for name, tool in self.tools.items()
-        ]
 
     async def _follow_changes(self, client: Client) -> None:
         if client.protocol_version in MODERN_PROTOCOL_VERSIONS:

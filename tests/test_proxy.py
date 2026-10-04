@@ -134,6 +134,7 @@ def test_meta_filter_over_stdio(tmp_path):
     log = tmp_path / "probe.log"
     toml = f"[upstream.p]\ncommand = {rig.toml_str(sys.executable)}\nargs = [{rig.toml_str(rig.PROBE)}]\nenv = {{ PROBE_LOG = {rig.toml_str(log)} }}\n"
     cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
+    rig.prime(cfg)
     updates = []
 
     async def progress(p, total, message):
@@ -265,8 +266,10 @@ def test_upstream_isolation(tmp_path):
     assert crashed.is_error and crashed.content[0].text.startswith(
         "polarizer: upstream crashy failed: "
     )
-    assert again.is_error and again.content[0].text.startswith(
-        "polarizer: upstream crashy failed: "
+    # With pins, a lost upstream hides its tools at once (docs/PIN-SPEC.md, section 6), so
+    # the next call is refused instead of failing as a transport error.
+    assert again.is_error and again.content[0].text == (
+        "polarizer: crashy__wait is not available: its server's tool list could not be checked"
     )
     assert not good.is_error and json.loads(good.content[0].text) == {"still": "here"}
     assert "good__echo" in names_after
@@ -278,7 +281,11 @@ def test_upstream_isolation(tmp_path):
     assert connected["good"]["tools"] == len(fake.names)
     assert connected["crashy"]["protocol_version"] == "2025-11-25"
     outcomes = [e["data"]["outcome"] for e in rig.kinds(tmp_path / "ledger", "call.returned")]
-    assert outcomes == ["transport-error", "transport-error", "ok"]
+    assert outcomes == ["transport-error", "ok"]
+    (refused,) = rig.kinds(tmp_path / "ledger", "call.refused")
+    assert refused["data"]["reason"] == "upstream crashy tool list could not be refreshed"
+    (lost,) = rig.kinds(tmp_path / "ledger", "upstream.refresh_failed")
+    assert (lost["data"]["prefix"], lost["data"]["trigger"]) == ("crashy", "connection-lost")
 
 
 def test_unknown_tool(tmp_path):
@@ -355,4 +362,9 @@ def test_ledger_verifies_after_a_session(tmp_path):
         (ledger / "ledger.jsonl").read_bytes(), (ledger / "ledger.head").read_bytes()
     )
     assert result.status == "intact"
-    assert result.output_lines()[0] == "intact: 8 entries, 1 sessions, 2 calls"
+    assert result.output_lines()[0].endswith(" entries, 1 sessions, 2 calls")
+    counted = [e["kind"] for e in rig.entries(ledger)]
+    # The M0 entries, counted by kind; pins add a tool.seen and a tool.approved per tool.
+    assert [counted.count(k) for k in ("session.started", "upstream.connected")] == [1, 1]
+    assert [counted.count(k) for k in ("call.sent", "call.returned")] == [2, 2]
+    assert counted.count("tool.seen") == counted.count("tool.approved") == len(fake.names)

@@ -78,6 +78,7 @@ def test_rich_result_from_older_upstream_over_stdio(tmp_path):
     sides of `polarizer serve`. The SDK stamps Polarizer's serverInfo on the client's side."""
     toml = f"[upstream.p]\ncommand = {rig.toml_str(sys.executable)}\nargs = [{rig.toml_str(rig.PROBE)}]\n"
     cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
+    rig.prime(cfg)
 
     async def scenario():
         async with Client(rig.probe()) as client:
@@ -105,6 +106,7 @@ def test_rich_result_on_the_wire(tmp_path, era):
     SDK's client parses the upstream's result into its models (a stated limit)."""
     toml = f"[upstream.p]\ncommand = {rig.toml_str(sys.executable)}\nargs = [{rig.toml_str(rig.PROBE)}]\n"
     cfg = rig.serve_config(tmp_path, toml, tmp_path / "ledger")
+    rig.prime(cfg)
     serve = [sys.executable, "-m", "polarizer", "serve", "--config", str(cfg)]
     with RawClient(serve) as client:
         if era == "2026-07-28":

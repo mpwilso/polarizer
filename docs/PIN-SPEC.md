@@ -148,7 +148,7 @@ Pin state is a fold over the verified chain, in seq order, keyed by (upstream, t
 - Until they do, the tool is hidden, and the agent's calls to it fail with `its definition changed after approval`.
 - A changed definition can't be group-approved (section 7). After a server upgrade that is rolled back, each affected tool is approved one at a time.
 - Approving text already read, again and again, is the habit that wears down attention, which is what Polarizer exists to measure.
-- In M1a the only sign of a revert is that `pending` prints the same hash twice: `changed <prefix>__<tool> H, approved H`.
+- In M1a a revert records nothing (section 3), so `pending` keeps showing the change it reverted, `changed <prefix>__<tool> B, approved A`. To expose the tool again, the person approves A by name; `approve` accepts a hash approved before for that tool.
 
 **What M3's card must show** when it asks for a decision on a changed definition:
 - whether the live definition is identical to one approved before (the same hash), and if so, the seq and time of that approval;

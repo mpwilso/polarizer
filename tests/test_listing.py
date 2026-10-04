@@ -59,31 +59,43 @@ def test_every_client_list_refreshes(tmp_path):
     fake = FakeUpstream(ttl_ms=60_000, listen=False)
 
     async def scenario():
-        async with rig.proxied(tmp_path / "ledger", [rig.spec("f", fake.server)]) as (client, _):
+        async with rig.proxied(tmp_path / "ledger", [rig.spec("f", fake.server)]) as (client, gw):
             before = fake.list_calls
             first = (await client.list_tools()).tools[0].description
             fake.version = 2  # changed behind the proxy's back, with no notice
+            # The refresh saw the change: with pins, a changed definition is hidden.
+            hidden = (await client.list_tools()).tools
+            calls = fake.list_calls - before
+            await rig.approve_pending(gw, changed=True)
             second = (await client.list_tools()).tools[0].description
-            return fake.list_calls - before, first, second
+            return calls, first, hidden, second
 
-    calls, first, second = anyio.run(scenario)
+    calls, first, hidden, second = anyio.run(scenario)
     assert calls == 2
+    assert hidden == []
     assert (first, second) == ("Definition v1", "Definition v2")
 
 
-def test_refresh_failure_keeps_last_list(tmp_path, capfd):
+def test_refresh_failure_hides_the_upstream(tmp_path, capfd):
+    """M0 kept the last good list after a failed refresh (STAGE2-NOTES.md, guess 2). With pins,
+    the upstream's tools are hidden and the failure is recorded (docs/PIN-SPEC.md, section 6)."""
     fake = FakeUpstream()
 
     async def scenario():
         async with rig.proxied(tmp_path / "ledger", [rig.spec("f", fake.server)]) as (client, _):
+            before = [t.name for t in (await client.list_tools()).tools]
             fake.page_size = 1  # now the listing pages, and with names this long...
             fake.names = [f"t{i}" for i in range(101)]  # ...it passes the page limit
             names = [t.name for t in (await client.list_tools()).tools]
-            return names
+            return before, names
 
-    names = anyio.run(scenario)
-    assert names[:2] == ["f__echo", "f__wait"]
+    before, names = anyio.run(scenario)
+    assert before[:2] == ["f__echo", "f__wait"]
+    assert names == []
     assert (
-        "polarizer: upstream f: listing failed (more than 100 pages); kept its last list"
+        "polarizer: upstream f: listing failed (more than 100 pages); its tools are hidden"
         in capfd.readouterr().err
     )
+    (failed,) = rig.kinds(tmp_path / "ledger", "upstream.refresh_failed")
+    assert failed["data"]["trigger"] == "client-list"
+    assert failed["data"]["error"] == "more than 100 pages"

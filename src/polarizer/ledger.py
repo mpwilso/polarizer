@@ -96,6 +96,7 @@ class ChainState:
     calls_sent: list = field(default_factory=list)  # (seq, args_commit) for verify --args
     watch_seq: int | None = None  # remember the hash at this seq (the head's)
     watched_hash: str | None = None
+    last_entry: dict | None = None  # the line check_line adopted last, parsed
 
     @property
     def last_seq(self) -> int | None:
@@ -122,6 +123,7 @@ class ChainState:
             return problem
         self.lines = n
         self.last_hash = entry["hash"]
+        self.last_entry = entry
         if self.watch_seq is not None and n - 1 == self.watch_seq:
             self.watched_hash = entry["hash"]
         if self.version == 1:
@@ -251,8 +253,11 @@ class Result:
         return lines
 
 
-def verify_bytes(data: bytes, head: bytes | None) -> Result:
+def verify_bytes(data: bytes, head: bytes | None, on_entry=None) -> Result:
     """Verify a ledger's bytes and its ledger.head bytes (None when the file is missing).
+    `on_entry`, if given, gets each entry that passed its line checks, in order, in the same
+    pass (pin state is folded this way, with no second read). An entry it was given may still
+    be followed by a problem; the caller then discards what it folded.
 
     The first problem wins, in this order: per-line problems in file order; then head problems
     (an invalid head file, a head hash that doesn't match, a head past the last entry); then a
@@ -264,6 +269,8 @@ def verify_bytes(data: bytes, head: bytes | None) -> Result:
     state = ChainState(watch_seq=parsed_head.seq if parsed_head else None)
     for n, raw in enumerate(data[:complete].split(b"\n")[:-1], 1):
         problem = state.check_line(raw)
+        if problem is None and on_entry is not None and state.version == 1:
+            on_entry(state.last_entry)
         if problem:
             shown = "?" if problem.seq is None else problem.seq
             where = f"line {n}" if state.version == 0 else f"line {n} (seq {shown})"

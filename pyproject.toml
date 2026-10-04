@@ -5,9 +5,10 @@ description = "A local proxy between an AI agent and its MCP servers, with a ver
 readme = "CLAUDE.md"
 requires-python = ">=3.11"
 dependencies = [
-    # Exactly 2.2.0 for now: every SDK behavior in docs/verified-facts.md (outcomes, progress,
-    # cancellation, cache modes, capabilities) was checked against 2.2.0. M0's range is
-    # mcp>=2.2,<3; widen it only after re-checking those facts on the newer release.
+    # Exactly 2.2.0: every SDK behavior in docs/verified-facts.md (outcomes, progress,
+    # cancellation, cache modes, capabilities) was checked against 2.2.0, and M1a's definition
+    # hash depends on the SDK's served form (docs/PIN-SPEC.md, section 2). Change it only after
+    # re-checking those facts on the newer release.
     "mcp==2.2.0",
     "mcp-types==2.2.0",
     # Imported directly (proxy.py catches its ValidationError); the version mcp 2.2.0 resolved.

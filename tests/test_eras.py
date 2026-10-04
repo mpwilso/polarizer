@@ -18,14 +18,17 @@ async def _next_event(subscription, seconds=2):
         return await subscription.__anext__()
 
 
-async def _exercise_modern(client, wait_for_cancel):
-    """List change through listen, a fresh list despite the TTL hint, progress, cancel."""
+async def _exercise_modern(client, wait_for_cancel, approve_changed):
+    """List change through listen, a fresh list despite the TTL hint, progress, cancel. With
+    pins, the changed definitions are hidden until approved again (docs/PIN-SPEC.md)."""
     first = (await client.list_tools()).tools
     assert {t.description for t in first} == {"Definition v1"}
     async with client.listen(tools_list_changed=True) as subscription:
         await client.call_tool("m__change", {})
         event = await _next_event(subscription)
         assert type(event).__name__ == "ToolsListChanged"
+    assert (await client.list_tools()).tools == []  # every definition changed: all hidden
+    await approve_changed()
     second = (await client.list_tools()).tools
     assert {t.description for t in second} == {"Definition v2"}
 
@@ -44,7 +47,7 @@ async def _exercise_modern(client, wait_for_cancel):
 
 
 def _check_modern_ledger(ledger_dir):
-    (connected,) = rig.kinds(ledger_dir, "upstream.connected")
+    connected = rig.kinds(ledger_dir, "upstream.connected")[-1]  # after any priming run
     assert connected["data"]["protocol_version"] == "2026-07-28"
     (client,) = rig.kinds(ledger_dir, "session.client")
     assert client["data"]["protocol_version"] == "2026-07-28"
@@ -68,7 +71,9 @@ def test_modern_upstream(tmp_path, transport):
             async with rig.proxied(ledger_dir, [rig.spec("m", fake.server)]) as (client, gw):
                 assert client.protocol_version == "2026-07-28"
                 assert gw.upstreams["m"].protocol_version == "2026-07-28"
-                await _exercise_modern(client, cancelled_upstream)
+                await _exercise_modern(
+                    client, cancelled_upstream, lambda: rig.approve_pending(gw, changed=True)
+                )
 
     else:
         log = tmp_path / "fake.log"
@@ -79,16 +84,21 @@ def test_modern_upstream(tmp_path, transport):
             f'env = {{ FAKE_TTL_MS = "60000", FAKE_LOG = {rig.toml_str(log)} }}\n'
         )
         cfg = rig.serve_config(tmp_path, toml, ledger_dir)
+        rig.prime(cfg)
 
         async def cancelled_upstream():
             with anyio.fail_after(2):
                 while "wait cancelled" not in log.read_text(encoding="utf-8"):
                     await anyio.sleep(0.01)
 
+        async def approve_changed():
+            # Another process approves; serve catches up at the client's next tools/list.
+            await anyio.to_thread.run_sync(rig.approve_changed, ledger_dir)
+
         async def scenario():
             async with Client(rig.serve_params(cfg)) as client:
                 assert client.protocol_version == "2026-07-28"
-                await _exercise_modern(client, cancelled_upstream)
+                await _exercise_modern(client, cancelled_upstream, approve_changed)
 
     anyio.run(scenario)
     _check_modern_ledger(ledger_dir)
@@ -123,6 +133,10 @@ def test_handshake_upstream(tmp_path):
             async with client.listen(tools_list_changed=True) as subscription:
                 await client.call_tool("l__change", {})
                 await _next_event(subscription)
+            # With pins, the changed l__ definitions are hidden until approved again.
+            names = [t.name for t in (await client.list_tools()).tools]
+            assert not any(n.startswith("l__") for n in names)
+            await rig.approve_pending(gw, changed=True)
             descriptions = {
                 t.description for t in (await client.list_tools()).tools if t.name.startswith("l__")
             }

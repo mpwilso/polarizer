@@ -190,11 +190,22 @@ def refusal(result: Result) -> str:
     return f"polarizer: {result.message}; run polarizer verify"
 
 
-class LedgerWriter:
-    """The one writer of a ledger in this process. Open it with LedgerWriter.open()."""
+_CATCH_UP = object()  # a queue item kind: only adopt what other processes appended
 
-    def __init__(self, ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync):
+
+class LedgerWriter:
+    """The one writer of a ledger in this process. Open it with LedgerWriter.open().
+
+    `on_entry`, if given, is called with every entry this writer verifies at open, appends, or
+    adopts from another process, in seq order, on the thread that handled it. Pin state is
+    folded this way. Before an adopted tool.approved is handed over, the writer fsyncs the
+    ledger itself (docs/PIN-SPEC.md, section 8), so nothing acts on an approval that another
+    process wrote but may not have made durable.
+    """
+
+    def __init__(self, ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync, on_entry=None):
         self.ledger_dir = ledger_dir
+        self._on_entry = on_entry
         self._lock = lock
         self._fd = fd
         self._rfd = rfd
@@ -216,6 +227,7 @@ class LedgerWriter:
         lock_wait: float = LOCK_WAIT,
         ops: FileOps | None = None,
         idle_fsync: bool = True,
+        on_entry=None,
     ) -> "LedgerWriter":
         """Open the ledger as every process does (LEDGER-SPEC.md, First run).
 
@@ -244,7 +256,7 @@ class LedgerWriter:
             if not data:
                 state = _write_genesis(ledger_dir, fd, ops)
             else:
-                state = cls._check_existing(ledger_dir, data, fd, ops)
+                state = cls._check_existing(ledger_dir, data, fd, ops, on_entry)
             offset = ops.size(fd)
         except BaseException:
             for f in (fd, rfd):
@@ -253,21 +265,30 @@ class LedgerWriter:
             lock.close()
             raise
         lock.release()
-        return cls(ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync)
+        return cls(ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync, on_entry)
 
     @staticmethod
-    def _check_existing(ledger_dir: Path, data: bytes, fd: int, ops: FileOps) -> ChainState:
+    def _check_existing(
+        ledger_dir: Path, data: bytes, fd: int, ops: FileOps, on_entry=None
+    ) -> ChainState:
         try:
             head = (ledger_dir / HEAD).read_bytes()
         except FileNotFoundError:
             head = None
-        result = verify_bytes(data, head)
+        verified: list[dict] = []
+        result = verify_bytes(data, head, verified.append if on_entry else None)
         if result.version == 0:
             line = f"polarizer: ledger at {ledger_dir} is v0 (Parallax's format); "
             raise LedgerError(line + "Polarizer only writes v1", 3)
         if result.status != "intact":
             raise LedgerError(refusal(result), result.exit_code)
         state = result.state
+        if on_entry is not None:
+            # What another process wrote may not be durable yet; make it so before anything
+            # acts on it (an approval in particular).
+            ops.fsync(fd)
+            for entry in verified:
+                on_entry(entry)
         if head is None:
             data = {"from_seq": state.last_seq, "from_hash": state.last_hash}
             _append_durable(ledger_dir, fd, state, "ledger.head_rebuilt", data, ops)
@@ -293,6 +314,22 @@ class LedgerWriter:
     async def append_async(self, kind: str, data: dict, *, durable: bool | None = None):
         return await asyncio.wrap_future(self.append(kind, data, durable=durable))
 
+    def catch_up(self) -> Future:
+        """Queue a catch-up: adopt whatever other processes appended, handing each entry to
+        on_entry. The future resolves to the number of entries adopted, or raises Stopped.
+        If the file hasn't grown, nothing is read and the lock isn't taken."""
+        future: Future = Future()
+        self._queue.put((_CATCH_UP, None, False, future))
+        return future
+
+    async def catch_up_async(self) -> int:
+        return await asyncio.wrap_future(self.catch_up())
+
+    @property
+    def stopped(self) -> str | None:
+        """The stderr line the writer printed when it stopped, or None while it writes."""
+        return self._stopped
+
     def close(self) -> None:
         self._queue.put(None)
         self._thread.join()
@@ -310,7 +347,10 @@ class LedgerWriter:
             kind, data, durable, future = item
             if future.set_running_or_notify_cancel():
                 try:
-                    future.set_result(self._append(kind, data, durable))
+                    if kind is _CATCH_UP:
+                        future.set_result(self._catch_up_only())
+                    else:
+                        future.set_result(self._append(kind, data, durable))
                 except BaseException as e:
                     future.set_exception(e)
             if self._queue.empty() and self._dirty and self._idle_fsync:
@@ -334,25 +374,50 @@ class LedgerWriter:
                 update_head(self.ledger_dir, state.chain_id, entry["hash"], entry["seq"], self._ops)
             else:
                 self._dirty = True
+            if self._on_entry is not None:
+                self._on_entry(entry)
             return Appended(entry["seq"], entry["hash"])
         finally:
             self._lock.release()
 
-    def _catch_up(self) -> None:
-        """Under the lock: adopt lines other processes appended, or stop for good."""
+    def _catch_up_only(self) -> int:
+        if self._stopped:
+            raise Stopped(self._stopped, 1)
+        if self._ops.size(self._fd) == self._offset:
+            return 0  # nothing new: no lock, no read
+        self._lock.acquire(None)
+        try:
+            return self._catch_up()
+        finally:
+            self._lock.release()
+
+    def _catch_up(self) -> int:
+        """Under the lock: adopt lines other processes appended, or stop for good. Returns how
+        many were adopted."""
         size = self._ops.size(self._fd)
         if size == self._offset:
-            return
+            return 0
         if size < self._offset:
             self._stop("the ledger is shorter than this process last saw it")
         new = self._ops.read_at(self._rfd, self._offset, size - self._offset)
         if not new.endswith(b"\n"):
             self._stop("the ledger ends in a partial line")
+        adopted = []
         for raw in new.split(b"\n")[:-1]:
             problem = self._state.check_line(raw)
             if problem:
                 self._stop(f"another process appended a line that doesn't chain: {problem.detail}")
+            adopted.append(self._state.last_entry)
         self._offset = size
+        if self._on_entry is not None:
+            if any(e["kind"] == "tool.approved" for e in adopted):
+                try:
+                    self._ops.fsync(self._fd)
+                except OSError as e:
+                    self._stop(f"could not fsync an approval another process wrote: {e}")
+            for entry in adopted:
+                self._on_entry(entry)
+        return len(adopted)
 
     def _stop(self, why: str) -> None:
         self._stopped = f"polarizer: stopped writing the ledger: {why}; run polarizer verify"

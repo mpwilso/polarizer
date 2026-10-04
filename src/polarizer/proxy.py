@@ -1,9 +1,16 @@
-"""The gateway: one MCP server in front of the upstreams (docs/PROXY-SPEC.md).
+"""The gateway: one MCP server in front of the upstreams (docs/PROXY-SPEC.md, and
+docs/PIN-SPEC.md for pins).
 
 Tools only. The server registers tools/list, tools/call and subscriptions/listen, and nothing
 else. Every call is recorded: call.sent before it is forwarded and call.returned after, or one
-call.refused for a name that matches no listed tool. Arguments go to side files; results
+call.refused for a name that matches no exposed tool. Arguments go to side files; results
 never enter the ledger.
+
+Pins: every listing is hashed, its copies stored and its observations recorded; only tools whose
+latest decision approves their live hash are exposed, each served from its stored copy. Pin
+state comes from the ledger alone (polarizer.pins), and the gateway catches up with the ledger
+at the start of every client tools/list and tools/call, so a decision made by another process
+applies there.
 """
 
 import asyncio
@@ -23,8 +30,9 @@ from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
 from mcp.shared.subscriptions import ToolsListChanged
 from mcp_types import CLIENT_INFO_META_KEY, CONNECTION_CLOSED, PROTOCOL_VERSION_META_KEY
 
-from polarizer import __version__
+from polarizer import __version__, defhash, pins
 from polarizer.canon import MAX_INT, EntryRefused
+from polarizer.pins import PinState
 from polarizer.sidefiles import write_args
 from polarizer.upstream import SEPARATOR, Upstream, UpstreamSpec, clip, describe, log, one_line
 from polarizer.writer import LedgerWriter, Stopped
@@ -71,13 +79,36 @@ def result_bytes(result: types.Result) -> int:
 
 
 class Gateway:
-    """The proxy for one Polarizer process: its upstreams, its ledger session and its server."""
+    """The proxy for one Polarizer process: its upstreams, its ledger session and its server.
 
-    def __init__(self, specs: list[UpstreamSpec], writer: LedgerWriter, *, config_sha256: str):
+    `pins` must be the PinState the writer folded at open (LedgerWriter.open(on_entry=...)),
+    so it reflects the whole ledger. Without one, the gateway starts from an empty state.
+    """
+
+    def __init__(
+        self,
+        specs: list[UpstreamSpec],
+        writer: LedgerWriter,
+        *,
+        config_sha256: str,
+        pins: PinState | None = None,
+    ):
         self.writer = writer
         self.config_sha256 = config_sha256
         self.session = secrets.token_hex(8)
-        self.upstreams = {spec.prefix: Upstream(spec, self._upstream_changed) for spec in specs}
+        self.pins = pins if pins is not None else PinState()
+        self.upstreams = {
+            spec.prefix: Upstream(spec, self._upstream_changed, self._upstream_lost)
+            for spec in specs
+        }
+        # From each upstream's latest successful listing: its tool name -> live hash, or None
+        # when the definition can't be hashed (the problem is in _unhashable).
+        self._live: dict[str, dict[str, str | None]] = {}
+        self._unhashable: dict[tuple[str, str], str] = {}
+        self._unservable_recorded: set = set()  # (prefix, tool, def_hash, problem), per process
+        self._failing: set[str] = set()  # prefixes in a run of failed refreshes, recorded
+        self._observe_lock = anyio.Lock()
+        self._stop_announced = False
         self.bus = InMemorySubscriptionBus()
         self.server = _ProxyServer(
             "polarizer",
@@ -113,6 +144,12 @@ class Gateway:
                     waits.start_soon(upstream.wait_ready)
             for upstream in self.upstreams.values():
                 await self._append("upstream.connected", self._connected_data(upstream))
+            for upstream in self.upstreams.values():
+                if upstream.list_known:
+                    await self._observe(upstream)
+            waiting = self._count_waiting()
+            if waiting:
+                log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
             try:
                 yield self
             finally:
@@ -200,8 +237,8 @@ class Gateway:
 
     # Change notices --------------------------------------------------------------------
 
-    async def _upstream_changed(self, upstream: Upstream) -> None:
-        """Republish an upstream's list change: on the listen bus for 2026-07-28 clients, and
+    async def _notify_clients(self) -> None:
+        """Tell clients their tool list changed: on the listen bus for 2026-07-28 clients, and
         as notifications/tools/list_changed to older-era clients."""
         await self.bus.publish(ToolsListChanged())
         for session in list(self._legacy_sessions):
@@ -210,38 +247,216 @@ class Gateway:
             except Exception:
                 self._legacy_sessions.remove(session)
 
+    async def _upstream_changed(self, upstream: Upstream) -> None:
+        """An upstream's list changed: pass the notice on, as M0 does. The client's tools/list
+        that follows refreshes the upstream and checks the pins."""
+        await self._notify_clients()
+
+    # Pins --------------------------------------------------------------------------------
+
+    async def _catch_up(self) -> None:
+        """Adopt what other processes appended (decisions in particular). A ledger that changed
+        under the writer stops it: nothing is exposed after that, and clients are told once."""
+        if not self.writer.stopped:
+            try:
+                await self.writer.catch_up_async()
+            except Stopped:
+                pass
+        await self._check_stopped()
+
+    async def _check_stopped(self) -> None:
+        if self.writer.stopped and not self._stop_announced:
+            self._stop_announced = True
+            await self._notify_clients()
+
+    async def _upstream_lost(self, upstream: Upstream) -> None:
+        why = upstream.lost or "connection closed"
+        await self._refresh_failed(upstream, "connection-lost", why)
+
+    async def _refresh_failed(self, upstream: Upstream, trigger: str, error: str) -> None:
+        """Record the first failure of a run of failed refreshes; the next success ends it."""
+        if upstream.prefix in self._failing:
+            return
+        self._failing.add(upstream.prefix)
+        data = {
+            "session": self.session,
+            "prefix": upstream.prefix,
+            "trigger": trigger,
+            "error": one_line(error),
+        }
+        await self._append("upstream.refresh_failed", data)
+
+    async def _unservable(self, prefix: str, tool: str, def_hash: str | None, problem: str):
+        problem = one_line(problem)
+        key = (prefix, tool, def_hash, problem)
+        if key in self._unservable_recorded:
+            return
+        self._unservable_recorded.add(key)
+        data = {
+            "session": self.session,
+            "upstream": prefix,
+            "tool": tool,
+            "def_hash": def_hash,
+            "problem": problem,
+        }
+        await self._append("tool.unservable", data)
+
+    async def _observe(self, upstream: Upstream) -> None:
+        """After a successful listing: hash each tool, store copies that are missing, and record
+        what PIN-SPEC.md section 3 asks for, in list order, one upstream at a time."""
+        async with self._observe_lock:
+            if self.writer.stopped:
+                return
+            prefix = upstream.prefix
+            self._failing.discard(prefix)
+            live: dict[str, str | None] = {}
+            for name, tool in upstream.tools.items():
+                try:
+                    def_hash, canon = defhash.definition(tool)
+                except defhash.Unhashable as e:
+                    live[name] = None
+                    problem = f"cannot be hashed: {e}"
+                    self._unhashable[(prefix, name)] = problem
+                    await self._unservable(prefix, name, None, problem)
+                    continue
+                live[name] = def_hash
+                tp = self.pins.get(prefix, name)
+                action = pins.what_to_record(tp, def_hash)
+                if action == "cap":
+                    await self._unservable(prefix, name, def_hash, pins.CAP_PROBLEM)
+                    continue
+                if pins.state(tp, def_hash)[1] == pins.CAP_PROBLEM:
+                    continue  # beyond the cap: neither stored nor recorded
+                try:
+                    defhash.write_copy(self.writer.ledger_dir, def_hash, canon)
+                except OSError as e:
+                    why = e.strerror or describe(e)
+                    await self._unservable(
+                        prefix, name, def_hash, f"stored copy could not be written: {why}"
+                    )
+                base = {"session": self.session, "upstream": prefix, "tool": name}
+                if action == "seen":
+                    await self._append("tool.seen", {**base, "def_hash": def_hash})
+                elif action == "drift":
+                    drift = {"approved_hash": tp.decided_hash, "live_hash": def_hash}
+                    await self._append("tool.drift", {**base, **drift})
+            self._live[prefix] = live
+
+    async def _tool_state(self, prefix: str, name: str) -> tuple[str, str | None, dict | None]:
+        """(state, problem, stored copy) for a listed tool of an upstream whose list is known.
+        An approved tool's copy is read and rehashed every time."""
+        live = self._live.get(prefix, {}).get(name)
+        if live is None:
+            return "unservable", self._unhashable.get((prefix, name), "cannot be hashed"), None
+        st, problem = pins.state(self.pins.get(prefix, name), live)
+        if st != "approved":
+            return st, problem, None
+        try:
+            obj = defhash.read_copy(self.writer.ledger_dir, live)
+        except defhash.CopyProblem as e:
+            problem = f"stored copy {e}"
+            await self._unservable(prefix, name, live, problem)
+            return "unservable", problem, None
+        return "approved", None, obj
+
+    def _listed(self, upstream: Upstream) -> list[str]:
+        """The tools of an upstream whose list is known, in its order; [] otherwise."""
+        if not upstream.list_known or upstream.prefix not in self._live:
+            return []
+        return list(upstream.tools)
+
+    def _count_waiting(self) -> int:
+        """Listed tools that wait for a decision: pending or changed."""
+        count = 0
+        for upstream in self.upstreams.values():
+            for name in self._listed(upstream):
+                live = self._live[upstream.prefix].get(name)
+                if live is not None:
+                    st, _ = pins.state(self.pins.get(upstream.prefix, name), live)
+                    count += st in ("pending", "changed")
+        return count
+
+    async def exposed(self) -> list[types.Tool]:
+        """The tools served now: approved ones, from their stored copies, in config order of
+        upstreams and each upstream's own order. Nothing while the writer is stopped."""
+        if self.writer.stopped:
+            return []
+        tools = []
+        for upstream in self.upstreams.values():
+            for name in self._listed(upstream):
+                st, _, obj = await self._tool_state(upstream.prefix, name)
+                if st == "approved":
+                    tools.append(defhash.served(obj, f"{upstream.prefix}{SEPARATOR}{name}"))
+        return tools
+
+    async def catch_up(self) -> None:
+        """Adopt decisions other processes wrote. Called before every client tools/list and
+        tools/call; tests call it directly after approving."""
+        await self._catch_up()
+
     # tools/list ------------------------------------------------------------------------
 
     async def _list_tools(self, ctx, params) -> types.ListToolsResult:
-        live = [u for u in self.upstreams.values() if u.connected]
+        await self._catch_up()
+        if self.writer.stopped:
+            return types.ListToolsResult(tools=[])
+        live = [u for u in self.upstreams.values() if u.connected and u.client is not None]
+        results: dict[str, bool] = {}
+
+        async def refresh(upstream):
+            results[upstream.prefix] = await upstream.refresh()
+
         async with anyio.create_task_group() as tasks:
             for upstream in live:
-                tasks.start_soon(upstream.refresh)
-        return types.ListToolsResult(tools=[tool for u in live for tool in u.exposed()])
+                tasks.start_soon(refresh, upstream)
+        for upstream in live:  # observed in config order, so records come in a stable order
+            if results.get(upstream.prefix):
+                await self._observe(upstream)
+            elif upstream.client is not None:
+                await self._refresh_failed(upstream, "client-list", upstream.list_error or "failed")
+        await self._check_stopped()
+        return types.ListToolsResult(tools=await self.exposed())
 
     # tools/call ------------------------------------------------------------------------
 
-    def _route(self, name: str) -> tuple[Upstream | None, str]:
-        """(upstream, the upstream's tool name), or (None, the refusal reason)."""
+    async def _route(self, name: str) -> tuple[Upstream | None, str, str | None]:
+        """(upstream, the upstream's tool name, None), or (None, the refusal reason, the
+        client's <why>; None for M0's refusals, which say there is no such tool)."""
         if SEPARATOR not in name:
-            return None, "not a prefixed name"
+            return None, "not a prefixed name", None
         prefix, tool = name.split(SEPARATOR, 1)
         upstream = self.upstreams.get(prefix)
         if upstream is None:
-            return None, f'no upstream with prefix "{clip(prefix, 256)}"'
+            return None, f'no upstream with prefix "{clip(prefix, 256)}"', None
         if not upstream.connected:
-            return None, f"upstream {prefix} did not connect"
+            return None, f"upstream {prefix} did not connect", None
+        if not upstream.list_known or prefix not in self._live:
+            reason = f"upstream {prefix} tool list could not be refreshed"
+            return None, reason, "its server's tool list could not be checked"
         if tool not in upstream.tools:
-            return None, f'upstream {prefix} has no tool "{clip(tool, 512)}"'
-        return upstream, tool
+            return None, f'upstream {prefix} has no tool "{clip(tool, 512)}"', None
+        st, problem, _ = await self._tool_state(prefix, tool)
+        if st != "approved":
+            reason, why = pins.REASONS[st]
+            reason = reason.format(problem=problem)
+            return None, f'upstream {prefix} tool "{clip(tool, 512)}" {reason}', why
+        return upstream, tool, None
 
     async def _call_tool(self, ctx, params: types.CallToolRequestParams):
-        upstream, tool = self._route(params.name)
+        await self._catch_up()
+        if self.writer.stopped:
+            log(f"polarizer: refused {params.name}: could not record it: {self.writer.stopped}")
+            return _text_result(
+                f"polarizer: {params.name} was not called: the ledger could not record it"
+            )
+        upstream, tool, why = await self._route(params.name)
         if upstream is None:
             await self._append(
                 "call.refused", {"session": self.session, "tool": clip(params.name), "reason": tool}
             )
-            return _text_result(f"polarizer: no tool named {clip(params.name, 4096)}")
+            if why is None:
+                return _text_result(f"polarizer: no tool named {clip(params.name, 4096)}")
+            return _text_result(f"polarizer: {clip(params.name, 4096)} is not available: {why}")
 
         meta = dict(params.meta or {})
         forward = {key: meta[key] for key in FORWARDED_META if key in meta}
@@ -313,11 +528,15 @@ class Gateway:
                 await self._append("call.returned", finish("protocol-error", 0, e.message, e.code))
                 raise MCPError(code=e.code, message=e.message) from None
             line = f"polarizer: upstream {upstream.prefix} failed: {describe(e)}"
-            return await self._reply_error(line, "transport-error", finish)
+            reply = await self._reply_error(line, "transport-error", finish)
+            await upstream.check_closed(e)  # a dead upstream hides its tools before we answer
+            return reply
         except Exception as e:
             why = UNREADABLE if _leaf(e, pydantic.ValidationError) else describe(e)
             line = f"polarizer: upstream {upstream.prefix} failed: {why}"
-            return await self._reply_error(line, "transport-error", finish)
+            reply = await self._reply_error(line, "transport-error", finish)
+            await upstream.check_closed(e)
+            return reply
 
         if isinstance(result, types.InputRequiredResult):
             asked = (result.input_requests or {}).values()

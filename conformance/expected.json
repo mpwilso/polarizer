@@ -190,6 +190,20 @@
    "seq": 3,
    "status": "invalid"
   },
+  "broken/pins_edit_approval": {
+   "check": "hash",
+   "head": false,
+   "line": 5,
+   "seq": 4,
+   "status": "tampered"
+  },
+  "broken/pins_rehashed_rejection": {
+   "check": "head",
+   "head": true,
+   "line": null,
+   "seq": 10,
+   "status": "tampered"
+  },
   "broken/reorder_keys": {
    "check": "canonical",
    "head": false,
@@ -314,6 +328,13 @@
    "head": false,
    "line": 13,
    "seq": 12,
+   "status": "intact"
+  },
+  "valid/pins": {
+   "check": null,
+   "head": true,
+   "line": 12,
+   "seq": 11,
    "status": "intact"
   },
   "valid/session": {

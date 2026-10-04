@@ -15,6 +15,7 @@ def test_stdout_clean(tmp_path):
         f"[upstream.gone]\ncommand = {rig.toml_str(tmp_path / 'no-such-command')}\n"
     )
     cfg = rig.serve_config(tmp_path, toml, ledger_dir)
+    rig.prime(cfg)
     requests = [
         {
             "jsonrpc": "2.0",
@@ -96,6 +97,7 @@ def test_stdout_clean(tmp_path):
     assert "probe: started" in text  # the upstream's stderr reaches serve's stderr...
     assert "polarizer: upstream gone did not connect:" in text  # ...with serve's own logs
     assert b"probe: started" not in out and b"did not connect" not in out
+    # The priming run wrote no session.client: it read no request.
     (client,) = rig.kinds(ledger_dir, "session.client")
     assert client["data"]["client_name"] == "raw-test"
     assert client["data"]["protocol_version"] == "2025-11-25"
