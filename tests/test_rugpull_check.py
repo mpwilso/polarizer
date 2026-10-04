@@ -133,13 +133,15 @@ def check(tmp_path):
     stub.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{STUB}" "$@"\n', encoding="utf-8")
     stub.chmod(0o755)
 
-    def run(mode="", testing=True):
+    def run(mode="", testing=True, extra=None):
         base = tmp_path / (mode or "normal")
         dirs = {name: base / name for name in ("tmp", "home", "stub")}
         for d in dirs.values():
             d.mkdir(parents=True)
         dirs["results"] = base / "results.txt"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "PROBE_"))}
+        # CLAUDE_CODE_* is dropped so the tests run alike inside a Claude Code session or not.
+        dropped = ("STUB_", "PROBE_", "CLAUDE_CODE_")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(dropped)}
         env.update(
             HOME=str(dirs["home"]),
             TMPDIR=str(dirs["tmp"]),
@@ -151,6 +153,7 @@ def check(tmp_path):
         )
         if testing:
             env["POLARIZER_CHECK_TESTING"] = "1"
+        env.update(extra or {})
         done = subprocess.run(
             ["bash", str(SCRIPT)],
             env=env,
@@ -198,6 +201,7 @@ def test_all_checks_pass(check):
     assert len(lines(out, "PASS  ")) == 9 and not lines(out, "FAIL  "), out
     assert "rugpull check passed" in out
     assert dirs["results"].read_text(encoding="utf-8") == out  # everything is in the file
+    assert "notice:" not in out  # a plain terminal: no Claude Code session notice
     assert out.rstrip().endswith(f"Paste the output of: cat {dirs['results']}")
     assert list(dirs["tmp"].iterdir()) == []  # the temp directory was removed
     workdir = re.search(r"^working directory: (.+)$", out, re.M).group(1)
@@ -279,6 +283,23 @@ def test_claude_exiting_nonzero_fails(check):
         )
     assert "rugpull check FAILED" in out
     kept(out, dirs)
+
+
+@POSIX
+def test_notice_inside_a_claude_code_session(check):
+    """With CLAUDE_CODE_SESSION_ID set, the first line says the documented conditions are a plain
+    terminal and names the CLAUDE_CODE_* variables passed on, never their values. The checks are
+    the same."""
+    extra = {"CLAUDE_CODE_SESSION_ID": "session-value", "CLAUDE_CODE_OTHER": "other-value"}
+    code, out, dirs = check(extra=extra)
+    assert code == 0, out
+    first = out.splitlines()[0]
+    assert first.startswith("notice: running inside a Claude Code session"), out
+    assert "The documented conditions are a plain terminal." in first
+    assert first.endswith("(names only): CLAUDE_CODE_OTHER CLAUDE_CODE_SESSION_ID"), first
+    assert "session-value" not in out and "other-value" not in out
+    assert dirs["results"].read_text(encoding="utf-8") == out  # the notice is in the file too
+    assert len(lines(out, "PASS  ")) == 9 and not lines(out, "FAIL  "), out
 
 
 @POSIX

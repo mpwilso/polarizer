@@ -73,6 +73,12 @@ on_signal() {
 }
 trap on_signal INT TERM
 
+# The documented conditions are a plain terminal. Inside a Claude Code session its CLAUDE_CODE_*
+# variables reach each claude run, so the output says so first. Names only, never values.
+if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  echo "notice: running inside a Claude Code session (CLAUDE_CODE_SESSION_ID is set). The documented conditions are a plain terminal. These CLAUDE_CODE_* variables are passed on to each claude run (names only): $(compgen -e | grep '^CLAUDE_CODE_' | sort | paste -sd ' ' -)"
+fi
+
 helper() {
   "$PY" "$HELPER" "$@"
 }

@@ -641,12 +641,23 @@ So for Claude Code 2.1.289, interactive Claude Code lists the tools again after 
 - **Cost,** from Claude Code's own `total_cost_usd`: A 0.0237063, B 0.0111517 and C 0.0103563 USD, 0.045214 USD in total.
 - **No serve process** for the check's config was left running after any run. Every check passed, so the temp directory and its ledger were removed.
 - **Bookkeeping:** `~/.claude.json` went from 91,602 bytes (mtime 16:40:49Z) to 89,343 bytes (16:42:34Z) during the runs. `scripts/guard.sh check` afterwards found its MCP config unchanged in all 6 locations, and nothing else changed.
+- **Run B, why no refusal:** B's session has `tool.drift` at seq 24 and neither a `call.sent` nor a `call.refused` for `probe__wait`, because the model did not try to call the tool. It was not offered the tool and said so. `tool.approved` for the new hash followed at seq 26, between runs B and C.
+
+What it shows: with Claude Code 2.1.289, headless, a definition that changed after approval is hidden from a real agent until the new definition is approved. In run B the agent was not offered `probe__wait` and nothing reached the probe; after the approval, run C's call reached it and was recorded `ok`.
+
+What it does not show:
+
+- **The refusal path.** B's agent never named the hidden tool, so no call for it reached Polarizer and nothing was refused. That a hidden tool called by name is refused and recorded is shown by tests only (`tests/test_pins.py::test_hidden_tool_called_by_name`).
+- **Re-listing within one live session.** Each run was a new Claude Code process with a new Polarizer, and B saw the changed definition from the probe's first listing. That was answered separately, interactively (M1a check, interactive).
+- **A real third-party server.** The only upstream was the test probe.
+- **Windows or macOS.** It ran on Linux (WSL2) only.
+- **The documented conditions.** It ran inside a Claude Code session, not from a plain terminal. The script now says so in its first line when `CLAUDE_CODE_SESSION_ID` is set, and names the `CLAUDE_CODE_*` variables it passes on.
 
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
 
-- **Interactive sessions:** apart from Esc to cancel (see Interactive), every Claude Code fact above is headless. Not tested interactively:
+- **Interactive sessions:** apart from the facts the owner observed interactively (Interactive, Manual check follow-up, and M1a check, interactive: Esc to cancel, the `/mcp` names, and re-listing after an approval), every Claude Code fact above is headless. Not tested interactively:
   - closing a session without pressing Esc while a call is in flight (does Claude Code send `notifications/cancelled`, or only close stdin?);
   - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap);
   - whether interactive sessions open `subscriptions/listen` the same way;

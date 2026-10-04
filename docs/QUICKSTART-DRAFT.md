@@ -35,7 +35,7 @@ Nothing is exposed until you approve it, so do this once:
 3. **Approve them:** `.venv/bin/polarizer approve --config /absolute/path/to/polarizer.toml --group <id>`. A group approves exactly the definitions `pending` printed; if anything changed in between, it refuses and you run `pending` again. A tool with more than one definition waiting, or one you have decided on before, is approved by name: `polarizer approve --config <path> <prefix> <tool> <hash>`.
 4. **Start Claude Code** in the project directory, adding `--mcp-config <file> --strict-mcp-config` if the config is a separate file, and approve the `polarizer` server if asked. `/mcp` lists the approved tools, prefixed.
 
-Later, `polarizer pending` shows anything new or changed. A running Polarizer notices an approval within about a second and tells Claude Code. Whether interactive Claude Code then lists the tool again without a reconnect is not yet verified; if `/mcp` doesn't show it, reconnect `polarizer` from `/mcp`. `approve` and `reject` refuse to run without a terminal unless given `--allow-no-terminal`, so that an agent doesn't approve things by accident.
+Later, `polarizer pending` shows anything new or changed. A running Polarizer notices an approval within about a second and tells Claude Code, which lists the tool again without a reconnect (seen in an interactive session with Claude Code 2.1.289 on 2026-10-04). If `/mcp` doesn't show it, reconnect `polarizer` from `/mcp`. `approve` and `reject` refuse to run without a terminal unless given `--allow-no-terminal`, so that an agent doesn't approve things by accident.
 
 ## Check the ledger
 

@@ -126,7 +126,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 - **From 2026-07-28 upstreams:** Polarizer holds `client.listen(tools_list_changed=True)` open and republishes each event as `ToolsListChanged()` on its own `subscriptions/listen` bus.
 - **From older-era upstreams:** it receives `notifications/tools/list_changed` through the `Client`'s `message_handler` and republishes the same way. This path is unverified.
 - **To older-era clients:** the server is created with `NotificationOptions(tools_changed=True)`.
-- **(M1a)** An upstream's notice no longer passes straight through. It triggers a refresh of that upstream, and the client is told only when the list Polarizer exposes changes, at most once per second. A decision made by `polarizer approve` or `reject` in another process is noticed the same way (PIN-SPEC.md, sections 6 and 8). Whether interactive Claude Code re-lists on that notice is unverified (it did headless), so after approving, the documented fallback is to reconnect the server in `/mcp` (PIN-SPEC.md, section 8).
+- **(M1a)** An upstream's notice no longer passes straight through. It triggers a refresh of that upstream, and the client is told only when the list Polarizer exposes changes, at most once per second. A decision made by `polarizer approve` or `reject` in another process is noticed the same way (PIN-SPEC.md, sections 6 and 8). Claude Code re-listed on that notice headless, and interactively in the owner's check on 2026-10-04 with Claude Code 2.1.289, without a reconnect (verified-facts.md, M1a check, interactive). If `/mcp` doesn't show a tool after approving, the documented fallback is to reconnect the server in `/mcp` (PIN-SPEC.md, section 8).
 
 ## Calls
 

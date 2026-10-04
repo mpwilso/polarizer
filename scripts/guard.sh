@@ -20,9 +20,21 @@
 # Both commands also warn, and exit 1, if this repo has a .mcp.json at its root: any claude session
 # started here would then spawn polarizer serve (CLAUDE.md rule 13).
 #
+# Exit codes, and the output that goes with each:
+#   0  snapshot: recorded, last line "snapshot <file>".  check: nothing changed.
+#   1  check: a change, each one printed.  Either command: the root .mcp.json warning (a snapshot
+#      is still recorded).
+#   2  usage error, no snapshot, or the state could not be read completely (find, git or python
+#      failed): a "guard: stopped" line on stderr says so. A snapshot that stops is left as
+#      .guard/partial-<UTC timestamp>.txt, never as snapshot-*.txt, so check can't use it.
+# guard.sh's exit code is its own. Chained after other commands (guard.sh snapshot && wc ...),
+# the shell reports the last command's code: on 2026-10-04 an exit 1 that looked like the
+# snapshot's came from wc reading scripts/__pycache__.
+#
 # Snapshots are never deleted. check also reads the older format, where the summarized directory
 # was stored line by line, by summarizing those lines the same way.
 set -euo pipefail
+shopt -s inherit_errexit  # a failure inside $(state) stops check too, not just snapshot
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 paths_file="$root/.guard-paths"
@@ -68,7 +80,7 @@ EOF
 }
 
 listing() {  # "<path><TAB><size><TAB><mtime>" for every entry under $1, sorted; never contents
-  find "$1" -printf "%P\t%s\t%T@\n" 2>/dev/null | LC_ALL=C sort
+  find "$1" -printf "%P\t%s\t%T@\n" | LC_ALL=C sort  # an unreadable entry stops the guard
 }
 
 summarize() {  # stdin: listing lines; stdout: one summary line
@@ -93,8 +105,9 @@ state() {  # the full state, one tab-separated line per item
     printf 'repo:%s\thead\t%s\n' "$repo" "$(git -C "$repo" rev-parse HEAD)"
     git -C "$repo" --no-optional-locks status --porcelain --ignored | sed "s#^#repo:$repo\tstatus\t#"
   done < <(repos)
+  local p s
   for p in "${summary_paths[@]}"; do
-    if [ -e "$p" ]; then printf 'sum:%s\t%s\n' "$p" "$(listing "$p" | summarize)"
+    if [ -e "$p" ]; then s=$(listing "$p" | summarize); printf 'sum:%s\t%s\n' "$p" "$s"
     else printf 'sum:%s\tabsent\n' "$p"; fi
   done
   for p in "${meta_paths[@]}"; do
@@ -109,6 +122,11 @@ sections() {
   repos | sed 's#^#repo:#'
   printf 'sum:%s\n' "${summary_paths[@]}"
   printf 'meta:%s\n' "${meta_paths[@]}"
+}
+
+stopped() {  # EXIT trap while the state is read: say so on stderr and exit 2
+  echo "guard: stopped while reading the state (exit $1); $2" >&2
+  exit 2
 }
 
 show() { awk -v n="$shown" 'NR<=n {print "    " $0} END {if (NR>n) print "    ... and " NR-n " more"}'; }
@@ -128,11 +146,14 @@ old_summary() {
 
 snapshot() {
   mkdir -p "$state_dir"
-  local epoch at file
+  local epoch at file partial
   epoch=$(date -u +%s); at=$(date -u -d "@$epoch" +%Y%m%dT%H%M%SZ)
-  file="$state_dir/snapshot-$at.txt"
+  file="$state_dir/snapshot-$at.txt"; partial="$state_dir/partial-$at.txt"
   [ -e "$file" ] && { echo "snapshot $file already exists; wait a second" >&2; exit 2; }
-  { printf '#epoch\t%s\n' "$epoch"; state; } > "$file"
+  trap "stopped \$? 'no snapshot recorded; what was read is in $partial'" EXIT
+  { printf '#epoch\t%s\n' "$epoch"; state; } > "$partial"
+  trap - EXIT
+  mv -- "$partial" "$file"
   while IFS= read -r repo; do
     dirty=$(grep -F "repo:$repo	status	" "$file" | cut -f3 | grep -vc '^!!' || true)
     head=$(grep -F "repo:$repo	head	" "$file" | cut -f3)
@@ -161,7 +182,9 @@ check() {
   local epoch changed=0 now diffs sec d newer h p was is
   epoch=$(grep '^#epoch' "$file" | cut -f2)
   echo "since $(basename "$file")"
+  trap 'stopped $? "nothing was compared"' EXIT
   now=$(state)
+  trap - EXIT
   # Summarized directories are compared on their own below, in either snapshot format.
   local skip=()
   for p in "${summary_paths[@]}"; do skip+=(-e "^sum:$p	" -e "^meta:$p	"); done

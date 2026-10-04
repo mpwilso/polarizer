@@ -391,11 +391,11 @@ When a decision changes the exposed list, the notice in section 6 goes out:
 
 | Path | Status |
 |---|---|
-| `ToolsListChanged()` on the listen bus, for a 2026-07-28 client | Verified headless with Claude Code 2.1.287: it re-listed within 1 s each time (verified-facts.md, Spike). Not verified in an interactive session. |
+| `ToolsListChanged()` on the listen bus, for a 2026-07-28 client | Verified headless with Claude Code 2.1.287: it re-listed within 1 s each time (verified-facts.md, Spike). Observed interactively by the owner with Claude Code 2.1.289 on 2026-10-04: `/mcp` showed the tools without a reconnect (verified-facts.md, M1a check, interactive). |
 | `send_tool_list_changed()` to an older-era session | Verified SDK to SDK only (`tests/test_eras.py::test_eras`). Never seen with Claude Code, which negotiates 2026-07-28 with Polarizer. |
 | Claude Code's `subscriptions/listen` stream after Polarizer restarts | After Esc, Claude Code logged `subscriptions/listen stream dropped (remote); attempting to re-listen` (verified-facts.md, Interactive). Whether a new process's notices reach it is not verified. |
 
-**Re-listing is unverified where approvals happen.** Claude Code re-listed after a change notice in headless runs. Whether it does in an interactive session, where a person approves, is not verified; the stage 5 manual check answers it (decided, question 9). So the documented step after approving, if `/mcp` doesn't show the tool, is to restart the server by reconnecting it in `/mcp`. The new process rebuilds pin state from the ledger and exposes the approved tool from its first listing. Esc during a Polarizer call also ends the process (Shutdown and restart, below). In the one interactive check, Claude Code started a new process about 12 s later, but what started it is not known, so the documented fallback is the `/mcp` reconnect.
+**Re-listing where approvals happen.** Claude Code re-listed after a change notice in headless runs, and in an interactive session too: on 2026-10-04, with Claude Code 2.1.289, the owner approved while a session was open, and `/mcp` showed the tools without a reconnect, both after approving a group and after approving a changed definition (verified-facts.md, M1a check, interactive; decided, question 9). That is one check on one version, so the documented step after approving, if `/mcp` doesn't show the tool, stays: restart the server by reconnecting it in `/mcp`. The new process rebuilds pin state from the ledger and exposes the approved tool from its first listing. Esc during a Polarizer call also ends the process (Shutdown and restart, below). In the one interactive check, Claude Code started a new process about 12 s later, but what started it is not known, so the documented fallback is the `/mcp` reconnect.
 
 If Claude Code doesn't re-list, the decision still holds, and a hidden tool is refused whatever Claude Code thinks it has.
 
@@ -603,7 +603,7 @@ The owner answered the spec round's fourteen open questions on Oct 3, 2026. Each
 6. **The latest decision wins:** yes. A rejection of B also removes an approval of A.
 7. **A session-end entry:** none now.
 8. **The cap of 16 definitions per tool between decisions:** 16 is fine.
-9. **Interactive re-listing:** the stage 5 manual check approves while a session is open and checks whether `/mcp` shows the tool without reconnecting (section 9).
+9. **Interactive re-listing:** the stage 5 manual check approves while a session is open and checks whether `/mcp` shows the tool without reconnecting (section 9). Answered on 2026-10-04 with Claude Code 2.1.289: it does, for a first approval and for a changed definition (verified-facts.md, M1a check, interactive).
 10. **The refusal line the model sees:** keep the informative line, `polarizer: <name> is not available: <why>`.
 11. **The actor:** keep the fixed value `"person"`.
 12. **SDK upgrades:** no migration command. Approving again is fine, and the exact SDK pin stays.
