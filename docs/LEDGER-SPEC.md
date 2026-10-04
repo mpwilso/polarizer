@@ -67,15 +67,20 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | `session.started` | `session` (16 random hex characters, one per Polarizer process), `polarizer_version`, `config_sha256` |
 | `session.client` | `session`, `client_name`, `client_version`, `protocol_version`: written once, on the first request that carries client information. In 2026-07-28 that's every request's `_meta`; in the older era it's `initialize`. |
 | `upstream.connected` | `prefix`, then either `protocol_version`, `tools` and `skipped_tools` (a list of names left out), or `error` |
-| `call.sent` | `session`, `tool` (the full exposed name, `<prefix>__<tool>`), `args_commit`, `meta_dropped` (a list of strings), `client_call_id` (a string, or `null` when the client sent none) |
+| `call.sent` | `session`, `tool` (the full exposed name, `<prefix>__<tool>`), `args_commit`, `meta_dropped` (a list of strings), `client_call_id` (a string, or `null` when the client sent none). (M2a) A held call that was allowed also has `hold`, the hold id; a call never held has no `hold` key (HOLD-SPEC.md, section 5). |
 | `call.returned` | `call_seq`, `outcome` (`ok`, `tool-error`, `protocol-error`, `transport-error`, `cancelled`, `unsupported`; defined in PROXY-SPEC.md), `latency_ms`, `result_bytes`, plus `error` (one line) for every outcome but `ok`, and `code` for `protocol-error` |
-| `call.refused` | `session`, `tool` (the name as called), `reason`. M0: a name that matches no listed tool. M1a adds hidden tools called by name, with the reasons in PIN-SPEC.md (section 4). |
+| `call.refused` | `session`, `tool` (the name as called), `reason`: a call Polarizer never forwarded. M0: a name that matches no listed tool. M1a adds hidden tools called by name, with the reasons in PIN-SPEC.md (section 4). M2a adds held calls that end without being forwarded, with `hold` (the hold id), and calls refused because 16 holds already wait, without it (HOLD-SPEC.md, section 5). |
 | `tool.approved` | `upstream`, `tool`, `def_hash`, `actor`, `group` (null, or the group id of a group approval) (M1a; PIN-SPEC.md, section 3) |
 | `tool.rejected` | `upstream`, `tool`, `def_hash`, `actor`, `reason` (M1a) |
 | `tool.drift` | `session`, `upstream`, `tool`, `approved_hash`, `live_hash` (M1a) |
 | `tool.seen` | `session`, `upstream`, `tool`, `def_hash`: a live definition no decision covers (M1a) |
 | `tool.unservable` | `session`, `upstream`, `tool`, `def_hash` (or null), `problem`: a tool hidden because it can't be hashed, its definition is larger than 262144 bytes, or its stored copy fails its check (M1a) |
 | `upstream.refresh_failed` | `session`, `prefix`, `trigger` (`client-list`, `upstream-notice` or `connection-lost`), `error` (M1a) |
+| `policy.loaded` | `session`, `holds` (`on` or `off`), `policy_sha256`, `classified`, `workspace_roots`, `hold_timeout_seconds`: the policy a `serve` process runs with, written after `session.started`; fsynced, with `ledger.head` updated (M2a; HOLD-SPEC.md, section 5) |
+| `hold.created` | `session`, `hold` (16 random lowercase hex characters), `tool`, `args_commit`, `class` (or null), `class_from` (`config`, `annotations` or null), `rule`, `reason`, `timeout_seconds`: a call held for a person; not fsynced (M2a) |
+| `hold.decided` | `hold`, `args_commit`, `decision` (`allow` or `deny`), `actor`, `reason` (or null): a person's decision on a hold; fsynced, with `ledger.head` updated, before the deciding command reports success (M2a) |
+| `hold.expired` | `session`, `hold`, `reason`: a hold the holding process ended by timeout, the client's cancel or shutdown; not fsynced (M2a) |
+| `hold.abandoned` | `session`, `hold`, `held_by`: an open hold whose process has ended, recorded by a later `serve` at start; not fsynced (M2a) |
 | `ledger.repaired` | `bytes`, `sha256`, `file` |
 | `ledger.head_rebuilt` | `from_seq`, `from_hash` (the verified chain head it was rebuilt from) |
 

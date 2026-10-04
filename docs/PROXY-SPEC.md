@@ -1,6 +1,6 @@
 # Proxy spec (M0)
 
-This is the behavior contract for `polarizer serve` and the command line. The ledger format is in LEDGER-SPEC.md. M1a's pins change what `serve` lists, refuses and does at shutdown, and add `pending`, `approve` and `reject`. Each change is summarized below, marked (M1a), and PIN-SPEC.md is the full contract for them. The facts this relies on, and how each was checked, are in verified-facts.md.
+This is the behavior contract for `polarizer serve` and the command line. The ledger format is in LEDGER-SPEC.md. M1a's pins change what `serve` lists, refuses and does at shutdown, and add `pending`, `approve` and `reject`. Each change is summarized below, marked (M1a), and PIN-SPEC.md is the full contract for them. M2a's classes and holds change how `serve` reads its config, starts and handles calls, and add `holds`, `allow` and `deny`; those changes are marked (M2a), and HOLD-SPEC.md is their full contract. M2a is specified, not built. The facts this relies on, and how each was checked, are in verified-facts.md.
 
 ## Scope
 
@@ -52,6 +52,7 @@ env = { NOTES_TOKEN = "${NOTES_TOKEN}", NOTES_MODE = "read-only" }
   - `env`: table of strings, default empty;
   - `connect_timeout_seconds`: number from 1 to 20, default 10.
 - **Unknown keys** at either level are an error.
+- **(M2a)** A top-level `[policy]` table (`workspace_roots`, `hold_timeout_seconds`, `write_hold_patterns`, `read_hold_patterns`), and two per-upstream keys, `trust_annotations` and a `tools` table giving each tool its `class` and `path_args`. The schema, the defaults and the error lines are in HOLD-SPEC.md, section 2. A config without them loads, and every call to an unclassified tool is held.
 - **Relative paths:** `command` and `args` are passed to the operating system as written. Relative paths resolve against Polarizer's working directory, which Claude Code sets, so use absolute paths.
 
 **The prefix** is the table name. It must be 1 to 32 characters of letters, digits, `-` and `_`, with no `__` anywhere and no `_` at the start or end. `__` is the separator in exposed names, so a prefix that contains it or ends in `_` would split ambiguously.
@@ -104,12 +105,13 @@ Everything below happens before the proxy answers Claude Code's first message. C
    - Any status other than `intact` exits with that status's code and one line on stderr: `polarizer: <verify's first line>; run polarizer verify`. For a torn tail, whose line already ends `; run polarizer repair`, nothing is added.
    - A v0 ledger exits 3: `polarizer: ledger at <dir> is v0 (Parallax's format); Polarizer only writes v1`.
    - (M1a) If folding a verified entry into pin state raises, startup exits 1 with `polarizer: could not fold seq <n> into pin state: <the error, through safe()>`, and writes nothing, not even a missing `ledger.head`. `approve` and `reject` refuse the same way.
-4. **Append `session.started`** with Polarizer's version and the config hash. The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
+4. **Append `session.started`** with Polarizer's version and the config hash. (M2a) Before it, serve creates and locks its session lock file, `sessions/<session>.lock`; after it, serve appends `policy.loaded`, fsynced, then records `hold.abandoned` for each open hold of a session that has ended (HOLD-SPEC.md, sections 5 and 7). The client's name, version and protocol aren't known yet: in 2026-07-28 there's no `initialize`, and they arrive in each request's `_meta`. They are recorded as `session.client` exactly once per process, on the first request or `initialize` that carries them, even when two requests arrive at the same moment. A flag set before the write, under one lock, decides which request writes it.
 5. **Connect every upstream in parallel,** each within its own `connect_timeout_seconds`. Connecting means opening the SDK `Client` and listing the tools (see Listing).
    - Each upstream gets an `upstream.connected` entry, with its protocol version and tool count, or its error (`timeout after 10 s`, the exception's message made safe as in Calls, Upstream text, or a listing limit).
    - A failed or hung upstream is skipped for the session, and the others serve.
    - There is no retry in M0. A skipped upstream returns only when Claude Code restarts Polarizer.
    - (M1a) Each connected upstream's list is then hashed, stored and checked against the pins, and the results recorded (PIN-SPEC.md, section 6). Nothing is exposed that isn't approved.
+   - (M2a) Once every upstream has been listed, serve writes one stderr line naming how many listed tools have no class, if any (HOLD-SPEC.md, section 2).
    - (M1a) End of input during startup doesn't cancel it. With stdin closed, `serve` finishes steps 3 to 5, fsyncs and exits 0, which is how a ledger is primed before the first session (PIN-SPEC.md, sections 7 and 8).
 6. **Serve.** With the default timeouts, steps 3 to 5 take at most about 12 s plus ledger verification, well under 30 s.
 
@@ -138,6 +140,8 @@ Everything below happens before the proxy answers Claude Code's first message. C
 - **The client** gets a `tools/call` result with `isError` and one line: `polarizer: no tool named <name>`. This is deliberate, not a JSON-RPC error: a result reaches the model, which can see the mistake and recover, for example by listing tools again.
 
 **Hidden tools (M1a).** A listed tool that isn't in the approved state is refused the same way: one `call.refused`, no side file, no upstream call. The reasons are `upstream <p> tool "<t>" is pending approval`, `... was rejected`, `... changed after approval`, `... cannot be served: <problem>`, and `upstream <p> tool list could not be refreshed`. The client's line is `polarizer: <name> is not available: <why>` (PIN-SPEC.md, section 6).
+
+**Held calls (M2a).** A call that routes to an approved tool then goes through the rule function (HOLD-SPEC.md, section 4). If it is held, serve writes the side file and `hold.created`, keeps the request pending, and sends progress every 10 s under the client's own token. It forwards only after a `hold.decided` allow from another process, fsynced, followed by serve's own fsync and a second routing check; then the order below applies, with `call.sent` carrying `hold`. A deny, a timeout (`hold_timeout_seconds`, default 300, at most 1200), the client's cancel or shutdown ends the hold with `call.refused`, and the client gets `polarizer: <name> was not allowed`, or nothing for a cancel. At most 16 holds per process are open; a further call that would be held is refused at once. Full contract: HOLD-SPEC.md, sections 5 and 6.
 
 **Request `_meta`.**
 - **Forwarded:** `traceparent` and `tracestate`.
@@ -168,6 +172,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 - **`result_bytes`:** the length of the compact UTF-8 JSON of the result as sent to the client, that is `len(json.dumps(result.model_dump(by_alias=True, mode="json", exclude_none=True), separators=(",", ":"), ensure_ascii=False).encode("utf-8"))`. It is 0 when nothing was returned: for `cancelled`, and for `protocol-error`, where the client gets a JSON-RPC error instead of a result.
 
 Notes on the outcomes:
+- **Shutdown and holds (M2a).** Shutdown also ends every held call: each records `hold.expired` and `call.refused` in its shielded scope, best effort (HOLD-SPEC.md, section 6).
 - **Shutdown (M1a).** SIGINT, SIGTERM and end of input start one shutdown (end of input during startup lets startup finish first): in-flight calls are recorded as `cancelled` with the error `polarizer shut down during the call`, upstream clients get at most 1 s to close, and the writer is closed; then the process exits 0 at once. A second signal skips the wait (PIN-SPEC.md, section 8).
 - **Timeouts.** M0 has no transport timeout, and "timeout" is not part of `transport-error`. Polarizer sets no per-call read timeout in M0, so the SDK's local -32001 can't occur. A call is bounded only by Claude Code's own limit, which arrives as `cancelled`.
 - **Unreadable results.** A result the SDK can't parse into its models (for example a content block of an unknown `type`) is a `transport-error`, with the fixed line `polarizer: upstream <prefix> failed: result did not match the MCP schema` for the client and the ledger. The SDK's own message quotes the result, so it is never passed on or recorded (Results).
@@ -201,7 +206,7 @@ polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--ar
 polarizer repair (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
-M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax.
+M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax, and M2a adds one flag to it: `polarizer serve --config <absolute path> [--no-holds]`. `--no-holds` turns the hold rules off for that process, is never the default, has no config key, and is recorded in `policy.loaded` at every start (HOLD-SPEC.md, section 2). M2a's `holds`, `allow` and `deny` are in HOLD-SPEC.md, section 8.
 
 ```
 polarizer pending (--config <absolute path> | --ledger-dir <absolute path>) [--upstream <prefix>]

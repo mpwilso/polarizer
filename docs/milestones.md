@@ -1,6 +1,6 @@
 # Polarizer milestones
 
-These are in build order. The cut line is everything above "Stretch". Sizes are rough: small is days, medium is one to two weeks, large is more. Details for M0 are in docs/m0-plan.md, for M1a in docs/PIN-SPEC.md, and the ledger format is in docs/LEDGER-SPEC.md.
+These are in build order. The cut line is everything above "Stretch". Sizes are rough: small is days, medium is one to two weeks, large is more. Details for M0 are in docs/m0-plan.md, for M1a in docs/PIN-SPEC.md, for M2a in docs/HOLD-SPEC.md, and the ledger format is in docs/LEDGER-SPEC.md.
 
 The order puts M2b before the practice range, because the range's exfiltration cases need taint. M1b comes after M2b because scanning has the most prior art.
 
@@ -8,7 +8,7 @@ The order puts M2b before the practice range, because the range's exfiltration c
 |---|---|---|---|
 | M0 | Pass-through proxy and ledger v1 | Claude Code works through it with only prefixed names changed. Every call is in the ledger. Both verifiers agree on every fixture, each broken fixture gets its status, and the manual checklist is confirmed. | large |
 | M1a | Pins | A tool is exposed only while its served definition matches an approved hash. Drift hides it, is recorded, and Claude Code is notified. Startup fails closed on a broken ledger. | medium |
-| M2a | Classes and default holds | Every tool has a class in `polarizer.toml`. Writes outside the workspace roots or to protected paths (resolved real paths), destructive calls and egress calls are held with a one-line reason. Reads and in-root writes pass. Unknown tools are denied. | medium |
+| M2a | Classes and default holds | Every tool has a class in `polarizer.toml`. Writes outside the workspace roots or matching the hold patterns (resolved real paths), destructive calls and egress calls are held with a one-line reason, and `polarizer holds`, `allow` and `deny` decide them. Reads and in-root writes pass. Unclassified tools are held on every call. | medium |
 | M3 | The card | Held calls appear on a local page showing what will change, the arguments, why it was held, its history and a recommendation written by code. Approve, deny, timeout and cancel each land in the ledger, fsynced before acting. | large |
 | M5 + M6 | Stats and canaries | `polarizer stats` shows holds per session, approval rate, time per decision and the falling-time warning. Canaries are opt-in, capped, never forwarded (a test proves it), revealed after each decision, and scored for catches and false flags. The prediction-gate condition is in. | large |
 | M2b | Argument rules and taint | Domain and value allowlists work. Session taint holds egress after untrusted content, with the reason naming the source and time. Grants are revoked on taint. Each has tests. | medium |
@@ -24,6 +24,7 @@ The order puts M2b before the practice range, because the range's exfiltration c
 
 - **M0:** built in stages 1 to 3. The owner ran parts of its manual check interactively: Esc to cancel and the `/mcp` names (docs/verified-facts.md, Interactive and Manual check follow-up). The hung upstream and closing a session during a call are still unverified.
 - **M1a:** built in stages 4 and 5 (docs/STAGE4-NOTES.md, docs/STAGE5-NOTES.md). It pins definitions only: no scanning, no policy, no holds. It is done when the owner's M1a manual check (docs/MANUAL-CHECK.md, M1a section) and CI on all three platforms pass.
+- **M2a:** specified in docs/HOLD-SPEC.md, to be built in stages 6 and 7. Not built.
 
 ## Carry-forward notes
 
