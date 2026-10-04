@@ -116,7 +116,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 
 **Exposed names.** Each upstream tool is exposed as `<prefix>__<tool>`. A tool whose exposed name would not match `^[A-Za-z0-9._-]{1,128}$` is left out, and its name is recorded in `upstream.connected` under `skipped_tools`.
 
-**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, which has no `_meta` (PIN-SPEC.md, sections 4 and 5). Nothing turns pins off; M0's behavior is the code at commit 4eaa61a (PIN-SPEC.md, section 7).
+**Pins (M1a).** Only tools in the approved state are listed, each served from its stored copy, which has no `_meta` (PIN-SPEC.md, sections 4 and 5). A definition whose canonical form is larger than 262144 bytes is never stored or served, and one that can't be hashed is recorded with a fixed reason, never the exception's text (PIN-SPEC.md, section 2). Nothing turns pins off; M0's behavior is the code at commit 4eaa61a (PIN-SPEC.md, section 7).
 
 **Paging.** `tools/list` follows `next_cursor` for up to 100 pages and 1,000 tools per upstream. Past either limit, that upstream is refused for the session, with the error `more than 100 pages` or `more than 1000 tools` recorded.
 

@@ -74,7 +74,7 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | `tool.rejected` | `upstream`, `tool`, `def_hash`, `actor`, `reason` (M1a) |
 | `tool.drift` | `session`, `upstream`, `tool`, `approved_hash`, `live_hash` (M1a) |
 | `tool.seen` | `session`, `upstream`, `tool`, `def_hash`: a live definition no decision covers (M1a) |
-| `tool.unservable` | `session`, `upstream`, `tool`, `def_hash` (or null), `problem`: a tool hidden because it can't be hashed or its stored copy fails its check (M1a) |
+| `tool.unservable` | `session`, `upstream`, `tool`, `def_hash` (or null), `problem`: a tool hidden because it can't be hashed, its definition is larger than 262144 bytes, or its stored copy fails its check (M1a) |
 | `upstream.refresh_failed` | `session`, `prefix`, `trigger` (`client-list`, `upstream-notice` or `connection-lost`), `error` (M1a) |
 | `ledger.repaired` | `bytes`, `sha256`, `file` |
 | `ledger.head_rebuilt` | `from_seq`, `from_hash` (the verified chain head it was rebuilt from) |

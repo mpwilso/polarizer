@@ -69,7 +69,10 @@ The same step also drops a null at the top level of `inputSchema` or `outputSche
   - step 3 fails when the 2026-07-28 model rejects the tool;
   - step 4 fails on an integer outside plus or minus 2^53-1 (`IntegerDomainError`; an int64 bound such as `"maximum": 9223372036854775807` is enough), a non-finite float or a lone surrogate.
 
-  The tool is hidden and recorded as `tool.unservable` with `def_hash` null and the problem `cannot be hashed: <one line>`. It can't be approved. Such tools stay hidden, and the reference test counts them (decided, question 1).
+  The tool is hidden and recorded as `tool.unservable` with `def_hash` null and the problem `cannot be hashed: <reason>`. It can't be approved. Such tools stay hidden, and the reference test counts them (decided, question 1).
+
+  `<reason>` is one of four fixed texts, chosen by the type of the exception, never from its message, because an exception's message can quote the upstream's definition: `not a valid tool definition` (step 3 failed), `integer outside the safe range` (`IntegerDomainError`), `text that is not valid Unicode` (a `CanonicalizationError` caused by a `UnicodeError`, which is how rfc8785 reports a lone surrogate), and `could not be canonicalized` (any other failure in step 4, such as a non-finite float).
+- **A definition larger than 262144 bytes.** When `canon` is longer than `MAX_DEFINITION_BYTES` (262144, 256 KiB), the definition is not stored and gets no `tool.seen` or `tool.drift`, so it never counts toward the cap. It is recorded once as `tool.unservable`, with its `def_hash` and the problem `definition larger than 262144 bytes`, and it is hidden. Since serve never saw it in a `tool.seen`, `approve` refuses it. Nothing in the SDK or M0 limited the size of one listed definition; M0's limits are pages and tool counts.
 - **Names.** The form carries the upstream's own name, and pins are keyed by (prefix, upstream tool name). Two upstreams with identical tools have equal hashes and separate pins. Renaming a prefix in `polarizer.toml` makes every tool behind it pending again.
 
 ### When the SDK changes
@@ -105,7 +108,8 @@ The three unfsynced kinds are observations that the next start repeats.
 - **`tool.seen`:** once for each (upstream, tool, `def_hash`) since that tool's latest decision, when the hash is live and isn't covered by the decision. That means there is no decision, or the latest decision rejected a different hash.
 - **`tool.drift`:** once for each (`approved_hash`, `live_hash`) pair since the latest decision, when the latest decision approved a hash and the live hash differs.
 - **`tool.unservable`:** once per process for each (upstream, tool, `def_hash`, `problem`). The problems are:
-  - `cannot be hashed: <one line>`;
+  - `cannot be hashed: not a valid tool definition`, `cannot be hashed: integer outside the safe range`, `cannot be hashed: text that is not valid Unicode` or `cannot be hashed: could not be canonicalized` (section 2), never an exception's own message;
+  - `definition larger than 262144 bytes` (section 2);
   - `stored copy missing`;
   - `stored copy could not be written: <the operating system's message>`;
   - `stored copy does not match its hash`;
@@ -138,7 +142,7 @@ Pin state is a fold over the verified chain, in seq order, keyed by (upstream, t
 | pending | no decision, or the latest decision rejected a hash other than the live one | no | `upstream <p> tool "<t>" is pending approval` |
 | rejected | latest decision rejects the live hash | no | `upstream <p> tool "<t>" was rejected` |
 | changed | latest decision approves H, and a drift follows it or the live hash isn't H | no | `upstream <p> tool "<t>" changed after approval` |
-| unservable | can't be hashed, over the cap, or the stored copy of an approved H fails its check | no | `upstream <p> tool "<t>" cannot be served: <problem>` |
+| unservable | can't be hashed, larger than 262144 bytes, over the cap, or the stored copy of an approved H fails its check | no | `upstream <p> tool "<t>" cannot be served: <problem>` |
 | list unknown | the upstream's last refresh failed, or its connection was lost | no, for every tool of that upstream | `upstream <p> tool list could not be refreshed` |
 | not listed | the upstream's current list doesn't have the tool, whatever its decisions | no | M0's `upstream <p> has no tool "<t>"` |
 
@@ -176,7 +180,7 @@ Pin state is the latest decision per tool, so losing the end of the ledger could
   2. give it its final name without ever replacing an existing file: `os.link` then remove the temp file on POSIX, `os.rename` on Windows, which fails if the target exists;
   3. fsync `defs/` on POSIX.
 
-  An existing file is never overwritten. If writing fails, the tool gets `tool.unservable` with `stored copy could not be written: <message>`.
+  An existing file is never overwritten. If writing fails, the tool gets `tool.unservable` with `stored copy could not be written: <message>`. A definition larger than 262144 bytes is never stored (section 2).
 - **Read with a rehash every time.** Every time `serve` builds the exposed list, it reads each approved tool's copy and rehashes it. `pending` and `approve` read and rehash it too. There is no in-memory cache of a copy's contents. A copy that is missing, unreadable, fails the rehash or won't parse as a tool makes the tool unservable (hidden, and `tool.unservable` recorded once per process). A missing copy is written again the next time `serve` sees the same live definition, since its bytes are determined by the hash. An altered copy stays until a person deletes it, and `serve` then writes it again at its next refresh.
 - **What is served:** the stored JSON object, with `name` set to `<prefix>__<tool>`, parsed into `mcp_types.Tool` by alias, and served by the SDK in the client's era. The stored copy has no `_meta` (section 2), so none is served.
   - For a 2026-07-28 client, the wire definition equals the stored object, renamed. A test pins this.
@@ -201,7 +205,7 @@ Every listing uses `cache_mode="refresh"` and follows `next_cursor` within M0's 
 
 The upstream's tools are processed in list order, under one lock in the event loop, so two refreshes never interleave their records:
 1. Apply M0's name rule; skipped names are never hashed.
-2. Compute the hash (section 2).
+2. Compute the hash (section 2). A definition that can't be hashed, or is larger than 262144 bytes, is recorded as unservable and skips steps 3 and 4.
 3. Write the stored copy if it's missing (section 5).
 4. Record `tool.seen`, `tool.drift` or `tool.unservable` if section 3 says so.
 5. Recompute that tool's state.
@@ -284,21 +288,27 @@ new <prefix>__<tool> <def_hash>, after rejecting <rejected_hash>
 not in a group, because this tool has a decision; approve it by name
 <definition>
 
+new <prefix>__<tool> <def_hash>
+more than one definition waits for this tool; approve one by name
+<definition>
+
 changed <prefix>__<tool> <live_hash>, approved <approved_hash>
 <definition>
 
 unservable <prefix>__<tool> <def_hash or ->: <problem>
 
-group <group id> covers the <k> new definitions above for tools with no decision yet
+group <group id> covers the <k> new definitions above for tools with no decision yet and one definition waiting
 ```
 
 - **Each block** is separated by one blank line. With nothing waiting, the whole output is `pending: nothing waits for a decision`.
-- **`<definition>`** is the stored copy rendered with `json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True)`. Every character outside ASCII therefore appears as an escape, so hidden or look-alike characters are visible. The stored copy has no `_meta`, so none is shown.
+- **`<definition>`** is the stored copy rendered with `json.dumps(obj, indent=2, sort_keys=True, ensure_ascii=True)`, with DEL (0x7f), which `ensure_ascii` leaves as it is, written as `\u007f` too. Every character outside printable ASCII therefore appears as an escape, so hidden or look-alike characters are visible. The stored copy has no `_meta`, so none is shown.
+- **Text from the ledger is escaped.** Every other string `pending` takes from the ledger and prints (the problem on an `unservable` line, the operating system's message in a stored-copy problem, and the upstream, tool and hash names, which a hand-edited ledger could fill with anything) goes through one function that writes every character outside printable ASCII (0x20 to 0x7e) as `\xNN` below 0x100 and as `\uNNNN` above, one escape per UTF-16 code unit for characters past U+FFFF. A backslash is printed as it is. So a ledger can't send terminal escapes or invisible characters to the person's terminal.
 - **What is listed for each tool:** every hash its `tool.seen` and `tool.drift` records name since its latest decision, one block each. With no decision, each is a `new` block; after a rejection, a `new ..., after rejecting` block; after an approval, a `changed` block. A tool seen with several definitions since its latest decision therefore has several blocks.
 - **A copy that fails its check** is listed in place of the definition as one line, `stored copy defs/<def_hash>.json <problem>; it cannot be approved`, naming the file under `ledger_dir`, and its block doesn't count toward the group.
 - **Unservable blocks** list the `tool.unservable` records since each tool's latest decision, once per hash and problem. A stored-copy problem is checked again: a copy that now passes is left out, and one that still fails is shown with its file, `unservable <prefix>__<tool> <def_hash>: stored copy defs/<def_hash>.json <problem>`.
 - **Only tools with no decision at all are grouped.** A tool with any earlier approval or rejection is left out of the group line and the group id. That covers its `changed` blocks, and its `new ..., after rejecting` blocks, which print `not in a group, because this tool has a decision; approve it by name` on the line after the header (decided, question 2, and the owner's decision on group approval).
-- **The group line** appears when `<k>` is at least 1. `<k>` counts the `new` blocks of tools with no decision whose definitions were printed. A group approves them in listing order, so for a tool with several, the most recently seen one becomes its latest decision.
+- **A tool with more than one definition waiting is not grouped either.** When a tool with no decision has more than one hash observed since its latest decision (so more than one `new` block), all of its blocks are left out of the group line and the group id. Each prints as before, with `more than one definition waits for this tool; approve one by name` on the line after the header, in the place where a decided tool's blocks print their line. The person picks one by name. Approving it gives the tool a decision, which ends the others' blocks; if serve lists one of them again, it is recorded as drift and shows as a `changed` block. A group can therefore never pick between two definitions of one tool on the person's behalf (stage 4 review).
+- **The group line** appears when `<k>` is at least 1. `<k>` counts the `new` blocks of tools with no decision and exactly one definition waiting, whose definitions were printed. A group approves them in listing order.
 - **The group id** is `hex(sha256(b"POLARIZER-GROUP/1\n" + rfc8785.dumps(sorted list of [prefix, tool, def_hash])))` over those blocks.
 - **Exit 0** whenever the ledger is intact, whatever is waiting.
 
@@ -313,12 +323,12 @@ group <group id> covers the <k> new definitions above for tools with no decision
 6. if the latest decision already approves this hash with no drift since, prints `already approved: <prefix>__<tool> <def_hash>`, writes nothing, and exits 0;
 7. otherwise prints the definition, appends `tool.approved` (`group` null, fsynced, `ledger.head` updated), prints `approved <prefix>__<tool> <def_hash> at seq <q>`, and exits 0.
 
-**A group.** The command checks the location and opens the ledger as above. It then recomputes the definitions `pending` would group (new blocks of tools with no decision, whose stored copies pass), with the same `--upstream` filter, and their group id.
+**A group.** The command checks the location and opens the ledger as above. It then recomputes the definitions `pending` would group (new blocks of tools with no decision and one definition waiting, whose stored copies pass), with the same `--upstream` filter, and their group id.
 - **A different id**, or nothing pending, refuses with `polarizer: group <id> does not match what is pending now; run polarizer pending again`. Nothing is written.
 - **A match** appends one `tool.approved` per definition, in the listing's order, each fsynced, each with `group` set to the id, and prints `approved <prefix>__<tool> <def_hash> at seq <q>` for each. A final line follows: `approved <k> definitions as group <id>`. Exit 0.
 - **If the writer fails partway,** the lines already printed stand, and stderr gets `polarizer: could not record an approval: <why>; <j> of <k> were approved`. The exit code is the writer error's own (1 for a stopped writer). Each approval is complete on its own, and the rest stay pending.
 
-A group is bound to exactly the definitions `pending` printed. Any change between the two commands (a new tool, a changed definition, another person's decision) changes the id, and nothing is approved. A tool that has ever had a decision is never in a group, so a group can never approve a changed definition or overturn a rejection.
+A group is bound to exactly the definitions `pending` printed. Any change between the two commands (a new tool, a changed definition, another person's decision) changes the id, and nothing is approved. A tool that has ever had a decision is never in a group, so a group can never approve a changed definition or overturn a rejection. Nor is a tool with two definitions waiting, so a second definition seen between the two commands takes the tool out of the group and changes the id.
 
 ### `polarizer reject`
 
@@ -345,6 +355,7 @@ Every row gets a file under `tests/golden/`, run on a ledger built by a determin
 | `pending`, nothing waiting | `pending_nothing.txt` | 0 |
 | `pending`, two new, one after a rejection, one changed, one unservable, one bad stored copy; the group line counts only the two new definitions of never-decided tools, and the after-rejection block says to approve it by name | `pending_mixed.txt` | 0 |
 | `pending --upstream probe` | `pending_one_upstream.txt` | 0 |
+| `pending`, one tool with two definitions waiting and one with one; the group covers only the second, and each block of the first says to approve one by name | `pending_several_waiting.txt` | 0 |
 | `pending` on each non-intact status (tampered, invalid, torn tail, truncated) | `pending_<status>.txt` | that status's code |
 | `pending`, locked; no ledger | `pending_locked.txt`, `pending_no_ledger.txt` | 7, 2 |
 | `approve` one definition | `approve_one.txt` | 0 |
@@ -451,6 +462,8 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 | `test_meta_not_hashed_not_served` | A change to `_meta` alone changes neither the hash nor the stored copy, and doesn't hide the tool; the served copy has no `_meta`. | Default |
 | `test_snake_case_input_schema_fails_listing` | An upstream that sends `input_schema` fails to connect, and on a later refresh records `upstream.refresh_failed`. | Default |
 | `test_unhashable_definition_hidden` | A schema with `"maximum": 9223372036854775807` makes the tool hidden, records `tool.unservable` with `def_hash` null, and `approve` can't approve it. | Default |
+| `test_unhashable_message_is_fixed` | Each of the four reasons comes from its exception type. A definition whose values hold an ESC character and 5,000 characters of text, and which fails to hash, leaves none of that text in the ledger or in `pending`'s output. | Default |
+| `test_oversized_definition_unservable` | A definition whose canonical bytes pass 262144 is not stored, records one `tool.unservable` with its hash and `definition larger than 262144 bytes`, stays hidden however often it is listed, and can't be approved. | Default |
 
 ### `tests/test_pins.py` (in-memory gateway unless noted)
 
@@ -480,6 +493,8 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 |---|---|---|
 | `test_golden.py` (new rows) | Every row of the golden table in section 7. | Default |
 | `test_group_is_bound_to_what_was_printed` | A new or changed definition between `pending` and `approve --group` refuses the group and writes nothing. A tool with any earlier approval or rejection is never in a group. | Default |
+| `test_group_skips_tools_with_several_waiting_hashes` | A tool with no decision and two definitions waiting is left out of the group line and the group id; each of its blocks says to approve one by name; approving one by name gives it a decision. | Default |
+| `test_pending_escapes_problem_text` | Control characters, DEL and non-ASCII text in a ledger's problem, stored-copy message and names print as `\xNN` and `\uNNNN` escapes, and a definition's DEL prints as `\u007f`. | Default |
 | `test_approve_needs_terminal` | `approve`, `approve --group` and `reject` with stdin not a terminal refuse with the one line, exit 2, and write nothing; with `--allow-no-terminal` they run. On POSIX, `approve` run on a pseudo-terminal runs without the flag. | Default; the pseudo-terminal case POSIX: Windows has no `pty` module |
 | `test_approve_only_what_serve_saw` | A hash never seen for that tool is refused, even if its stored copy exists. | Default |
 | `test_approve_updates_head` | After `approve`, `ledger.head` names the approval's seq. | Default |
@@ -615,3 +630,7 @@ The owner answered the spec round's fourteen open questions on Oct 3, 2026. Each
 31. **Sticky drift and the cap move to stage 4,** because they are part of the fold (the changed state) and of section 3's recording rules, which stage 4 builds. Stage 5 keeps the notices.
 32. **The reference test and `test_prime_with_closed_stdin` move to stage 4** (owner's decisions); the live check's priming stays in stage 5.
 33. **Usage lines for the pin commands,** the `no ledger` refusal of `approve` and `reject` on stderr, and the count in serve's `tools wait for approval` line (pending and changed tools) are this spec's choice (section 7).
+34. **Fixed reasons for a definition that can't be hashed** (stage 4 review). The problem after `cannot be hashed:` was the exception's one-line message, which can quote the upstream's definition (pydantic's messages quote their input). It is now one of four fixed texts chosen by exception type (section 2).
+35. **A size cap on one definition** (stage 4 review): 262144 bytes of canonical form. Nothing limited it before; a larger definition is unservable, unstored and unapprovable (section 2).
+36. **`pending` escapes what it prints from the ledger** (stage 4 review): free text and names, through one function, and DEL in definitions (section 7).
+37. **A tool with more than one definition waiting is left out of the group** (stage 4 review). Stage 4 grouped all of them and let the most recently seen become the decision, which picked a definition for the person (section 7).
