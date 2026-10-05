@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 import pytest
-from conftest import build_chain, install_fixture
+from conftest import build_chain, install_fixture, mask_paths
 
 from polarizer import cli, sidefiles
 from polarizer.ledger import LOCK
@@ -111,7 +111,7 @@ REPAIR = {
 
 
 def check(case, out, code, want_code, tmp_path):
-    text = out.replace(str(tmp_path / "ledger"), "<dir>")
+    text = mask_paths(out, dir=tmp_path / "ledger")
     path = GOLDEN / f"{case}.txt"
     if os.environ.get("POLARIZER_UPDATE_GOLDEN"):
         path.write_text(text, encoding="utf-8", newline="\n")

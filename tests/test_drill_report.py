@@ -335,7 +335,7 @@ def test_export_refusals(tmp_path, capsys):
     code, out, err = report(directory, capsys, "--export", str(existing))
     assert code == 2 and out == "" and existing.read_text() == "mine\n"
     assert err == f"polarizer: {existing} already exists; nothing was written\n"
-    check_golden("drill_export_refused_existing.txt", err.replace(str(tmp_path), "<dir>"))
+    check_golden("drill_export_refused_existing.txt", err, tmp_path)
     empty = install_fixture("valid/minimal", tmp_path / "empty")
     target = tmp_path / "none.json"
     code, out, err = report(empty, capsys, "--export", str(target))

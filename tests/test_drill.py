@@ -16,7 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-from conftest import ROOT, build_chain, install_fixture
+from conftest import ROOT, build_chain, install_fixture, mask_paths
 from helpers import drillkit as dk
 from helpers import holdledger as hl
 from helpers.ptyread import finish, read_some
@@ -37,9 +37,11 @@ KINDS = {
 }  # fmt: skip
 
 
-def check_golden(name: str, text: str, directory: Path | None = None) -> None:
-    if directory is not None:
-        text = text.replace(str(directory), "<dir>")
+def check_golden(
+    name: str, text: str, directory: Path | None = None, home: Path | None = None
+) -> None:
+    places = {"dir": directory, "home": home}
+    text = mask_paths(text, **{k: v for k, v in places.items() if v is not None})
     path = GOLDEN / name
     if os.environ.get("POLARIZER_UPDATE_GOLDEN"):
         path.write_text(text, encoding="utf-8", newline="\n")
@@ -597,7 +599,7 @@ def test_drill_refuses_forbidden_dir(monkeypatch, tmp_path, fake_home, capsys):
     code, _ = dk.run(monkeypatch, forbidden, [""])
     err = capsys.readouterr().err
     assert code == 2
-    check_golden("drill_refused_forbidden_dir.txt", err.replace(str(fake_home), "<home>"))
+    check_golden("drill_refused_forbidden_dir.txt", err, home=fake_home)
     assert not forbidden.exists()
     tree = tmp_path / "work"
     (tree / ".git").mkdir(parents=True)
@@ -863,7 +865,7 @@ def test_drill_golden(monkeypatch, tmp_path):
     earlier_drill(monkeypatch, directory)
     code, console = golden_drill(monkeypatch, directory)
     assert code == 0
-    intro = console.text(0).replace(str(directory), "<dir>")
+    intro = mask_paths(console.text(0), dir=directory)
     assert intro == SPEC_INTRO
     check_golden("drill_intro_plain.txt", intro)
     call3 = console.text(5)
@@ -897,7 +899,7 @@ def test_drill_golden(monkeypatch, tmp_path):
     code, console = golden_drill(monkeypatch, directory, "--condition", "prediction-gate",
                                  prediction="adds a section")  # fmt: skip
     assert code == 0
-    intro = console.text(0).replace(str(directory), "<dir>")
+    intro = mask_paths(console.text(0), dir=directory)
     assert intro == SPEC_INTRO.replace(
         "This drill: plain. Type q at any prompt to stop.",
         "This drill: prediction first. Before each call, type in a few words what you\n"
@@ -928,7 +930,7 @@ def test_drill_golden(monkeypatch, tmp_path):
     directory = tmp_path / "first"
     code, console = dk.run(monkeypatch, directory, ["q"], "--seed", dk.GOLDEN_SEED)
     assert code == 0
-    intro = console.text(0).replace(str(directory), "<dir>")
+    intro = mask_paths(console.text(0), dir=directory)
     assert intro == SPEC_INTRO.replace(
         "\nThis drill: plain. Type q at any prompt to stop.\nPress Enter to start.",
         SPEC_FIRST_TAIL,
@@ -941,7 +943,7 @@ def test_drill_golden(monkeypatch, tmp_path):
     code, console = dk.run(monkeypatch, directory, ["", "a", "", "d", "", "a", "q"], "--seed",
                            GUIDED_SEED, "--calls", "10", "--condition", "guided")  # fmt: skip
     assert code == 0
-    intro = console.text(0).replace(str(directory), "<dir>")
+    intro = mask_paths(console.text(0), dir=directory)
     assert intro == SPEC_INTRO.replace("20 held calls", "10 held calls").replace(
         "deny. Between 6 and 10 of the 20 calls are planted: they differ from the\n"
         "task in a way that should be denied. The number changes from drill to drill,\n"

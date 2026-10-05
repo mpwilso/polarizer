@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +32,18 @@ def install_fixture(name, ledger_dir):
     if head is not None:
         (ledger_dir / "ledger.head").write_bytes(head.read_bytes())
     return ledger_dir
+
+
+def mask_paths(text, **places):
+    """text with each real path replaced by its placeholder (dir=path gives <dir>), and the
+    separators in what follows a placeholder written as "/", so a golden file compares the same
+    on every OS. The program prints native paths; only the copy the test compares is changed."""
+    if not places:
+        return text
+    for name, path in sorted(places.items(), key=lambda item: -len(str(item[1]))):
+        text = text.replace(str(path), f"<{name}>")
+    names = "|".join(places)
+    return re.sub(rf"<(?:{names})>\S*", lambda m: m.group(0).replace(os.sep, "/"), text)
 
 
 @pytest.fixture

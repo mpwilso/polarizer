@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import install_fixture
+from conftest import install_fixture, mask_paths
 from helpers import pinledger
 from test_verify_readonly import listing
 
@@ -284,7 +284,7 @@ def test_pin_commands_subprocess(tmp_path, fake_home):
         capture_output=True, stdin=subprocess.DEVNULL,
     )  # fmt: skip
     assert done.returncode == 0, done.stderr
-    assert done.stdout.replace(str(directory).encode(), b"<dir>") == (
+    assert mask_paths(done.stdout.decode("utf-8"), dir=directory).encode("utf-8") == (
         (GOLDEN / "approve_one.txt").read_bytes()
     )
 

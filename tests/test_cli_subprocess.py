@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import install_fixture
+from conftest import install_fixture, mask_paths
 
 GOLDEN = Path(__file__).parent / "golden"
 
@@ -48,7 +48,7 @@ def test_raw_stdout_matches_golden(tmp_path, name, fixture, golden, code):
     done = run("verify", "--ledger-dir", str(directory))
     assert done.returncode == code, done.stderr
     assert done.stderr == b""
-    out = done.stdout.replace(str(directory).encode("utf-8"), b"<dir>")
+    out = mask_paths(done.stdout.decode("utf-8"), dir=directory).encode("utf-8")
     assert b"\r" not in done.stdout
     assert out == (GOLDEN / f"{golden}.txt").read_bytes()
 
