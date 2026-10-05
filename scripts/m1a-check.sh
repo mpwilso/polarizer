@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Superseded by scripts/rugpull-check.sh, which docs/MANUAL-CHECK.md's M1a section now runs.
+# Superseded by scripts/rugpull-check.sh, which docs/dev/MANUAL-CHECK.md's M1a section now runs.
 # Kept for the record: the owner ran it interactively on 2026-10-04 (docs/verified-facts.md,
 # M1a check, interactive), skipping its rugpull step.
 #
-# The M1a manual check (formerly docs/MANUAL-CHECK.md, M1a) as one script, run from a second
+# The M1a manual check (formerly docs/dev/MANUAL-CHECK.md, M1a) as one script, run from a second
 # terminal while Claude Code runs in terminal A. Only starting Claude Code and looking at /mcp
 # are left to the person.
 #

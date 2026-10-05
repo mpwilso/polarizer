@@ -2,9 +2,9 @@
 
 A local proxy between an AI agent and its MCP servers. It holds risky calls for a person, lets routine work through, keeps a verifiable ledger, and measures whether the person's approvals still catch anything.
 
-Read these first, in this order: CLAUDE.md, docs/m0-plan.md, docs/LEDGER-SPEC.md, docs/PROXY-SPEC.md, docs/PIN-SPEC.md, docs/HOLD-SPEC.md, docs/milestones.md, docs/verified-facts.md, docs/STAGE1-NOTES.md, docs/STAGE2-NOTES.md, docs/STAGE3-NOTES.md, docs/STAGE4-NOTES.md, docs/STAGE5-NOTES.md, docs/STAGE6-NOTES.md, docs/STAGE7-NOTES.md, then docs/PLAN.md if it exists. docs/MANUAL-CHECK.md and docs/QUICKSTART-DRAFT.md are for the owner and for readers; read them when the task touches them.
+Read these first, in this order: CLAUDE.md, docs/dev/m0-plan.md, docs/LEDGER-SPEC.md, docs/PROXY-SPEC.md, docs/PIN-SPEC.md, docs/HOLD-SPEC.md, docs/milestones.md, docs/verified-facts.md, docs/dev/STAGE1-NOTES.md, docs/dev/STAGE2-NOTES.md, docs/dev/STAGE3-NOTES.md, docs/dev/STAGE4-NOTES.md, docs/dev/STAGE5-NOTES.md, docs/dev/STAGE6-NOTES.md, docs/dev/STAGE7-NOTES.md, then docs/PLAN.md if it exists. docs/dev/MANUAL-CHECK.md is for the owner, and README.md is for readers (it replaces docs/dev/QUICKSTART-DRAFT.md); read them when the task touches them. docs/dev/README.md says what the build log in docs/dev/ holds.
 
-docs/PLAN.md is background only. Draft 5 is deferred until after M0 is done. Where PLAN.md differs from m0-plan.md, LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md or milestones.md, those win. The "Corrections to PLAN.md" list in m0-plan.md stays until draft 5.
+docs/PLAN.md is background only. Draft 5 is deferred until after M0 is done. Where PLAN.md differs from docs/dev/m0-plan.md, LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md or milestones.md, those win. The "Corrections to PLAN.md" list in docs/dev/m0-plan.md stays until draft 5.
 
 ## Standing rules (never break these, even if asked mid-task; stop and flag instead)
 
@@ -35,13 +35,13 @@ Enforcement: run `scripts/guard.sh snapshot` at the start of a session and `scri
   - A search by name on Oct 2, 2026 found no Loupe or ISR directories under ~/.local/share, ~/.config or ~/.cache. Add any that appear later to the guard.
 - **Settings change, Oct 2, 2026, 20:21:58 UTC:** ~/.claude/settings.json grew from 433 to 3270 bytes between turns, when the user ran /auto-mode-setup. The user made that change; no session wrote it. It matters because user-scope settings apply to every claude run, including scripts/live-check.sh, so a live-check result depends on them. Never open the file; the guard compares it by metadata only. A new baseline snapshot was taken after the change.
 - **Root .mcp.json:** `check` prints a warning line and exits non-zero if ~/code/polarizer/.mcp.json exists (rule 13).
-- **Docs integrity check:** run `uv run python scripts/check_docs.py` (scripts/test.sh runs it too, so CI does). It checks docs/*.md and CLAUDE.md for repeated paragraphs and lines, lines that end mid-sentence, table column counts, duplicate headings, a missing final newline, and any character outside printable ASCII except the micro sign, and exits non-zero on a finding. Run the script; don't retype the checks by hand.
+- **Docs integrity check:** run `uv run python scripts/check_docs.py` (scripts/test.sh runs it too, so CI does). It checks CLAUDE.md, the Markdown files at the repo root, docs/*.md and docs/dev/*.md for repeated paragraphs and lines, lines that end mid-sentence, table column counts, duplicate headings, a missing final newline, and any character outside printable ASCII except the micro sign, and exits non-zero on a finding. Run the script; don't retype the checks by hand.
 - **Old snapshots** are never deleted. `check` reads the older line-by-line format too, by summarizing it the same way.
 - **Not guarded:** the Windows-side Parallax clone on the Windows drive (the origin of parallax-backup-before-rewrite). It isn't under ~/code, and /mnt/c isn't mounted in this WSL distro, so the guard can't see it. Don't touch it.
 
 ## Clean room
 
-Nothing from mcpclerk's code goes in this repo: no code, text or structure copied, pasted or quoted. Its ideas are credited by name only, in the README and docs/m0-plan.md:
+Nothing from mcpclerk's code goes in this repo: no code, text or structure copied, pasted or quoted. Its ideas are credited by name only, in the README and docs/dev/m0-plan.md:
 - the run-end entry that records how many entries the run wrote;
 - tools hidden from the list are still refused and recorded when called by name;
 - an approve-everything switch that exists only as a command-line flag, never in the policy file.

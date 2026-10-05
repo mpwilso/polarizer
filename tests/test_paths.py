@@ -135,7 +135,7 @@ def test_link_targets_decide_with_an_injected_resolver(root, tmp_path):
     """The verdict follows the resolved path, not the path as given: through stand-in links, a
     write escapes the root, lands in .git/hooks or in the ledger directory, stays inside, or
     meets a loop. Runs on every platform, so these path rules are tested where os.symlink is
-    refused too (docs/STAGE7-NOTES.md, the Windows skip audit)."""
+    refused too (docs/dev/STAGE7-NOTES.md, the Windows skip audit)."""
     outside, ledger = os.path.realpath(tmp_path / "outside"), os.path.realpath(tmp_path / "ld")
     r = p(root)
     table = {

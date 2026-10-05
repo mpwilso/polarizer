@@ -1,0 +1,15 @@
+# The build log
+
+These files are the record of how Polarizer was built, kept as they were written. They are not user documentation: start with README.md at the repo root, and the specs in docs/. Where a file here disagrees with a spec in docs/ (LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md) or with docs/verified-facts.md, those win.
+
+The work went in stages: a spec round for each milestone, then implementation stages, each with tests written first, a claims table (what was claimed, the command that checks it, and whether it was run), and a review before the next stage. "The owner" in these files is the project's author, who ran the interactive checks.
+
+- **m0-plan.md:** the plan for M0, the proxy and the ledger, with its build order, test methods and claims table, and the list of corrections to an earlier draft plan. Its M1a appendix is superseded by docs/PIN-SPEC.md.
+- **STAGE1-NOTES.md to STAGE3-NOTES.md:** M0. Stage 1 is the ledger, its verifiers and the conformance fixtures; stage 2 the proxy; stage 3 result fidelity, the reference servers and the headless live check.
+- **STAGE4-NOTES.md and STAGE5-NOTES.md:** M1a, pins at rest and in motion, shutdown, upstream text safety, and the rug-pull check.
+- **STAGE6-NOTES.md and STAGE7-NOTES.md:** M2a, classes, path rules and holds, then session lifetime, progress and `holds --wait`, and the CI follow-ups for Windows and macOS.
+- **MANUAL-CHECK.md:** the interactive checks the owner ran with Claude Code, for M0, M1a and M2a. Their results are in docs/verified-facts.md.
+- **QUICKSTART-DRAFT.md:** the draft that README.md replaced.
+- **PUSHING.md:** the owner's steps for the first push to GitHub and reading CI.
+
+File names written without a directory in these files (such as HOLD-SPEC.md) mean the file in docs/ or here, whichever has it.

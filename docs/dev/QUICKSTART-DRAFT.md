@@ -1,5 +1,7 @@
 # Quickstart (draft)
 
+Superseded by README.md at the repo root, which replaced this draft for v0.1. Kept as part of the build log.
+
 This is a draft for a future README. It describes Polarizer 0.1 at milestone M2a (pins, classes and holds). It is not published, and Polarizer is not on PyPI. M0, the pass-through that exposed every tool as soon as it connected, is the code at commit 4eaa61a; no flag brings that behavior back.
 
 ## What it is

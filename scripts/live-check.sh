@@ -6,7 +6,7 @@
 # Polarizer. Claude Code's own limit (MCP_TOOL_TIMEOUT=5000) cancels a 14 s wait call. It
 # passes only if the probe's log shows notifications/cancelled within 2 s of Claude Code's
 # cancel and the ledger has a call.returned with outcome cancelled for that call; otherwise it
-# exits 1 and names the failed check (docs/m0-plan.md, build step 7).
+# exits 1 and names the failed check (docs/dev/m0-plan.md, build step 7).
 #
 # Before Claude Code runs, it primes the temp ledger (live_check.py prime: a serve run with stdin
 # closed, then the group approval, with no model), because from M1a no tool is exposed until a

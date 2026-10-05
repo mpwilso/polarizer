@@ -1,6 +1,6 @@
 # Verified facts for Polarizer
 
-Checked on Oct 2, 2026, on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2, ext4, system Python 3.12.3). Each fact says how it was checked. "Headless" means it was observed only through `claude -p`, never in an interactive Claude Code session. "Binary" means it was read from strings in the Claude Code executable, not observed. Anything not listed here is unverified.
+Checked on Oct 2, 2026, on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2, ext4, system Python 3.12.3). Each fact says how it was checked. "Headless" means it was observed only through `claude -p`, never in an interactive Claude Code session. "Binary" means it was read from strings in the Claude Code executable, not observed. Anything not listed here is unverified. "The owner" is the project's author, who ran the interactive checks; "this session" or "a development session" is a Claude Code session that built Polarizer.
 
 ## Claude Code
 
@@ -177,7 +177,7 @@ Both tags are lightweight tags that point directly at those commits. The workflo
 
 - PyPI: `polarizer`, `polarizer-mcp` and `mcp-polarizer` all return 404.
 - npm: `polarizer` returns 404.
-- GitHub: `mpwilso/polarizer` does not exist. `github.com/polarizer` is an existing user account with no public repos. About 13 repos named `polarizer` exist, none MCP or AI related.
+- GitHub: `mpwilso/polarizer` did not exist yet (this repository was created later). `github.com/polarizer` is an existing user account with no public repos. About 13 repos named `polarizer` exist, none MCP or AI related.
 
 ## mcpclerk: ideas credited, nothing else used
 
@@ -441,7 +441,7 @@ Run with `POLARIZER_REFERENCE=1 uv run --locked pytest tests/test_reference.py`,
 
 ### Esc during a long call (interactive, Claude Code 2.1.288)
 
-Verified by the owner in an interactive session, following docs/MANUAL-CHECK.md step 5. Claude Code 2.1.288 negotiated 2026-07-28 with Polarizer; the probe was the upstream, at 2025-11-25. Claude called `probe__wait` with 30 s, and the owner pressed Esc during the call. No wiretap was in place, so nothing recorded what Claude Code itself sent to Polarizer.
+Verified by the owner in an interactive session, following docs/dev/MANUAL-CHECK.md step 5. Claude Code 2.1.288 negotiated 2026-07-28 with Polarizer; the probe was the upstream, at 2025-11-25. Claude called `probe__wait` with 30 s, and the owner pressed Esc during the call. No wiretap was in place, so nothing recorded what Claude Code itself sent to Polarizer.
 
 Probe log (`/tmp/polarizer-probe.log`), Unix seconds:
 
@@ -455,7 +455,7 @@ Ledger (`~/.local/share/polarizer/ledger.jsonl`), abridged:
     seq 22 call.returned  ts 2026-10-03T14:04:34.791Z  call_seq 21, outcome cancelled, latency_ms 7730,
                                                        error "the client cancelled the call", result_bytes 0
 
-Claude Code's own log for the server (`~/.cache/claude-cli-nodejs/-home-matt-code-polarizer/mcp-logs-polarizer/2026-10-03T14-03-26-955Z.jsonl`), abridged:
+Claude Code's own log for the server (`~/.cache/claude-cli-nodejs/-home-<you>-code-polarizer/mcp-logs-polarizer/2026-10-03T14-03-26-955Z.jsonl`), abridged:
 
     14:04:28.160Z  Calling MCP tool: probe__wait
     14:04:34.791Z  Sending SIGINT to MCP server process
@@ -588,7 +588,7 @@ Checked while fixing the stage 4 review items, on mcp 2.2.0, mcp-types 2.2.0, py
 - **pydantic's messages quote their input** (executed): a tool whose `inputSchema` has `"type"` set to an ESC and 5,000 characters fails the 2026-07-28 result model with a `ValidationError` whose message holds a cut-down part of that text, with the ESC shown as `\x1b`. Such a tool can't reach the hash through an upstream: the 2025-11-25 result model, which the SDK client checks first on older-era connections, also requires `"type": "object"`.
 - **A NaN in a schema** (executed): `model_dump(mode="json")` writes it as `null`, so the definition hashes, with `null` in its place.
 - **Nothing limits one definition's size** (read): `mcp/client/stdio.py` splits stdout into lines with no length limit, and Polarizer's only listing limits are 100 pages and 1,000 tools.
-- **The reference servers, offline.** `npx --offline -y <package>@2026.8.31 ...` ran both pinned servers from npx's cache; `--offline` makes npm refuse any registry request, and a version not in the cache failed with `notarget`. The two reference tests ran through a scratch `npx` script that adds `--offline` (STAGE4-NOTES.md, Review fixes). Nothing new was fetched or pinned.
+- **The reference servers, offline.** `npx --offline -y <package>@2026.8.31 ...` ran both pinned servers from npx's cache; `--offline` makes npm refuse any registry request, and a version not in the cache failed with `notarget`. The two reference tests ran through a scratch `npx` script that adds `--offline` (dev/STAGE4-NOTES.md, Review fixes). Nothing new was fetched or pinned.
 
 ## Stage 5 (Oct 4, 2026, UTC)
 
@@ -608,16 +608,16 @@ Checked while making upstream text safe and looking at upstream processes at shu
 - **An upstream writes its stderr to serve's** (read, then seen): `stdio_client`'s `errlog` defaults to `sys.stderr`, and `Client` passes none. Seen as a probe that ignored end of input for 60 s keeping serve's captured stderr open: `subprocess.run(..., capture_output=True)` returned after 60.7 s, though serve had exited.
 - **A lone surrogate escape makes the SDK refuse the whole line** (executed): a JSON-RPC error whose message holds the JSON escape for U+D800 fails `jsonrpc_message_adapter.validate_json` with `Invalid JSON: unexpected end of hex escape`. The SDK logs that with `logger.exception("Failed to parse JSONRPC message from server")` (`mcp/client/stdio.py`, around line 223). With no logging set up, Python's last-resort handler prints it with a traceback, and pydantic's message quotes the line, cut down, with escapes shown as `\x1b`, over several lines.
 - **pydantic's error type for a string `inputSchema` over stdio is `model_type`** (executed, through `polarizer serve`), and `dict_type` when `ListToolsResult.model_validate` is called on a dict directly.
-- **Probes left running by `test_signal_during_startup`** (seen): 22 probe processes started 01:05 to 01:42 UTC, about 86 s apart, each with `PROBE_DELAY=5` and a `test_signal_during_startup0` log path, each with one thread waiting. Each had read `server/discover` from its stdin after serve had exited, failed to answer, and lost its reader thread to `BrokenPipeError`. This session's runs added two, stopped by their pids; the 22 were left for the owner (STAGE5-NOTES.md, Follow-up).
+- **Probes left running by `test_signal_during_startup`** (seen): 22 probe processes started 01:05 to 01:42 UTC, about 86 s apart, each with `PROBE_DELAY=5` and a `test_signal_during_startup0` log path, each with one thread waiting. Each had read `server/discover` from its stdin after serve had exited, failed to answer, and lost its reader thread to `BrokenPipeError`. This session's runs added two, stopped by their pids; the 22 were left for the owner (dev/STAGE5-NOTES.md, Follow-up).
 
 ## M1a check, interactive (Oct 4, 2026, observed by the owner)
 
-Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/m1a-check.sh` (docs/MANUAL-CHECK.md's M1a section at the time). These are the owner's results, from that script's results file; no development session saw the run.
+Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/m1a-check.sh` (docs/dev/MANUAL-CHECK.md's M1a section at the time). These are the owner's results, from that script's results file; no development session saw the run.
 
 - **Approving the first run's group while a session was open** (`approve`): the answer was `y`. `/mcp` showed the tools without a reconnect.
 - **Approving the changed definition while a session was open** (`approve-changed`): the answer was `y`. `/mcp` listed `probe__wait` again without a reconnect.
 - **The ledger** (`finish`): 53 entries, verified intact.
-- **The `rugpull` step** of `m1a-check.sh` was skipped, so that run recorded nothing about `/mcp` after the rug pull or about what Claude said when asked to call `probe__wait`. `scripts/rugpull-check.sh` now checks the rug pull headless (docs/MANUAL-CHECK.md, M1a).
+- **The `rugpull` step** of `m1a-check.sh` was skipped, so that run recorded nothing about `/mcp` after the rug pull or about what Claude said when asked to call `probe__wait`. `scripts/rugpull-check.sh` now checks the rug pull headless (docs/dev/MANUAL-CHECK.md, M1a).
 
 So for Claude Code 2.1.289, interactive Claude Code lists the tools again after Polarizer's change notice, without a reconnect, for both a first approval and an approval of a changed definition (PIN-SPEC.md, decision 9).
 
@@ -674,7 +674,7 @@ Checked while building M2a's lifetime, progress and visibility, on Python 3.12.3
 
 ## M2a check, interactive (Oct 5, 2026, UTC, observed by the owner)
 
-Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/hold-check.sh` (docs/MANUAL-CHECK.md, M2a) at commit c986088, from two plain terminals, between 00:28:57Z and 00:51:15Z. These are the owner's results, from the script's results file (`/tmp/hold-check-results.txt`), the check's ledger (`~/.local/share/polarizer-m2a-check`) and the owner's own account; no development session saw the run. The ledger's entries were read afterwards, read-only, to confirm the sequence numbers and times below.
+Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/hold-check.sh` (docs/dev/MANUAL-CHECK.md, M2a) at commit c986088, from two plain terminals, between 00:28:57Z and 00:51:15Z. These are the owner's results, from the script's results file (`/tmp/hold-check-results.txt`), the check's ledger (`~/.local/share/polarizer-m2a-check`) and the owner's own account; no development session saw the run. The ledger's entries were read afterwards, read-only, to confirm the sequence numbers and times below.
 
 | Step | What happened | Ledger |
 |---|---|---|

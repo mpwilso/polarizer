@@ -177,7 +177,7 @@ def test_signal_during_startup(tmp_path):
     kinds = [json.loads(line)["kind"] for line in data.splitlines()]
     assert "session.started" in kinds and "upstream.connected" not in kinds
     # serve wrote server/discover before it stopped. After its delay the probe reads it, can't
-    # answer, and exits; before the probe's fix it hung there for good (STAGE5-NOTES.md).
+    # answer, and exits; before the probe's fix it hung there for good (docs/dev/STAGE5-NOTES.md).
     pid = int(re.search(r" start (\d+)", log.read_text(encoding="utf-8"))[1])
     try:
         wait_for(lambda: "stdout closed" in log.read_text(encoding="utf-8"))

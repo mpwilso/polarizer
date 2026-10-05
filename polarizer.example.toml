@@ -40,7 +40,7 @@ invalid = { class = "local-read" }
 change = { class = "local-read" }
 
 # The reference Filesystem server, pinned, confined to one directory. Pre-warm it once first
-# (docs/MANUAL-CHECK.md, step 1).
+# (docs/dev/MANUAL-CHECK.md, step 1).
 [upstream.fs]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/tmp/polarizer-manual"]

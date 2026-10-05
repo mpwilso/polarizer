@@ -2,7 +2,8 @@
 
     uv run python scripts/check_docs.py
 
-Checks docs/*.md and CLAUDE.md and prints a report per file: word count, line count and the
+Checks CLAUDE.md, the Markdown files at the repo root (README.md and the others), docs/*.md and
+docs/dev/*.md, and prints a report per file: word count, line count and the
 heading list. A finding makes it exit 1:
 - a repeated paragraph, or a repeated line of 40 or more characters outside code blocks and
   tables (a copy-paste or merge slip);
@@ -24,7 +25,9 @@ ENDINGS = tuple(".:;!?)`*>]\"'|")
 
 
 def files() -> list[Path]:
-    return [ROOT / "CLAUDE.md", *sorted((ROOT / "docs").glob("*.md"))]
+    root = [p for p in sorted(ROOT.glob("*.md")) if p.name != "CLAUDE.md"]
+    docs = [*sorted((ROOT / "docs").glob("*.md")), *sorted((ROOT / "docs" / "dev").glob("*.md"))]
+    return [ROOT / "CLAUDE.md", *root, *docs]
 
 
 def table_cells(line: str) -> int:

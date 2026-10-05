@@ -1,14 +1,14 @@
 # Stage 3 notes
 
-Read after docs/STAGE2-NOTES.md. This file records what stage 3 (checks and the manual check) decided on its own: the deviations, the guesses, the time bounds left in the tests, what could not be run, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
+Read after docs/dev/STAGE2-NOTES.md. This file records what stage 3 (checks and the manual check) decided on its own: the deviations, the guesses, the time bounds left in the tests, what could not be run, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
 
-Stage 3 added the result fidelity tests, the local reference-server tests, `scripts/live-check.sh` with its wiretap and checker, `docs/MANUAL-CHECK.md`, `docs/QUICKSTART-DRAFT.md`, and the example configs. It replaced the timing assertions in the stage 2 tests with event-based ones. It changed one behavior, with the owner's approval: an unreadable upstream result now gives a fixed line.
+Stage 3 added the result fidelity tests, the local reference-server tests, `scripts/live-check.sh` with its wiretap and checker, `docs/dev/MANUAL-CHECK.md`, `docs/dev/QUICKSTART-DRAFT.md`, and the example configs. It replaced the timing assertions in the stage 2 tests with event-based ones. It changed one behavior, with the owner's approval: an unreadable upstream result now gives a fixed line.
 
 ## What the fidelity checks found
 
 The owner was asked before anything was changed. Each difference below is pinned exactly by a test, so a new one fails.
 
-1. **Unknown fields are dropped** from results at every level. Cause: the SDK, whose models ignore extras. Documented as a stated limit (PROXY-SPEC.md, Results), as the stage 3 prompt asked.
+1. **Unknown fields are dropped** from results at every level. Cause: the SDK, whose models ignore extras. Documented as a stated limit (docs/PROXY-SPEC.md, Results), as the stage 3 prompt asked.
 2. **The 2026-07-28 envelope.** Results gain `resultType` and the serverInfo stamp on a 2026-07-28 client connection. A 2025-11-25 client behind a 2026-07-28 upstream gets that upstream's stamp. Cause: the SDK's server runner. The owner chose: document only.
 3. **Unreadable results.** A result the SDK can't parse became a `transport-error` whose line was pydantic's message, which quotes the result, into the client's view and the ledger. Cause: the SDK rejects the result, and Polarizer copied the message. The owner chose a fixed line, `polarizer: upstream <p> failed: result did not match the MCP schema`, with the outcome unchanged and no new kind or status. Fixed in `proxy.py`.
 4. **`isError: false` is added** when an upstream leaves it out (found with the reference servers). Cause: the SDK's model default.
@@ -18,7 +18,7 @@ Items 4 and 5 were found after the owner's decision on items 2 and 3. They have 
 
 ## Deviations
 
-1. **Quickstart name.** `docs/QUICKSTART-DRAFT.md`, as the stage 3 prompt says, not m0-plan.md's `docs/README-quickstart.md`. m0-plan.md now says so.
+1. **Quickstart name.** `docs/dev/QUICKSTART-DRAFT.md`, as the stage 3 prompt says, not m0-plan.md's `docs/README-quickstart.md`. m0-plan.md now says so.
 2. **The manual check's second upstream** is the pinned Filesystem server, as the prompt says, not the Everything server. m0-plan.md now says so. Everything stays pinned for the reference tests.
 3. **live-check.sh**:
    - It makes one 14 s call. m0-plan.md's "basic call with progress" is gone; progress through Claude Code was already observed in the round 2 spike.
@@ -79,7 +79,7 @@ The stage 2 proxy tests (guess 2), 20 times in a row on an idle machine, then 20
 ## Not run
 
 - **CI,** and therefore Windows and macOS, for everything stage 3 added or changed. Only Linux (WSL2, Python 3.12.3) ran it.
-- **An interactive Claude Code session.** docs/MANUAL-CHECK.md is for the owner. `/mcp` names, the hung upstream under Claude Code, and closing a session without pressing Esc during a call are still unverified. Esc to cancel was verified by the owner afterwards, on Oct 3, 2026 (verified-facts.md, Interactive).
+- **An interactive Claude Code session.** docs/dev/MANUAL-CHECK.md is for the owner. `/mcp` names, the hung upstream under Claude Code, and closing a session without pressing Esc during a call are still unverified. Esc to cancel was verified by the owner afterwards, on Oct 3, 2026 (docs/verified-facts.md, Interactive).
 - **live-check.sh more than once,** and on any platform but Linux. It runs only where bash and `.venv/bin/python` exist.
 - **The reference tests on Windows or macOS,** and in CI, by design.
 
@@ -110,8 +110,8 @@ While dry-running the live-check plumbing, one command began with `rm -rf "$S/dr
 | Everything and Filesystem through the proxy: same tools apart from `execution` (SDK clients) or identical (raw); same results apart from the stamp or `isError: false` | `POLARIZER_REFERENCE=1 uv run --locked pytest tests/test_reference.py` | yes, locally; skipped in CI |
 | The reference tests are skipped without `POLARIZER_REFERENCE=1` | `pytest tests/test_reference.py` | yes |
 | live-check's decision, on made-up logs, and its config files | `pytest tests/test_live_check.py` | yes |
-| End to end with Claude Code: Claude Code's timeout cancel reaches the upstream within 2 s, and the ledger records `cancelled` | `scripts/live-check.sh` | yes, once: passed, 1 ms, 0.0239 USD (verified-facts.md, Stage 3) |
+| End to end with Claude Code: Claude Code's timeout cancel reaches the upstream within 2 s, and the ledger records `cancelled` | `scripts/live-check.sh` | yes, once: passed, 1 ms, 0.0239 USD (docs/verified-facts.md, Stage 3) |
 | The example configs parse with Polarizer's own config reader | `polarizer verify --config <the example with /home/<you> replaced>` | yes: `no ledger at ...`, exit 2, no config error |
-| Esc during a call in an interactive session: the call stops, the probe gets a cancel, and the ledger records `cancelled` | docs/MANUAL-CHECK.md, step 5 | yes, once, by the owner, Oct 3, 2026: Claude Code 2.1.288 (verified-facts.md, Interactive) |
-| `/mcp` names, a hung upstream, and closing a session during a call, in an interactive session | docs/MANUAL-CHECK.md | `/mcp` names: yes, by the owner, Oct 3, 2026: all 20 shown in full (verified-facts.md, Manual check follow-up). The hung upstream and closing a session: no; for the owner |
+| Esc during a call in an interactive session: the call stops, the probe gets a cancel, and the ledger records `cancelled` | docs/dev/MANUAL-CHECK.md, step 5 | yes, once, by the owner, Oct 3, 2026: Claude Code 2.1.288 (docs/verified-facts.md, Interactive) |
+| `/mcp` names, a hung upstream, and closing a session during a call, in an interactive session | docs/dev/MANUAL-CHECK.md | `/mcp` names: yes, by the owner, Oct 3, 2026: all 20 shown in full (docs/verified-facts.md, Manual check follow-up). The hung upstream and closing a session: no; for the owner |
 | All of the above on Windows and macOS | CI | no |

@@ -49,7 +49,7 @@ A tool with no class is **unclassified** and held on every call (fail closed).
 
 ```toml
 ledger_dir = "~/.local/share/polarizer"
-ledger_forbidden_paths = ["~/code/parallax", "~/code/loupe", "~/code/isr"]
+ledger_forbidden_paths = ["~/code/project-a", "~/code/project-b"]
 
 # Optional. With no [policy] table, every default below applies.
 [policy]
@@ -613,8 +613,8 @@ Every row gets a file under `tests/golden/`, on a ledger built by a deterministi
 - **Stdio tests** (`test_stdout`, `test_fidelity`'s raw tests, `test_reference`, the shutdown tests) write configs through a helper that classifies the probe's seven tools, and the reference servers' tools as the example config does.
 - **`polarizer.example.toml`** gains a `[policy]` table with `workspace_roots = ["/tmp/polarizer-manual"]`, the probe's tools classified `local-read` (all seven are harmless test tools), and the Filesystem tools as in section 2. The manual check therefore holds `fs__write_file` outside the directory and `fs__move_file` always, which is what its M2a section exercises.
 - **`scripts/live-check.sh`, `scripts/rugpull-check.sh` and `scripts/m1a-check.sh`** generate or edit their tomls; each classifies the probe's `wait` (and the others) as `local-read`, so their pass criteria don't change. Their tests check the generated toml.
-- **docs/MANUAL-CHECK.md** gains an M2a section (stage 7): ask Claude to write a file under `.git/hooks` in the manual directory, run `polarizer holds --wait` in another terminal, read the hold, deny it; ask again and allow it; ask for a `move_file` and let it time out with `hold_timeout_seconds` set to 30; note what Claude Code showed each time and how long the call appeared to run. And the long wait in section 9.
-- **`--no-holds`** is documented in QUICKSTART-DRAFT.md as the way to run with nothing held, with the warning that it is recorded in the ledger at every start.
+- **docs/dev/MANUAL-CHECK.md** gains an M2a section (stage 7): ask Claude to write a file under `.git/hooks` in the manual directory, run `polarizer holds --wait` in another terminal, read the hold, deny it; ask again and allow it; ask for a `move_file` and let it time out with `hold_timeout_seconds` set to 30; note what Claude Code showed each time and how long the call appeared to run. And the long wait in section 9.
+- **`--no-holds`** is documented in dev/QUICKSTART-DRAFT.md as the way to run with nothing held, with the warning that it is recorded in the ledger at every start.
 
 ## 12. Canaries later (M6)
 
@@ -781,7 +781,7 @@ M2a stays **medium**, as milestones.md says: about one to two weeks, in two stag
 4. **`holds --wait` and `--bell`:** done when `test_holds_wait`, `test_holds_wait_bell` and `holds_wait_bell.txt` pass. Small.
 5. **Classes in `pending` and `approve`:** done when `test_pending_shows_classes` and the remaining golden rows pass. Small.
 6. **Reference check of the example config:** `test_example_config_matches_reference_servers`, run locally with `POLARIZER_REFERENCE=1`. Small.
-7. **Docs:** MANUAL-CHECK.md's M2a section, QUICKSTART-DRAFT.md's `--no-holds` and the threat model, STAGE6 and STAGE7 notes with claims tables. Small.
+7. **Docs:** dev/MANUAL-CHECK.md's M2a section, dev/QUICKSTART-DRAFT.md's `--no-holds` and the threat model, STAGE6 and STAGE7 notes with claims tables. Small.
 
 **Stop for review,** then the owner's manual check, including the long wait in section 9. The owner ran it on Oct 5, 2026 (section 17, The owner's M2a check).
 
@@ -853,7 +853,7 @@ After stage 6, the owner's review of the rule function and of CI asked for these
 12. **`polarizer holds --wait`** is this spec's addition, so the person can learn that a call is held without polling.
 13. **The watch runs every 0.25 s while a hold is open,** not once a second, so an allow is acted on within about a quarter of a second.
 14. **A `policy.loaded` kind** records the policy at every start, rather than a new field on `session.started`, which stays as M0 has it.
-15. **`--no-holds`** is the documented way to run with nothing held: a flag recorded in `policy.loaded`, as the round's brief asked, using mcpclerk's idea of a switch that is only a flag (credited by name). m0-plan.md's credits list that idea under M3; the README's credits should name M2a too.
+15. **`--no-holds`** is the documented way to run with nothing held: a flag recorded in `policy.loaded`, as the round's brief asked, using mcpclerk's idea of a switch that is only a flag (credited by name). dev/m0-plan.md's credits list that idea under M3; the README's credits should name M2a too.
 16. **After an allow, serve routes the call again** (pins), but doesn't evaluate the policy again.
 17. **`pending` and `approve` show classes only with `--config`,** so `--ledger-dir` output and every existing golden file stay unchanged.
 18. **The suggested class from annotations** follows a table chosen here (section 4), with MCP's defaults for absent hints, so a tool with no annotations suggests `destructive`.
@@ -869,7 +869,7 @@ After stage 6, the owner's review of the rule function and of CI asked for these
 
 ### Stage 7 (Oct 5, 2026)
 
-Decided while building stage 7, recorded in docs/STAGE7-NOTES.md, and folded into the sections above. None changes the ledger format, a status or an exit code.
+Decided while building stage 7, recorded in docs/dev/STAGE7-NOTES.md, and folded into the sections above. None changes the ledger format, a status or an exit code.
 1. **Progress values always increase** (section 6). MCP asks that each progress value be higher than the last; whole seconds waited do that at the 10 s interval, but not at the 0.05 s interval `test_progress_during_a_hold` injects, where it asks for increasing progress. A value is the whole seconds waited, or the one before plus one if that is higher.
 2. **Shutdown after an allow, before forwarding** (sections 5 and 6) has its own `call.refused` reason, `polarizer shut down before the call was forwarded`, as the client's cancel has its own.
 3. **`hold.abandoned` is a conditional append** (section 7), so two starts at once, or an allow racing a start, never give a hold two endings or a held call two terminal entries.

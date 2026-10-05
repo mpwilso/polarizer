@@ -66,10 +66,10 @@ def test_defaults(tmp_path, fake_home):
 
 
 def example(tmp_path, fake_home) -> str:
-    """polarizer.example.toml filled in as docs/MANUAL-CHECK.md step 2 does, with its POSIX
+    """polarizer.example.toml filled in as docs/dev/MANUAL-CHECK.md step 2 does, with its POSIX
     /tmp/polarizer-manual replaced by a directory under tmp_path. The example's paths are POSIX
     only; on Windows "/tmp/..." has no drive and is rightly not absolute, so every platform
-    gets a real absolute path here (docs/QUICKSTART-DRAFT.md says to edit them by hand)."""
+    gets a real absolute path here (docs/dev/QUICKSTART-DRAFT.md says to edit them by hand)."""
     text = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
     assert '"/tmp/polarizer-manual"' in text
     text = text.replace("/tmp/polarizer-manual", (tmp_path / "manual").as_posix())
@@ -77,7 +77,7 @@ def example(tmp_path, fake_home) -> str:
 
 
 def test_example_config_uses_the_manual_ledger(tmp_path, fake_home):
-    """polarizer.example.toml, filled in as docs/MANUAL-CHECK.md step 2 does, parses, and its
+    """polarizer.example.toml, filled in as docs/dev/MANUAL-CHECK.md step 2 does, parses, and its
     ledger is the manual check's own directory, not the default."""
     cfg = load(write(tmp_path, example(tmp_path, fake_home)))
     assert cfg.ledger_dir == fake_home / ".local/share/polarizer-manual"

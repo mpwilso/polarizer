@@ -6,7 +6,7 @@ whole line. So connect-garbage sends one in a line of its own, and the SDK's log
 failure is what has to stay safe.
 
 It writes nothing to its own stderr: an upstream's stderr is its own channel, which serve
-passes through as it is (docs/STAGE5-NOTES.md, Upstream text).
+passes through as it is (docs/dev/STAGE5-NOTES.md, Upstream text).
 
 HOSTILE_MODE:
 - connect-error: every tools/list answers JSON-RPC error -32603 with HOSTILE as its message.

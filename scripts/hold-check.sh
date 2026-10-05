@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The M2a manual check (docs/MANUAL-CHECK.md, M2a) as one script, run from a second terminal
+# The M2a manual check (docs/dev/MANUAL-CHECK.md, M2a) as one script, run from a second terminal
 # while Claude Code runs in terminal A. The person starts Claude Code, asks Claude for each call
 # this script prints, and says what Claude Code showed. The script finds each hold itself, so no
 # id or hash is ever copied by hand.

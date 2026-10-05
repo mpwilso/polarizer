@@ -1,25 +1,25 @@
 # Stage 4 notes
 
-Read after docs/STAGE3-NOTES.md. This file records what stage 4 (M1a, pins at rest) decided on its own: what step 0 found, the deviations, the guesses, what could not be run, the platform hazards, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
+Read after docs/dev/STAGE3-NOTES.md. This file records what stage 4 (M1a, pins at rest) decided on its own: what step 0 found, the deviations, the guesses, what could not be run, the platform hazards, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
 
-Stage 4 began with the commit "spec: m1a decisions", which applied the owner's ten decisions to PIN-SPEC.md, PROXY-SPEC.md, LEDGER-SPEC.md, m0-plan.md, milestones.md, MANUAL-CHECK.md and QUICKSTART-DRAFT.md. Then it added `src/polarizer/defhash.py` (the definition hash and the stored copy), `src/polarizer/pins.py` (the fold, the states and what `pending` lists) and `src/polarizer/decisions.py` (approve and reject), changed the gateway, the upstreams, the writer and the command line, and added the pin tests. The two fixed hashes in PIN-SPEC.md section 10 matched the implementation on the first run; no expected value was changed.
+Stage 4 began with the commit "spec: m1a decisions", which applied the owner's ten decisions to docs/PIN-SPEC.md, docs/PROXY-SPEC.md, docs/LEDGER-SPEC.md, m0-plan.md, docs/milestones.md, MANUAL-CHECK.md and QUICKSTART-DRAFT.md. Then it added `src/polarizer/defhash.py` (the definition hash and the stored copy), `src/polarizer/pins.py` (the fold, the states and what `pending` lists) and `src/polarizer/decisions.py` (approve and reject), changed the gateway, the upstreams, the writer and the command line, and added the pin tests. The two fixed hashes in docs/PIN-SPEC.md section 10 matched the implementation on the first run; no expected value was changed.
 
 ## What step 0 found
 
 Nothing needed the owner: no gap touched the ledger format, a hash form beyond decision 1, a status or an exit code.
 
-1. **Stage 4 needed part of stage 5's watch.** `rig.gateway(approve=True)` must "approve all and wait until the exposed list is complete", and `test_writer_stopped_exposes_nothing` must see a line another process appended. Both need a running gateway to read the ledger, which section 8 assigns to the watch, and the stage 4 prompt excluded the watch. Decided: the catch-up at the start of every client `tools/list` and `tools/call`, with serve's own fsync before acting on an adopted approval, is built in stage 4. The once-a-second timer, change notices on decisions and `test_pin_durability.py` stay in stage 5. Recorded in PIN-SPEC.md (section 8, section 12 and deviation 30).
-2. **Sticky drift and the cap** were listed under stage 5 but are part of the fold (the changed state) and of section 3's recording rules, which stage 4 builds. Built in stage 4 (PIN-SPEC.md deviation 31).
+1. **Stage 4 needed part of stage 5's watch.** `rig.gateway(approve=True)` must "approve all and wait until the exposed list is complete", and `test_writer_stopped_exposes_nothing` must see a line another process appended. Both need a running gateway to read the ledger, which section 8 assigns to the watch, and the stage 4 prompt excluded the watch. Decided: the catch-up at the start of every client `tools/list` and `tools/call`, with serve's own fsync before acting on an adopted approval, is built in stage 4. The once-a-second timer, change notices on decisions and `test_pin_durability.py` stay in stage 5. Recorded in docs/PIN-SPEC.md (section 8, section 12 and deviation 30).
+2. **Sticky drift and the cap** were listed under stage 5 but are part of the fold (the changed state) and of section 3's recording rules, which stage 4 builds. Built in stage 4 (docs/PIN-SPEC.md deviation 31).
 3. **The stage 4 tests whose claims include a change notice** (`test_approve_exposes`, `test_reject_hides_and_needs_reason`, `test_flip_flop_is_bounded`) were written without the notice assertion. Stage 5 adds it.
-4. **A revert.** PIN-SPEC.md section 4 said `pending` shows a revert as `changed <prefix>__<tool> H, approved H`. Section 3 records no drift when the live hash returns to the approved one, and section 10's `test_drift_once_per_pair_and_sticky` requires that nothing is recorded, so no record can name H twice. Sections 3 and 10 were followed, and section 4's sentence now says a revert records nothing: `pending` keeps showing `changed ... B, approved A`, and the person approves A again by name, which `approve` accepts.
+4. **A revert.** docs/PIN-SPEC.md section 4 said `pending` shows a revert as `changed <prefix>__<tool> H, approved H`. Section 3 records no drift when the live hash returns to the approved one, and section 10's `test_drift_once_per_pair_and_sticky` requires that nothing is recorded, so no record can name H twice. Sections 3 and 10 were followed, and section 4's sentence now says a revert records nothing: `pending` keeps showing `changed ... B, approved A`, and the person approves A again by name, which `approve` accepts.
 
 ## Deviations
 
 1. **The catch-up before each list and call is in stage 4** (step 0, item 1).
 2. **Sticky drift and the cap are in stage 4** (step 0, item 2).
 3. **The writer fsyncs the ledger once when it opens with a pin-state listener** (`serve`, `approve`, `reject`), before the verified entries reach pin state. An approval written by a process whose own fsync failed is then durable before anything acts on it at startup, as section 8 requires for adopted approvals while running. `verify` and `pending` never fsync.
-4. **A lost connection is detected at the next request, not the moment the upstream exits.** The SDK raises nothing into the task holding the client when an idle stdio upstream exits (verified-facts.md, Stage 4). A call or listing that fails with -32000 is confirmed with the session's ping, which fails at once on a closed connection; only then is the upstream marked lost, its tools hidden and `connection-lost` recorded. An upstream that sends -32000 itself still answers the ping, so it isn't hidden.
-5. **M0 tests whose assertions change by design** (PIN-SPEC.md section 12, stage 4 step 6):
+4. **A lost connection is detected at the next request, not the moment the upstream exits.** The SDK raises nothing into the task holding the client when an idle stdio upstream exits (docs/verified-facts.md, Stage 4). A call or listing that fails with -32000 is confirmed with the session's ping, which fails at once on a closed connection; only then is the upstream marked lost, its tools hidden and `connection-lost` recorded. An upstream that sends -32000 itself still answers the ping, so it isn't hidden.
+5. **M0 tests whose assertions change by design** (docs/PIN-SPEC.md section 12, stage 4 step 6):
    - `test_proxy::test_upstream_isolation`: after `crashy__crash`, `crashy__wait` is refused (`its server's tool list could not be checked`) and recorded as `call.refused`, not as a second `transport-error`;
    - `test_listing::test_refresh_failure_keeps_last_list` is replaced by `test_refresh_failure_hides_the_upstream`;
    - `test_listing::test_every_client_list_refreshes`, `test_eras::test_modern_upstream` and `test_eras::test_handshake_upstream`: a changed definition is hidden until approved again, and the tests then approve it and see the new one;
@@ -30,7 +30,7 @@ Nothing needed the owner: no gap touched the ledger format, a hash form beyond d
 7. **stderr lines changed:** `polarizer: upstream <p>: listing timed out; its tools are hidden`, `polarizer: upstream <p>: listing failed (<why>); its tools are hidden` and `polarizer: upstream <p> stopped: <why>; its tools are hidden` replace M0's `kept its last list` lines. New: `polarizer: <n> tools wait for approval; run polarizer pending`.
 8. **A decision whose write fails with an operating-system error** prints `polarizer: could not record the decision: <why>` and exits 1, the code a stopped writer already uses.
 9. **Library changes:** `verify_bytes` takes `on_entry`; `ChainState` keeps `last_entry`; `LedgerWriter` takes `on_entry` and gains `catch_up()` and `stopped`; `Upstream` gains `list_error`, `list_known`, `lose()` and `check_closed()`, its `refresh()` returns whether it succeeded, and `exposed()` is gone (the gateway serves stored copies). `Gateway` takes `pins=`.
-10. **Tests beyond PIN-SPEC.md section 10:** `test_pins::test_fold_gives_every_state` (stage 4 step 2's done-when), `test_defhash::test_written_copy_never_replaces` and `test_copy_modes`, `test_pin_cli::test_reject_updates_head_and_can_revoke`, `test_decisions_need_a_ledger`, `test_group_writer_fails_partway`, `test_approve_runs_on_a_terminal` (the pseudo-terminal half of `test_approve_needs_terminal`) and `test_pending_on_a_broken_ledger_prints_verify`, and the golden row `pending_capped.txt`.
+10. **Tests beyond docs/PIN-SPEC.md section 10:** `test_pins::test_fold_gives_every_state` (stage 4 step 2's done-when), `test_defhash::test_written_copy_never_replaces` and `test_copy_modes`, `test_pin_cli::test_reject_updates_head_and_can_revoke`, `test_decisions_need_a_ledger`, `test_group_writer_fails_partway`, `test_approve_runs_on_a_terminal` (the pseudo-terminal half of `test_approve_needs_terminal`) and `test_pending_on_a_broken_ledger_prints_verify`, and the golden row `pending_capped.txt`.
 11. **Conformance fixtures added** for stage 4 step 3: `valid/pins` (every M1a kind), `broken/pins_edit_approval` (tampered) and `broken/pins_rehashed_rejection` (a rejection edited and re-hashed, caught by `ledger.head`). Both verifiers agree on all three; the reference verifier is unchanged.
 12. **Test helpers:** `rig` gains `approve_all`, `approve_changed`, `approve_pending`, `prime` and `run_serve`; `FakeUpstream` gains `definitions=`, `list_delay` and `bump_on_list`, and `FAKE_DEFINITIONS`; the probe gains `PROBE_SNAKE`; `tests/helpers/pinledger.py` builds the deterministic ledgers for the pin golden files.
 13. **`test_group_is_bound_to_what_was_printed`** reads "a changed definition" as a grouped tool seen with another definition. Since the owner's decision 3, a decided tool's change can't move the group either way, and the test checks that such tools are left out.
@@ -77,7 +77,7 @@ Nothing needed the owner: no gap touched the ledger format, a hash form beyond d
 | The probe's `wait` hashes to `ac0778cf...` with the stored bytes written in the test, and the nested description to `3462be54...` | `pytest tests/test_defhash.py -k "fixed or nested"` | yes |
 | One tool with `execution` gives one hash through `legacy` and `auto` clients, in memory and over stdio | `pytest tests/test_defhash.py::test_same_hash_in_both_eras` | yes |
 | `execution` is the only field one era serves and the other doesn't, and `Tool` has exactly the nine known fields | `pytest tests/test_defhash.py::test_execution_is_the_only_era_field` | yes |
-| Nulls, key order, unknown fields and schema keywords hash as PIN-SPEC.md section 2 says | `pytest tests/test_defhash.py -k "null or key_order or unknown"` | yes |
+| Nulls, key order, unknown fields and schema keywords hash as docs/PIN-SPEC.md section 2 says | `pytest tests/test_defhash.py -k "null or key_order or unknown"` | yes |
 | A change to `_meta` alone changes neither the hash nor the copy and doesn't hide the tool; no `_meta` is served | `pytest tests/test_defhash.py::test_meta_not_hashed_not_served` | yes |
 | `input_schema` on the wire fails the connect, and later a refresh | `pytest tests/test_defhash.py::test_snake_case_input_schema_fails_listing` | yes |
 | An integer past 2^53-1 in a schema makes the tool unservable and unapprovable | `pytest tests/test_defhash.py::test_unhashable_definition_hidden` | yes |
@@ -102,11 +102,11 @@ Nothing needed the owner: no gap touched the ledger format, a hash form beyond d
 | The whole M0 suite still passes, with the changes listed under Deviations | `scripts/test.sh` | yes |
 | The new and changed tests pass repeatedly | five runs of the pin, proxy, era, listing, stdout, fidelity, outcome and startup tests | yes, 5 of 5 |
 | All of the above on Windows and macOS | CI | no |
-| Approving while an interactive session is open | docs/MANUAL-CHECK.md (stage 5) | no |
+| Approving while an interactive session is open | docs/dev/MANUAL-CHECK.md (stage 5) | no |
 
 ## Review fixes
 
-After the stage 4 review, two commits: "spec: stage4 review fixes" (PIN-SPEC.md sections 2, 3, 4, 5, 6, 7, 10 and 13, and one sentence each in PROXY-SPEC.md and LEDGER-SPEC.md), then "stage4: review fixes". No change to the ledger format, the hash chain, a status or an exit code.
+After the stage 4 review, two commits: "spec: stage4 review fixes" (docs/PIN-SPEC.md sections 2, 3, 4, 5, 6, 7, 10 and 13, and one sentence each in docs/PROXY-SPEC.md and docs/LEDGER-SPEC.md), then "stage4: review fixes". No change to the ledger format, the hash chain, a status or an exit code.
 
 ### What changed
 
@@ -133,7 +133,7 @@ Checked for item 1. "Upstream text" means a message that may quote what an upstr
 3. `Upstream.refresh`: the same message as `list_error`, into `upstream.refresh_failed`'s `error` and serve's stderr line `listing failed (<why>)`.
 4. `Upstream.lose`, from `run` and `check_closed`: an `MCPError` -32000 message, which an upstream can send itself, into `upstream.refresh_failed` (`connection-lost`) and stderr.
 5. `Upstream._follow_changes`: a failed listen stream's message, to stderr only.
-6. `proxy.py`, `_call_tool`: a protocol error's message goes to `call.returned`'s `error` and back to the client as the JSON-RPC error's message, by design (PROXY-SPEC.md, Outcomes). A transport error's message, and any other exception's except pydantic's, goes into the client's one line and the ledger.
+6. `proxy.py`, `_call_tool`: a protocol error's message goes to `call.returned`'s `error` and back to the client as the JSON-RPC error's message, by design (docs/PROXY-SPEC.md, Outcomes). A transport error's message, and any other exception's except pydantic's, goes into the client's one line and the ledger.
 7. `approve`'s refusal `stored copy defs/<hash>.json unreadable: <message>` carries the operating system's message to stderr, unescaped. Not upstream text.
 
 None reaches stdout except through `pending`, which item 2 now escapes. Items 2 to 5 can carry an ESC to serve's stderr, which Claude Code logs and which a person sees when running `serve < /dev/null` in a terminal. Not changed here, because no review item asked for it; a fixed line for listing failures, like stage 3's for results, and escaping serve's stderr, would close them.

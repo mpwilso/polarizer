@@ -1,9 +1,26 @@
 [project]
 name = "polarizer"
-version = "0.1.0.dev0"
-description = "A local proxy between an AI agent and its MCP servers, with a verifiable ledger."
-readme = "CLAUDE.md"
+version = "0.1.0"
+description = "A local MCP gateway that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Matt Wilson", email = "198815669+mpwilso@users.noreply.github.com" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
 dependencies = [
     # Exactly 2.2.0: every SDK behavior in docs/verified-facts.md (outcomes, progress,
     # cancellation, cache modes, capabilities) was checked against 2.2.0, and M1a's definition
@@ -15,6 +32,12 @@ dependencies = [
     "pydantic==2.13.5",
     "rfc8785==0.1.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mpwilso/polarizer"
+Source = "https://github.com/mpwilso/polarizer"
+Issues = "https://github.com/mpwilso/polarizer/issues"
+Changelog = "https://github.com/mpwilso/polarizer/blob/master/CHANGELOG.md"
 
 [project.scripts]
 polarizer = "polarizer.cli:main"

@@ -86,7 +86,7 @@ def test_every_client_list_refreshes(tmp_path):
 
 
 def test_refresh_failure_hides_the_upstream(tmp_path, capfd):
-    """M0 kept the last good list after a failed refresh (STAGE2-NOTES.md, guess 2). With pins,
+    """M0 kept the last good list after a failed refresh (docs/dev/STAGE2-NOTES.md, guess 2). With pins,
     the upstream's tools are hidden and the failure is recorded (docs/PIN-SPEC.md, section 6)."""
     fake = FakeUpstream()
 

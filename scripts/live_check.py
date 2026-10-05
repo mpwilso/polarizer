@@ -11,7 +11,7 @@ from the model. `prime` does what a new user does once (docs/PIN-SPEC.md, sectio
 `polarizer serve` with stdin closed, which lists the probe and records its definitions, then
 the group approval `polarizer approve --group` would make, through the same library code.
 
-The check passes only if both hold (docs/m0-plan.md, build step 7):
+The check passes only if both hold (docs/dev/m0-plan.md, build step 7):
 - the probe's log shows notifications/cancelled within 2 seconds of Claude Code's own cancel
   (taken from the wiretap between Claude Code and Polarizer);
 - the ledger has a call.returned with outcome cancelled for that call.

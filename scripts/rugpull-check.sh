@@ -10,7 +10,7 @@
 #   C  the same changed definition, now approved: the call reaches the probe again.
 # Each run's Claude Code is given its own mcp config, and the two configs differ only in
 # PROBE_PHASE (original or changed), which Polarizer passes to the probe. So nothing depends on
-# how many times the probe started (docs/MANUAL-CHECK.md, M1a).
+# how many times the probe started (docs/dev/MANUAL-CHECK.md, M1a).
 #
 # Before run A it primes the ledger (live_check.py's priming: a serve run with stdin closed,
 # then the group approval, with no model). Pass or fail is read only from the ledger and the

@@ -69,7 +69,7 @@ def code_lines(path):
 
 # A `wait` for a process substitution: bash 3.2 can wait only for its own jobs, so there it
 # returns at once, and a script that waited that way for its tee could exit before tee wrote
-# (docs/STAGE7-NOTES.md, Follow-up: macOS output). Read as text: a PID variable set from $!
+# (docs/dev/STAGE7-NOTES.md, Follow-up: macOS output). Read as text: a PID variable set from $!
 # after a process substitution, with no job started with & in between, and any `wait` that
 # names it, wherever it is (a function that waits may come earlier in the file); or `wait $!`
 # straight after a process substitution.

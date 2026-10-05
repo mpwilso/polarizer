@@ -22,7 +22,7 @@ Read after docs/verified-facts.md. This file records what stage 1 decided on its
 16. The reference verifier checks `ledger.head`'s form with one regex instead of parsing it.
 17. CI actions were pinned only by major tag; fixed by SHA pins.
 18. ruff's line-length rule is off for `tests/`.
-19. Repair's location check is step "0." in LEDGER-SPEC.md.
+19. Repair's location check is step "0." in docs/LEDGER-SPEC.md.
 20. The `protected_paths` name overlapped with M2a's term; fixed by the rename to `ledger_forbidden_paths`.
 21. The live-check conditions requirement went into m0-plan step 7, because `live-check.sh` doesn't exist yet.
 22. The CI actions moved from v4 and v6 to v7.0.1 and v10.2.0.
@@ -92,7 +92,7 @@ Nothing here has run on Windows. "Runs" means the test is expected to run there;
 
 - **stdout and stderr:** every command except serve now sets UTF-8, backslashreplace and `"\n"` newlines. `tests/test_cli_subprocess.py` runs `python -m polarizer verify` as a subprocess and compares raw stdout bytes with the golden files, including a non-ASCII directory name and a hostile `PYTHONIOENCODING`.
 - **Subprocess quoting:** the multi-line `python -c` is gone; the workers run `tests/helpers/append_worker.py` with a path argument. No other test used `-c`.
-- **Case:** a differently cased forbidden path is tested as refused on Windows, not refused on Linux, and following the file system on macOS (PROXY-SPEC.md, Startup step 2).
+- **Case:** a differently cased forbidden path is tested as refused on Windows, not refused on Linux, and following the file system on macOS (docs/PROXY-SPEC.md, Startup step 2).
 - **Parallax on Windows:** Parallax's README, read during the stage 1 review, says it needs bubblewrap and does not run on native Windows, so `always_forbidden()`'s Parallax defaults are moot there, but harmless.
 
 ## Differential fuzz (`tests/test_differential.py`)

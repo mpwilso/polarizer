@@ -1,18 +1,18 @@
 # Stage 2 notes
 
-Read after docs/STAGE1-NOTES.md. This file records what stage 2 (the proxy) decided on its own: the deviations from the specs, the guesses where the specs are silent, what could not be run, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
+Read after docs/dev/STAGE1-NOTES.md. This file records what stage 2 (the proxy) decided on its own: the deviations from the specs, the guesses where the specs are silent, what could not be run, and a claims table. Where these notes and the specs differ, the specs win until a spec is changed.
 
 Stage 2 added `src/polarizer/upstream.py` and `src/polarizer/proxy.py`, added `serve` to `src/polarizer/cli.py`, and added the test upstreams under `tests/helpers/`. No contradiction between the specs needed a decision from the owner. SDK 2.2.0 behaved as `docs/verified-facts.md` describes everywhere stage 2 touched it.
 
 ## Deviations
 
-1. **The probe's location.** It is `tests/helpers/probe_server.py`, not `tests/probe_server.py`, as the stage 2 prompt asked. m0-plan.md step 6 and the PROXY-SPEC.md example config now say so.
+1. **The probe's location.** It is `tests/helpers/probe_server.py`, not `tests/probe_server.py`, as the stage 2 prompt asked. m0-plan.md step 6 and the docs/PROXY-SPEC.md example config now say so.
 2. **The probe's tools.** Besides `wait(seconds)`, it has `crash` (exits mid-call), `env` (returns its environment as JSON text) and `fail` (a tool error). It writes a `start <pid>` line to `PROBE_LOG` and `probe: started` to its stderr.
 3. **Where two claims are tested.** `InputRequiredResult` and the older-era requests to the client are tested in `tests/test_outcomes.py`, not `tests/test_scope.py`. `serve`'s usage errors are in `tests/test_golden.py` with the other usage errors; its config, location and v0 errors are in `tests/test_config.py`. The m0-plan.md claims table now names those files.
-4. **The progress token is not in `meta_dropped`.** PROXY-SPEC.md says `meta_dropped` lists "all other dropped keys". The token is not dropped in effect: progress is relayed under the client's own token through `report_progress`. The SDK also names it differently by transport (`progress_token` over stdio, absent in memory), so recording it would make the ledger depend on the transport. Pinned by `test_meta_filter` and `test_meta_filter_over_stdio`.
-5. **A call the ledger can't record is not forwarded.** If the side file can't be written or `call.sent` can't be appended (the writer has stopped, or the entry was refused), the client gets an isError result `polarizer: <name> was not called: the ledger could not record it`, stderr gets `polarizer: refused <name>: could not record it: <reason>`, and the upstream is never called. A side file written before the failure stays as an orphan, which `verify --args` reports. LEDGER-SPEC.md says a stopped writer refuses every later call but not what the client sees. Pinned by `test_stopped_ledger_refuses_calls`.
+4. **The progress token is not in `meta_dropped`.** docs/PROXY-SPEC.md says `meta_dropped` lists "all other dropped keys". The token is not dropped in effect: progress is relayed under the client's own token through `report_progress`. The SDK also names it differently by transport (`progress_token` over stdio, absent in memory), so recording it would make the ledger depend on the transport. Pinned by `test_meta_filter` and `test_meta_filter_over_stdio`.
+5. **A call the ledger can't record is not forwarded.** If the side file can't be written or `call.sent` can't be appended (the writer has stopped, or the entry was refused), the client gets an isError result `polarizer: <name> was not called: the ledger could not record it`, stderr gets `polarizer: refused <name>: could not record it: <reason>`, and the upstream is never called. A side file written before the failure stays as an orphan, which `verify --args` reports. docs/LEDGER-SPEC.md says a stopped writer refuses every later call but not what the client sees. Pinned by `test_stopped_ledger_refuses_calls`.
 6. **A message not in the spec:** `polarizer: cannot open <path>: <the operating system's message>`, exit 2, when `serve` can't create or open the ledger directory.
-7. **Older-era clients get `notifications/tools/list_changed`.** PROXY-SPEC.md says only that the server is created with `NotificationOptions(tools_changed=True)`. The gateway keeps the session of each older-era `initialize` and sends `send_tool_list_changed()` to it when an upstream's list changes, so the advertised capability is honored. A session whose send fails is dropped. Pinned by `test_eras`.
+7. **Older-era clients get `notifications/tools/list_changed`.** docs/PROXY-SPEC.md says only that the server is created with `NotificationOptions(tools_changed=True)`. The gateway keeps the session of each older-era `initialize` and sends `send_tool_list_changed()` to it when an upstream's list changes, so the advertised capability is honored. A session whose send fails is dropped. Pinned by `test_eras`.
 8. **Handlers beyond the three named.** The server also answers `ping` and `server/discover`, which the SDK registers by default. It registers nothing for resources, prompts, completions or logging, and no notification handlers. `test_registered_handlers_are_tools_only` pins the exact list.
 9. **stderr lines not in the spec**, all from `serve`:
    - `polarizer: upstream <p> did not connect: <error>`;
@@ -23,7 +23,7 @@ Stage 2 added `src/polarizer/upstream.py` and `src/polarizer/proxy.py`, added `s
    - `polarizer: upstream <p>: change notices stopped: <why>`;
    - `polarizer: upstream <p> stopped: <why>`;
    - `polarizer: could not record <kind>: <why>`.
-10. **verified-facts.md, Unverified.** The two older-era list-change items now say stage 2 ran them SDK to SDK. Neither has run with Claude Code or a third-party server.
+10. **docs/verified-facts.md, Unverified.** The two older-era list-change items now say stage 2 ran them SDK to SDK. Neither has run with Claude Code or a third-party server.
 
 ## Guesses
 
@@ -41,7 +41,7 @@ Stage 2 added `src/polarizer/upstream.py` and `src/polarizer/proxy.py`, added `s
 6. **A protocol error's `code` outside the subset's integer range** would be recorded as a string. No test covers it.
 7. **`session.client`'s `protocol_version`:** in the older era, the version from the `initialize` result (the negotiated one); in 2026-07-28, the request's `io.modelcontextprotocol/protocolVersion`. A missing name or version is `null`.
 8. **`<kinds>` in the `unsupported` line:** `elicitation`, `sampling` or `roots`, from the methods of the embedded requests, sorted and joined with `, `. An unknown method appears as itself.
-9. **`result_bytes`** uses PROXY-SPEC.md's formula on the result Polarizer hands the SDK. On the 2026-07-28 wire the SDK then stamps its own `serverInfo` into the `_meta` of results Polarizer wrote, which isn't counted. A result passed through from a 2026-07-28 upstream already carries that upstream's stamp, which is counted, and the client receives it unchanged. The SDK client treats the stamp as display-only.
+9. **`result_bytes`** uses docs/PROXY-SPEC.md's formula on the result Polarizer hands the SDK. On the 2026-07-28 wire the SDK then stamps its own `serverInfo` into the `_meta` of results Polarizer wrote, which isn't counted. A result passed through from a 2026-07-28 upstream already carries that upstream's stamp, which is counted, and the client receives it unchanged. The SDK client treats the stamp as display-only.
 10. **Order of `upstream.connected` entries:** config order, after every upstream has connected, failed or timed out; not in the order they finish.
 11. **Order of exposed tools:** upstreams in config order, each upstream's tools in its own order. If one upstream lists the same name twice, the first wins.
 12. **Polarizer's upstream clients identify themselves** as `polarizer` with Polarizer's version.
@@ -50,7 +50,7 @@ Stage 2 added `src/polarizer/upstream.py` and `src/polarizer/proxy.py`, added `s
 ## Not run
 
 - **CI**, and therefore **Windows and macOS runs** of every stage 2 test. Only the Linux (WSL2, Python 3.12.3) runs below happened.
-- **Claude Code, and any model.** Nothing in stage 2 ran `claude`. `scripts/live-check.sh` and `docs/MANUAL-CHECK.md` are stage 3, so every Claude Code behavior through Polarizer's own proxy is still untested, including Esc to cancel, `/mcp` names, and the cancel timing in the live check.
+- **Claude Code, and any model.** Nothing in stage 2 ran `claude`. `scripts/live-check.sh` and `docs/dev/MANUAL-CHECK.md` are stage 3, so every Claude Code behavior through Polarizer's own proxy is still untested, including Esc to cancel, `/mcp` names, and the cancel timing in the live check.
 - **A third-party upstream.** The Everything server was not run in stage 2. Nothing was fetched by `npx`, `npm` or `pip`, so no new pinned commands were recorded.
 - **Load.** The timing tests ran on an idle machine. Their bounds (two 1 s calls under 1.8 s; startup under 5 s) may need room on slow CI runners.
 

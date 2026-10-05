@@ -1,4 +1,4 @@
-"""Upstream text on stderr and in the ledger (docs/STAGE5-NOTES.md, Upstream text): whatever an
+"""Upstream text on stderr and in the ledger (docs/dev/STAGE5-NOTES.md, Upstream text): whatever an
 upstream sends, or an exception built from it, reaches serve's stderr and the ledger only
 through polarizer.text.safe(): escaped, on one line, at most 200 characters.
 
