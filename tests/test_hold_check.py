@@ -9,7 +9,6 @@ the Filesystem server. Everything the script writes is in the test's own directo
 
 import json
 import os
-import select
 import shutil
 import subprocess
 import sys
@@ -18,6 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
+from helpers.ptyread import finish, read_some
 from helpers.raw import RawClient
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,18 +72,15 @@ def drive(env, command, steps=(), timeout=60):
                         action()
                     else:
                         os.write(controller, action)
-            if select.select([controller], [], [], 0.05)[0]:
-                try:
-                    chunk = os.read(controller, 4096)
-                except OSError:  # EIO: everything holding the terminal has closed it
-                    break
-                if not chunk:
-                    break
-                output += chunk
+            chunk = read_some(controller, 0.05)
+            if chunk is None:  # the end: everything holding the terminal has closed it
+                break
+            output += chunk
         else:
             proc.kill()
             pytest.fail(f"hold-check.sh {command} still running after {timeout} s:\n{output!r}")
-        code = proc.wait(timeout=30)
+        code, rest = finish(controller, proc)
+        output += rest
     finally:
         os.close(controller)
     assert not todo, f"never saw {todo[0][0]!r}:\n{output.decode()}"
@@ -174,6 +171,7 @@ def ledger(base) -> list[dict]:
 def status(env) -> str:
     code, out = drive(env, "status")
     assert code == 0, out
+    assert out.strip(), f"hold-check.sh status exited {code} and printed nothing"
     return out.strip().splitlines()[-1]
 
 

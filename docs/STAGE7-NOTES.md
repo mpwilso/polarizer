@@ -99,7 +99,7 @@ The test files with new subprocess, signal, lock or timing tests (`test_hold_res
 
 ## Not run
 
-- **CI,** so nothing from stage 7 has run on Windows or macOS, or on Python 3.11 or 3.13. Only Linux (WSL2, Python 3.12.3) ran it. The Windows-only tests (the four junction tests) have never run.
+- **CI,** during the stage: only Linux (WSL2, Python 3.12.3) ran it. CI ran once the stage was committed, and passed at c986088 on all five jobs (Follow-up: CI, below).
 - **Claude Code, any model, and an interactive session.** Nothing in this session ran `claude`. The M2a manual check (`scripts/hold-check.sh`) ran only against its stand-ins in `tests/test_hold_check.py`; its real run, with interactive Claude Code, the pinned Filesystem server and a person, is the owner's. The owner ran it on Oct 5, 2026 (Follow-up: the owner's M2a check, below).
 - **`scripts/live-check.sh` and `scripts/rugpull-check.sh` with real Claude Code.** Unchanged in stage 7; their tests ran with the stub.
 - **Esc during a hold with real Claude Code.** Only the two signals Claude Code was seen to send, from a test.
@@ -135,7 +135,7 @@ The test files with new subprocess, signal, lock or timing tests (`test_hold_res
 | The M1a check's parser reads `pending --config`'s new lines | `pytest tests/test_m1a_check.py tests/test_hold_check.py::test_group_reads_a_fresh_first_run` | yes |
 | The new subprocess, signal and lock tests pass five times in a row and once under load, leaving no process running | the script in Repeated runs | yes |
 | The whole suite, ruff and the docs check | `scripts/test.sh` | yes: see the summary below |
-| All of the above on Windows and macOS, and on Python 3.11 and 3.13 | CI | no |
+| The suite on Windows and macOS, and on Python 3.11 and 3.13 (not the reference tests, which need `POLARIZER_REFERENCE=1`) | CI | yes, after the stage: passed at c986088 on all five jobs |
 | The M2a manual check with interactive Claude Code: a held write denied and not created; the same call asked again a new hold with a new id and `args_commit`, allowed, `call.sent` with `allowed_by` `hold`, `call.returned` `ok`; a call held 128 s, then allowed, `ok`; a destructive call expired after 30 s and not moved; ledger intact, 71 entries | `scripts/hold-check.sh` (docs/MANUAL-CHECK.md, M2a; verified-facts.md, M2a check, interactive) | yes, once, by the owner, interactive (Oct 5, 2026, Claude Code 2.1.289) |
 | While a call is held, Claude Code 2.1.289 shows the call line and the person can keep typing; after about 123 s it moves the call to the background as a task, the agent keeps working, and the result arrives as a task-completed notification when the hold is allowed | the long-wait step of `scripts/hold-check.sh` | yes, once, by the owner, interactive |
 | A refused agent did not try another route, and named Bash `mv` as one it could have taken | the expire step of `scripts/hold-check.sh` | yes, once, by the owner, interactive (what the model said; nothing stops such a route) |
@@ -158,3 +158,20 @@ The owner ran `scripts/hold-check.sh` interactively with Claude Code 2.1.289 at 
 | The test fails without the discard | the same, with `discard_input` made a no-op, then restored | yes, once |
 | The whole suite, ruff and the docs check | `scripts/test.sh` | yes: ruff (lint and format) clean, the docs check 18 files with 0 findings, pytest 768 passed, 13 skipped in 212.08 s; 3 min 38 s in all |
 | The pre-push scan finds none of the owner's private strings | `git grep --cached -i -c` per string, and the commit's message, author and committer | yes: every count 0 |
+
+## Follow-up: CI
+
+CI ran stage 7's commit, c986088, on all five jobs (Linux with Python 3.11, 3.12 and 3.13, Windows, macOS), and all five passed (run 37247672401). The next commit, 74cedbe (Follow-up: the owner's M2a check, above), failed on macOS only (run 37249953282, and again when the job was re-run): `tests/test_hold_check.py::test_whole_check` failed at its first line, because `drive(env, "status")` returned exit 0 with no output and the `status` helper's `splitlines()[-1]` raised `IndexError`. The Linux and Windows jobs' results for 74cedbe are not recorded here.
+
+- **What 74cedbe changed on the path `status` takes:** nothing that runs. `status` never calls `ask`, `confirm` or `describe`, so `discard-input` never runs; the commit added the `discard_input` function's definition and changed comments, and nothing in `start_output`, `end_output`, `marker`, `toml_ready` or `cmd_status`. `git diff c986088 74cedbe -- scripts tests` shows no other change to that path or to `drive`. So the discard is not shown to be the cause, and it was left as it is: it already throws away only input waiting on the terminal (`tcflush(TCIFLUSH)`), never touches output, and does nothing when stdin is not a terminal.
+- **What gives exactly this result:** every line `status` prints goes through `tee`, started by `start_output`, and `end_output` waits for it before bash exits. On Linux, with that wait left out, the output was empty in 199 of 200 runs on a pseudo-terminal (bash is the session leader, as in `drive`; when it exits, `tee` loses the terminal before writing), and with the wait, in 0 of 200. If `wait` returned at once on the macOS runner, `status` would print nothing and exit 0. Not confirmed: the run's log was not read in this session, and nothing here ran on macOS.
+- **The tests' pty reading:** `drive` in `test_hold_check.py` and `test_m1a_check.py` now read through `tests/helpers/ptyread.py`: they stop reading only at end of file or EIO (any other error is raised, where it used to be taken as the end), then wait for the child and read whatever is still on the terminal, so no output is dropped on any platform. Each `status` helper fails with "status exited 0 and printed nothing" rather than `IndexError`. `test_hold_cli.py` and `test_pin_cli.py` give a pseudo-terminal only as stdin and read output through pipes, and `test_rugpull_check.py` uses no pseudo-terminal, so they are unchanged.
+- **Whether this fixes the macOS job** can only be confirmed by CI. If the cause is `tee` losing the terminal, the test changes only make the failure say so; the fix would then be in the scripts' `end_output`.
+
+| Claim | Command | Run? |
+|---|---|---|
+| c986088 passed CI on all five jobs; 74cedbe failed on macOS at `test_whole_check`'s first `status` | CI runs 37247672401 and 37249953282 | yes, by CI (as reported by the owner) |
+| Nothing 74cedbe changed runs on `status`'s path | `git diff c986088 74cedbe -- scripts tests` | yes |
+| On Linux, bash exiting before `tee` writes leaves a pseudo-terminal with no output | a throwaway script in the session scratch directory, 200 runs each way | yes: 199 of 200 empty without the wait, 0 of 200 with it |
+| The hold-check tests pass 20 times in a row with the new reading | `pytest tests/test_hold_check.py`, 20 times | yes: 20 of 20, Linux only |
+| The macOS job passes | CI | no: only CI can confirm it |

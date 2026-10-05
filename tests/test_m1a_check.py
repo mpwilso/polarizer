@@ -10,7 +10,6 @@ import json
 import os
 import platform
 import re
-import select
 import shutil
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from pathlib import Path
 import mcp_types as types
 import pytest
 from conftest import build_chain
+from helpers.ptyread import finish, read_some
 
 from polarizer import cli, defhash
 
@@ -259,14 +259,10 @@ def drive(env, command, replies=(), timeout=60):
                 if ready:
                     os.write(controller, todo.pop(0)[1])
                     asked = None
-            if select.select([controller], [], [], 0.1 if asked is None else 0.01)[0]:
-                try:
-                    chunk = os.read(controller, 4096)
-                except OSError:  # EIO: everything holding the terminal has closed it
-                    break
-                if not chunk:
-                    break
-                output += chunk
+            chunk = read_some(controller, 0.1 if asked is None else 0.01)
+            if chunk is None:  # the end: everything holding the terminal has closed it
+                break
+            output += chunk
         else:
             proc.kill()
             waiting = (
@@ -275,7 +271,8 @@ def drive(env, command, replies=(), timeout=60):
             pytest.fail(
                 f"m1a-check.sh {command} still running after {timeout} s{waiting}:\n{output!r}"
             )
-        code = proc.wait(timeout=30)
+        code, rest = finish(controller, proc)
+        output += rest
     finally:
         os.close(controller)
     assert not todo, f"never asked {todo[0][0]!r}:\n{output.decode()}"
@@ -327,6 +324,7 @@ def kinds(base):
 def status(env):
     code, out = drive(env, "status")
     assert code == 0, out
+    assert out.strip(), f"m1a-check.sh status exited {code} and printed nothing"
     return out.strip().splitlines()[-1]
 
 
