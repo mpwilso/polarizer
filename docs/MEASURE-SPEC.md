@@ -29,12 +29,13 @@ The goal of the whole project is to measure whether a person's approvals still c
 
 ### What the numbers cannot show
 
-- **Small n.** One drill has about 6 planted calls. A catch rate from 6 calls has a 95% interval about 50 points wide; section 7 prints that interval every time, and prints "too few to say" below 5.
+- **Small n.** One drill has 8 planted calls. A catch rate from 8 calls has a 95% interval 33 to 58 points wide (52% to 98% for 7 of 8); section 7 prints that interval every time, and prints "too few to say" below 5, which only a drill stopped early reaches.
 - **Self-selection.** The people who run drills are the people who care about oversight. Their numbers say nothing about anyone else's.
 - **Drill calls are not the person's real work.** They are invented, short and self-contained, and they come with the task written above them, which real holds don't have. A person who catches every planted call in a drill may still miss one in their own project, where they know less about what the agent was asked.
 - **Repeats.** The scenario set is finite (section 6). After enough drills, a person may recognize a scenario. Each shown call records how often it was shown before, and the report counts repeats.
 - **The answers are in the package.** A person who reads the scenario file, or computes the plan from the seed in their own ledger, can score 100%. A drill measures only a person who doesn't look.
-- **The planted share is far above any real rate.** A drill plants 4 to 8 calls in 20, chosen for the measurement (section 4). Rare targets are missed more often than common ones, so a drill's catch rate is likely higher than a person's catch rate at a realistic rate. A low-rate condition may come later (section 16, question 2).
+- **The planted share is far above any real rate.** A drill plants 8 calls in 20, chosen for the measurement (section 4). Rare targets are missed more often than common ones, so a drill's catch rate is likely higher than a person's catch rate at a realistic rate. A low-rate condition may come later (section 16, questions 2 and 15).
+- **Counting down.** Every drill of 20 has 8 planted calls, and each answer is revealed, so a person who counts knows the remaining answers once 8 planted or 12 clean calls have been shown. Calls answered that way measure counting, not reading (section 4, Defaults, and why).
 - **Answers past the timeout.** Real holds time out after 300 s and drill calls never do; an answer that took longer is marked, and results are shown with and without such answers (section 4, Time).
 
 ## 2. Sources
@@ -135,8 +136,8 @@ The prediction is never scored, never shown again during the drill, and never ex
 
 ### Defaults, and why
 
-- **20 calls per drill** (`--calls` from 10 to 40). At about 30 seconds per call, reading the reveal included, that is about ten minutes: short enough to stay attentive and to repeat weekly, long enough for about 6 planted calls.
-- **Between a fifth and two fifths of the calls are planted,** drawn anew for each drill: 4 to 8 of 20, 6 on average. The count varies so that a person can't count down ("I've had five, so the rest are clean"), and the intro screen says only that the number changes. That share is far above any real rate of bad calls. It is chosen for the measurement: with fewer than about 4 planted calls a drill says almost nothing (section 7). Research on visual search finds that rare targets are missed more often than common ones; that is from general knowledge of that research, not from the sources checked on 2026-10-04 (section 17, deviation 27). So drill catch rates are expected to run above what a person would catch at a realistic rate, which live planted calls measure (section 11).
+- **20 calls per drill** (`--calls` from 10 to 40). At about 30 seconds per call, reading the reveal included, that is about ten minutes: short enough to stay attentive and to repeat weekly, long enough for 8 planted calls.
+- **Two fifths of the calls are planted:** 8 of 20, and 12 clean, in every drill (`floor(2 * calls / 5)` planted for other values of `--calls`: 4 of 10, 16 of 40). The planted calls are spread over the five shapes as evenly as the set allows, so a drill of 20 has two of three shapes and one of the other two, and no shape is missing (section 6, Sampling). This is the owner's decision after reviewing stage 8's first tool check, where one plain drill had 4 planted calls and one prediction-gate drill 6, and a catch rate needs 5 (section 16, question 15). Drawn from 4 to 8, as first specified, only 80% of drills had 5 or more. The intro screen states the count. The cost: the count no longer varies, so a person can count down ("I've had eight, so the rest are clean"), which the varying count was there to prevent (section 1, What the numbers cannot show). That share is far above any real rate of bad calls. It is chosen for the measurement: with fewer than 5 planted calls a drill has no catch rate (section 7). Research on visual search finds that rare targets are missed more often than common ones; that is from general knowledge of that research, not from the sources checked on 2026-10-04 (section 17, deviation 27). So drill catch rates are expected to run above what a person would catch at a realistic rate, which live planted calls measure (section 11).
 - **Condition at random,** plain or prediction gate with equal chance, from the plan's seed, unless `--condition` chooses one (decision 5). The draw is made either way, so a flag changes nothing else in the plan.
 - **No repeat in consecutive drills.** Scenarios shown in either of the last two drills in this ledger are left out of the draw (section 6, Sampling), unless `--seed` is given.
 
@@ -144,16 +145,16 @@ The prediction is never scored, never shown again during the drill, and never ex
 
 The screens below are exact; placeholders are in angle brackets, and `<dir>` is the drill directory. Every golden file is stdout's bytes from an in-process drill with injected input, clocks, seed, hold ids and salts, and a small test scenario set (`tests/helpers/drill_scenarios.json`), so the files don't change when the shipped set does. Typed input is not echoed in the files. A file for one screen (the intro, a call, a reveal, the end) holds what the drill wrote between two reads of input, so `drill_end.txt` is the end screen alone. A line that waits for Enter (`Press Enter to start.`, `Press Enter for the next call.`) is written without a newline; the person's Enter ends it.
 
-**Intro, plain** (`drill_intro_plain.txt`; 20 is the drill's `--calls`):
+**Intro, plain** (`drill_intro_plain.txt`; 20 is the drill's `--calls`, and 8 its number of planted calls):
 
 ```
 Polarizer drill: practice with held calls
 
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
-deny. Some calls are planted: they differ from the task in a way that should be
-denied. How many changes from drill to drill. After each answer you see whether
-the call was clean or planted, and why.
+deny. 8 of the 20 calls are planted: they differ from the task in a way
+that should be denied. Real work has far fewer. After each answer you see
+whether the call was clean or planted, and why.
 
 Nothing here is real. There is no agent and no server, nothing is sent
 anywhere, and nothing times out. Your answers and times stay on this computer,
@@ -253,14 +254,14 @@ For the last call, the Enter line is `Press Enter to see the results.`
 You took over 300 s; a real hold would have timed out before your answer.
 ```
 
-**The end of a drill** (`drill_end.txt`), with 6 planted calls of which 5 were denied, and 14 clean calls of which 1 was denied:
+**The end of a drill** (`drill_end.txt`), with 8 planted calls of which 7 were denied, and 12 clean calls of which 1 was denied:
 
 ```
 
 Drill finished: 20 of 20 calls answered (plain).
 
-planted calls: 6. You denied 5: caught 83%, 95% interval 43% to 97%.
-clean calls: 14. You denied 1: false flags 7%, 95% interval 1% to 32%.
+planted calls: 8. You denied 7: caught 88%, 95% interval 52% to 98%.
+clean calls: 12. You denied 1: false flags 8%, 95% interval 1% to 36%.
 median time to decide: 12.4 s (planted 18.0 s, clean 10.9 s)
 missed: call 7 (look-alike)
 false flags: call 12
@@ -278,7 +279,7 @@ to see every drill so far.
 - **Stopped with no answers** (`drill_end_stopped.txt` covers stopping after 3 answers): `Drill stopped: 0 of 20 calls answered (plain).`, then the closing lines only.
 - **Answers over 300 s** (`drill_end_over_300.txt`): after the `false flags:` line, `over 300 s: call 4. Without it:` (or `call 4, call 9. Without them:`), then the planted and clean lines again, indented two spaces, computed without those answers. With no answer over 300 s the two are the same, and these lines are left out.
 
-The numbers in this example are section 7's test vectors 5 of 6 and 1 of 14.
+The numbers in this example are section 7's test vectors 7 of 8 and 1 of 12.
 
 ## 6. The scenario set
 
@@ -362,7 +363,7 @@ Every planted call has exactly one shape (decision 3). The ledger and the file u
 
 ### Why 150
 
-A drill draws 20 calls, about 6 planted, and leaves out what the last two drills showed. With 60 planted calls, two drills in a row never share one, and a planted call comes back only after about 8 to 10 drills, which is a few months of weekly drills. With 90 clean calls the same holds for clean ones. A smaller set would let a person learn answers; a larger one costs review time for each scenario. The report counts repeats (section 9), so a set that has run out shows.
+A drill draws 20 calls, 8 planted, and leaves out what the last two drills showed. With 60 planted calls, two drills in a row never share one, and a planted call comes back after 6 drills at the median (3 at the least, 7.5 on average, in a simulation of 2,000 drills in a row on one ledger), which is about six weeks of weekly drills. Clean calls, 12 of 90 per drill, come back after the same numbers of drills. A smaller set would let a person learn answers; a larger one costs review time for each scenario. The report counts repeats (section 9), so a set that has run out shows.
 
 ### Loading
 
@@ -373,7 +374,7 @@ At start, `drill` loads the newest set in the package and checks it against the 
 - The file's sha256 is recorded in every `drill.started` (`set_sha256`), with its version.
 - `test_scenario_set_hash_pinned` holds the sha256 of each shipped set file. Any edit to a shipped set fails that test, so a change can't ship without a new version.
 - **Any change** to a scenario, an addition or a removal makes a new set: a new file, `drill-set-<n+1>.json`, with `set` raised. The newest set is the one drills use. Older set files stay in the package for one release, so a report can name them; the ledger never needs them, because `drill.revealed` records each answer (section 8).
-- **Adding a scenario:** write it with `intent`, `call`, `plant` and `why`; run `tests/test_scenarios.py`; render it with `uv run python -m polarizer.scenarios show <id>` (a development helper that prints the drill screen for one scenario); and have a person other than its author read the screen and answer it before seeing `answer`. A scenario that person answers wrongly for a reason other than inattention (the task was ambiguous, the cue was missing) is rewritten. The stage notes record who reviewed which set, by role.
+- **Adding a scenario:** write it with `intent`, `call`, `plant` and `why`; run `tests/test_scenarios.py`; render it with `uv run python -m polarizer.scenarios show <id>` (a development helper that prints the drill screen for one scenario); and have a person other than its author read the screen and answer it before seeing `answer`. A scenario that person answers wrongly for a reason other than inattention (the task was ambiguous, the cue was missing) is rewritten. The stage notes record who reviewed which set, by role. For a review of the whole set, `uv run python -m polarizer.scenarios sheet --out drill-review/scenarios.md` writes one markdown file (`drill-review/` is gitignored): every scenario with its id, answer, shape, task, the block a drill shows (zero ids, a fixed time) and its reveal; then counts per shape, tool, class, rule and answer, planted shapes against the clean scenarios on the same tools, and a list to look at: task lines the same or at least 0.85 alike (difflib's ratio), reveals under 8 words, shapes with fewer than 8 scenarios, and scenarios on a tool fewer than 3 scenarios use.
 
 ### Sampling
 
@@ -390,21 +391,35 @@ shuffle(s, xs):  for i from len(xs) - 1 down to 1:
 plan(seed, set, calls, excluded):
   s = stream(seed)                                  seed is 16 bytes
   condition = ["plain", "prediction-gate"][below(s, 2)]   (replaced by --condition when given)
-  lo = ceil(calls / 5); hi = floor(2 * calls / 5)
-  k = lo + below(s, hi - lo + 1)                    the number of planted calls
-  P = planted ids not in excluded, sorted; if fewer than k, all planted ids, sorted
+  k = min(floor(2 * calls / 5), number of planted ids)    the number of planted calls: 8 of 20
+  S = the shapes that have a planted id in the set, in the order of section 6's table
+  turn = shuffle(s, S)                              the order in which shapes are dealt a call
+  quota[x] = 0 for each x in S
+  while the quotas add up to less than k:
+    for x in turn:
+      if the quotas add up to less than k and quota[x] < the number of planted ids of shape x:
+        quota[x] = quota[x] + 1
+  P = []
+  for x in S:
+    Px = planted ids of shape x not in excluded, sorted;
+         if fewer than quota[x], all planted ids of shape x, sorted
+    P = P + shuffle(s, Px)[:quota[x]]
   C = clean ids not in excluded, sorted; if fewer than calls - k, all clean ids, sorted
-  P = shuffle(s, P)[:k]; C = shuffle(s, C)[:calls - k]
+  C = shuffle(s, C)[:calls - k]
   order = shuffle(s, P + C)
 ```
 
+- **The count** is fixed by `--calls`: 8 planted and 12 clean of 20 (section 16, question 15).
+- **The shapes** are dealt one call each per round, in the drawn order `turn`, so their counts differ by at most one; a shape with too few scenarios is skipped once it has them all, and the others take its place. With the shipped set (12 of each shape) a drill of 20 has 2, 2, 2, 1 and 1, every shape present, and which shapes get two is drawn. With fewer planted calls than shapes (4 of 10) some shape is missing.
+
 - **The seed** is 16 bytes from `secrets.token_bytes`, recorded in `drill.started` as 32 hex characters, unless `--seed` gives one (`seed_from` `"flag"`).
 - **Excluded** are the scenario ids shown in the last two drills of this ledger, by `drill.started` seq, whatever their ending, recorded in `drill.started` as a sorted list. With `--seed`, nothing is excluded, so one seed gives the same drill on any machine: two people can run the same drill and compare.
-- **Test vector** (`test_sampler_vector`): with planted ids `p01` to `p06`, clean ids `c01` to `c10`, `calls` 10, and the seed `000102030405060708090a0b0c0d0e0f` (bytes 0 to 15):
+- **Test vector** (`test_sampler_vector`): with planted ids `p01` to `p10`, of shapes changed argument (`p01` to `p03`), different tool (`p04`, `p05`), extra effect (`p06`, `p07`), misleading summary (`p08`, `p09`) and look-alike (`p10`), clean ids `c01` to `c12`, and the seed `000102030405060708090a0b0c0d0e0f` (bytes 0 to 15):
   - the stream's first two values are 8468598625902157147 and 15816047190215027138;
-  - with nothing excluded, the plan is `prediction-gate`, 4 planted, order `c08, c02, c06, c10, p01, c01, p06, p04, c03, p05`;
-  - with `p01`, `p02` and `c01` excluded, it is `prediction-gate`, 4 planted, order `p06, p05, c04, p03, c07, c09, c10, p04, c05, c08`;
-  - with the seed of 16 bytes of `ff` and nothing excluded, it is `prediction-gate`, 3 planted, order `p02, p01, c03, p05, c06, c01, c02, c05, c08, c09`.
+  - with `calls` 20 and nothing excluded, the plan is `prediction-gate`, 8 planted, order `c02, c09, p07, p06, p10, c04, c11, p09, c05, c06, c08, c10, p05, p03, c03, c01, c12, p01, c07, p04`;
+  - with `calls` 20 and `p01`, `p04`, `p10` and `c01` excluded, it is `prediction-gate`, 8 planted, order `c07, c11, c09, c05, c10, c01, c04, c02, p04, c08, p07, p05, p03, p10, p02, c03, c12, p09, c06, p06` (different tool and look-alike fall back to all their ids, and the clean calls to all clean ids);
+  - with the seed of 16 bytes of `ff`, `calls` 10 and nothing excluded, it is `prediction-gate`, 4 planted, order `c02, c05, c06, p08, c09, p04, p06, c01, c07, p10`, with no changed-argument call.
+  - These values were computed first by a stdlib-only script written from the text above, in the session's scratch directory, and then by the code; the two agreed (docs/dev/STAGE8-NOTES.md, Stage 8 review).
 
 ## 7. Statistics
 
@@ -465,6 +480,8 @@ The difference is **distinguishable from noise** when `low > 0` or `high < 0`, o
 | 5 | 5 | 0.565518 | 1.000000 | 100% (56% to 100%) |
 | 5 | 6 | 0.436497 | 0.969947 | 83% (43% to 97%) |
 | 1 | 14 | 0.012722 | 0.314687 | 7% (1% to 32%) |
+| 7 | 8 | 0.529112 | 0.977583 | 88% (52% to 98%) |
+| 1 | 12 | 0.014865 | 0.353880 | 8% (1% to 36%) |
 | 13 | 17 | 0.527382 | 0.904450 | 76% (52% to 91%) |
 | 15 | 17 | 0.656636 | 0.967120 | 88% (65% to 97%) |
 | 3 | 42 | 0.024590 | 0.190094 | 7% (2% to 20%) |
@@ -632,6 +649,7 @@ each drill
 <the closing lines of section 3>
 ```
 
+- **The fixture** was built before every drill of 20 had 8 planted calls (section 16, question 15), and is not drawn by the sampler: its drills of 20 have 5 or 6 planted calls. The report reads whatever a ledger holds, so the fixture and this example are unchanged.
 - **Pooling.** A condition's lines pool every answered call of its drills. With one condition only, the comparison section is `prediction gate minus plain: no prediction-gate drills yet` (or the other way round).
 - **Several set versions** are named in the first line: `(scenario sets 1 and 2)`.
 - **Each drill** is one line, in `drill.started` order, dated by the UTC date of its `drill.started` `ts`; `, stopped` or `, did not end` follows the counts when it didn't finish. The fixture's per-drill lines are in the golden file; the spec shows the first and last.
@@ -940,6 +958,8 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | `test_names_are_invented` | Reserved domains only; every home user and package name is in `names`; no name on the deny list; nothing credential-like. | Default |
 | `test_set_balance` | 150 scenarios, 90 and 60, 12 per shape; no rule, class or tool of a planted call has fewer than 40% clean; each shape on at least 3 tools; block lengths within 20%. | Default |
 | `test_every_scenario_renders` | Every scenario renders through `holds.render_block` in at most 60 lines, ASCII only. | Default |
+| `test_review_sheet` | `sheet --out` writes every scenario of the shipped set with its answer, shape, task, block and reveal, and the summary counts; the shipped set has nothing to look at. | Default |
+| `test_review_sheet_lists_what_to_look_at` | On the test set, changed to have a repeated and a near-duplicate task line, a short reveal and backticks in a reveal, each is listed, with the shapes under 8 and the rare tools; a reveal holding a fence gets a longer fence. | Default |
 | `test_loading_check` | A copy of the set with a broken scenario makes `drill` print the set's refusal line, exit 2, and write nothing. | Default |
 
 ### `tests/test_drill.py` (stage 8)
@@ -947,6 +967,7 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | Test | Claim | Suite |
 |---|---|---|
 | `test_sampler_vector` | The stream values and the three plans of section 6, Sampling. | Default |
+| `test_planted_count_and_shapes` | With the shipped set, 2,000 drills of 20 in a row, each leaving out the two before it: every plan has 8 planted and 12 clean calls, all five shapes, two each of three and one each of two, and nothing from the two drills before it. | Default |
 | `test_plan_is_reproducible_from_the_ledger` | After a drill, the plan drawn from `drill.started` (seed, set, calls, excluded, condition) equals the `drill.shown` sequence and the recorded condition. | Default |
 | `test_condition_random_and_flag` | Without `--condition`, the condition is the plan's draw and `condition_from` is `random`; with it, the flag's value and `flag`, and the order of calls is unchanged. | Default |
 | `test_no_repeat_of_last_two_drills` | Three drills in a row on one ledger: no scenario of drills 1 or 2 is in drill 3, and `excluded` lists them; with `--seed`, nothing is excluded. | Default |
@@ -1028,16 +1049,17 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 
 Stage 8 writes `docs/DRILL-GUIDE.md`: a one-page walkthrough the owner can send to a friend or a hiring manager who wants to try a drill. This section specifies it.
 
-- **Length and tone.** At most about 600 words. Plain sentences, second person, no jargon: "a record file on your computer", not "ledger"; "the AI agent", with MCP named once and explained in a clause. Every command is on its own line, ready to paste.
-- **Who it is for, first:** anyone, with no AI agent needed. "This takes about 15 minutes, 10 of them the drill."
-- **What a drill is:** you play the person who approves an AI agent's risky actions. You see 20 actions, each with the task the agent was given, and you allow or deny each. Some were changed to be wrong on purpose. After each answer you see whether you were right, and why.
-- **Install,** for macOS and Linux, and for Windows (PowerShell): install uv from its official instructions (linked), then the one `uv tool install` line. While the repository is private, the owner sends a package file instead, and the guide gives that line too (section 16, question 1). The guide states that installing downloads Polarizer's dependencies, and that the drill itself uses no network. It says that drills on a native Windows console (PowerShell or Command Prompt) have not been tried yet (section 16, question 14).
-- **Run one drill:** `polarizer drill`. What the screen shows, with a short excerpt of a call and a reveal; how to answer (`a` or `d`, `q` to stop); that nothing is real and nothing is sent.
+- **Length and tone.** One page, about 800 words of prose besides its commands and screens (600 before the stage 8 review added the items below). Plain sentences, second person, no jargon: "a record file on your computer", not "ledger"; "the AI agent", with MCP named once and explained in a clause. Every command is on its own line, ready to paste.
+- **Who it is for, first:** anyone, with no AI agent needed, but a terminal needed, said plainly, with what it is called on each system. "This takes about 15 minutes, 10 of them the drill." A friend who works with computers can do the install with the reader in five minutes.
+- **Words you will see,** four in three lines: planted call, clean call, caught, false flag, each in a few plain words.
+- **What a drill is:** you play the person who approves an AI agent's risky actions. You see 20 actions, each with the task the agent was given, and you allow or deny each. 8 of the 20 were changed to be wrong on purpose, far more than real work has. After each answer you see whether you were right, and why.
+- **Install,** for macOS and Linux, and for Windows (PowerShell), as numbered steps in plain words: install uv from its official instructions (linked; copy the line for your system, paste it, open a new terminal), then the one `uv tool install` line. Once the repository is public, `uvx --from git+https://github.com/mpwilso/polarizer polarizer drill` runs a drill with no install of Polarizer, marked as working only then. While the repository is private, the owner sends a package file instead, and the guide gives that line too (section 16, question 1). The guide states that installing downloads Polarizer's dependencies, and that the drill itself uses no network. It says that drills on a native Windows console (PowerShell or Command Prompt) have not been tried yet (section 16, question 14).
+- **Run one drill:** `polarizer drill`. What the screen shows, with an excerpt of a call that includes its arguments, and a reveal; how to read an action (the `hold` line names the tool and its kind, the `held by` line says why it would be paused, the part in braces is exactly what it would do, to compare with the task); that clean calls are held too, as real holds are, and the reveal explains each; how to answer (`a` or `d`, `q` to stop); that nothing is real and nothing is sent.
 - **See and export the results:** `polarizer drill report`, then `polarizer drill report --export drill-summary.json`; a short excerpt of what the export holds, and a plain list of what it never holds (section 9, The export). Sending it is the reader's choice.
-- **How to read the numbers:** "too few to say" and the interval, in two sentences; that a drill measures attention when you know you are being tested.
+- **How to read the numbers:** "too few to say" and the interval, in two sentences; that one drill's 8 planted calls give a wide interval; that a drill measures attention when you know you are being tested, and has far more planted calls than real work.
 - **What it is not:** the paragraph from section 3 that drills are not for grading or ranking anyone, word for word.
 - **Removing it:** `uv tool uninstall polarizer`, and the drill directory to delete by hand, with its path on each platform.
-- **Checked by a test:** `tests/test_drill_guide.py::test_guide_commands_exist` checks that every `polarizer` command line in the guide parses with Polarizer's own parser, and that the guide quotes section 3's paragraph exactly. The docs check covers its links and ASCII.
+- **Checked by a test:** `tests/test_drill_guide.py::test_guide_commands_exist` checks that every `polarizer` command line in the guide parses with Polarizer's own parser, the uvx line's included, and that the guide quotes section 3's paragraph exactly. `test_guide_commands_run` runs the polarizer lines, and `test_guide_install_lines_run_offline` runs the package file's install line and the uninstall line as written, with uv offline, into a tool directory of its own; only the two lines that fetch from GitHub are not run. The docs check covers its links and ASCII.
 
 ## 14. README plan (not applied)
 
@@ -1103,7 +1125,7 @@ Deferred by the owner's decision (section 16, question 6): M3's card comes first
 The owner answered this section's questions on Oct 5, 2026 (UTC), after stage 8's step 0; questions 1, 10 and 11 were left to this spec's recommendation. Each answer is one line; the sections it changes say so where they apply.
 
 1. **Installing for a friend while the repository is private.** Decided (this spec's recommendation): the guide gives the `uv tool install` line for a package file the owner builds with `uv build` and sends, and the `git+https` line for once the repository is public; whether to send package files before then is the owner's choice.
-2. **The planted share in drills.** Decided: kept at 4 to 8 of 20; the limits say it is far above any real rate, and a low-rate condition may come later (section 1, What the numbers cannot show).
+2. **The planted share in drills.** Decided: kept at 4 to 8 of 20; the limits say it is far above any real rate, and a low-rate condition may come later (section 1, What the numbers cannot show). The count was then fixed at 8 (question 15).
 3. **Keeping predictions.** Decided: by default only each prediction's length is recorded; `--keep-predictions` stores the folded text in the person's own drill ledger; predictions are never exported in any form other than counts (sections 4, 8 and 9).
 4. **A drill time limit.** Decided: an answer that took over 300 s is marked, and results are reported both with and without such answers (sections 4, 5 and 9).
 5. **Monotonic time to decision for real holds.** Decided: yes; M3's card records a monotonic `elapsed_ms` on `hold.decided`, and `stats` prefers it when present (section 10).
@@ -1116,6 +1138,7 @@ The owner answered this section's questions on Oct 5, 2026 (UTC), after stage 8'
 12. **`serve` and a drill ledger.** Decided: `serve` refuses a ledger directory that holds drill entries, with one line and exit 2, the existing usage-error exit; no new exit code (section 9).
 13. **CLAUDE.md, rule 6.** Decided: rule 6 names `~/.local/share/polarizer-drills` as a Polarizer ledger location that development sessions must not write to; tests use temporary directories.
 14. **Windows console input** for drills. Decided: drills on a native Windows console are unverified, and the guide says so (section 13).
+15. **The planted count, after the first tool check.** Decided by the owner on Oct 5, 2026 (UTC), after reviewing stage 8's first tool check (4 planted calls in a plain drill, 6 in a prediction-gate drill, and "too few to say" for a catch rate below 5): every drill of 20 has exactly 8 planted and 12 clean calls, spread over the five shapes as evenly as the set allows, with no shape missing when the set has it, and with seeded, recorded sampling as before (sections 4 and 6). Drawn from 4 to 8, 80% of 10,000 seeded drills in each condition had 5 or more planted calls; now all do. The intro screen states the count. Still open: a person can count down once 8 planted or 12 clean calls have been revealed (section 1); hiding the count, or marking the calls whose answer was already known, would each need a decision.
 
 ## 17. Deviations and guesses
 
@@ -1177,6 +1200,18 @@ Decided while building stage 8; docs/dev/STAGE8-NOTES.md has the detail.
 9. **An unknown word after `drill`** is argparse's error, `polarizer: argument action: invalid choice: ...`, exit 2.
 10. **The guide** quotes section 3's closing lines as its paragraph on what drills are not, word for word, after one plain sentence of its own; `tests/test_drill_guide.py` also runs the guide's polarizer commands, as `tests/test_readme.py` runs the README's.
 
+### Stage 8 review (Oct 5, 2026, UTC)
+
+Decided in the owner's review of stage 8; docs/dev/STAGE8-NOTES.md, Stage 8 review, has the detail.
+
+1. **A fixed 8 planted and 12 clean calls in a drill of 20** (section 16, question 15), dealt over the shapes in a drawn order so that shape counts differ by at most one. Other values of `--calls` plant `floor(2 * calls / 5)`; the brief named 20 only, so that rule is this round's guess.
+2. **The intro screen states the count** (`8 of the 20 calls are planted`), since the old sentence, that the count changes, is no longer true, and the guide and this spec state it. Not stating it would be the other choice; the count would still be learned after a drill or two.
+3. **The report fixture is unchanged.** It is a hand-built ledger, not drawn by the sampler, so its drills of 20 keep 5 or 6 planted calls (section 9).
+4. **The guide** says a terminal is needed and how to install uv and Polarizer in numbered steps, adds four words and how to read an action, says clean calls are held too, and gives the `uvx` line for once the repository is public (section 13). It grew to about 800 words of prose.
+5. **The guide's offline uv lines are run by its test,** into temporary tool and bin directories with uv offline; the two lines that fetch from GitHub are not.
+6. **`python -m polarizer.scenarios sheet --out <path>`** writes a review sheet (section 6, Adding a scenario). "Planted versus clean per shape" counts, for each shape, the clean scenarios on the tools that shape's planted scenarios use, since clean scenarios have no shape.
+7. **A writer test** pins stage 8's one change to `writer.py`: a listener's own `LedgerError` at open passes through, and every other listener error is reported as before.
+
 ### Deviations from the decisions and the existing documents
 
 1. **Time to decision for real holds is the wall-clock difference** of `hold.created` and `hold.decided`, in whole seconds, 0 when negative, labeled "about", because the interval crosses processes (section 10). milestones.md's carry-forward note and PIN-SPEC.md, section 3 asked for a monotonic value stored in the entry; that is kept for drills and proposed for M3 (section 16, question 5).
@@ -1191,7 +1226,7 @@ Decided while building stage 8; docs/dev/STAGE8-NOTES.md has the detail.
 10. **A drill's block says `times out after 300 s`,** as a real hold's does, and nothing times out; the intro says so.
 11. **`drill` reads no config** and refuses only Parallax's two directories (section 9).
 12. **A new default directory,** `~/.local/share/polarizer-drills`, beside the serve ledger's (section 16, question 13).
-13. **4 to 8 planted calls in 20,** varying per drill, chosen for measurement over realism (section 4).
+13. **8 planted calls in 20,** the same in every drill, chosen for measurement over realism (section 4); first 4 to 8, varying per drill, until the owner's decision after the first tool check (section 16, question 15).
 14. **No repeat of the last two drills,** and none of that with `--seed`, which is a user-facing flag so two people can run the same drill.
 15. **The cap margin:** no planted call with 12 or more holds open. HOLD-SPEC.md, section 12 left the margin to this spec.
 16. **The sampler is defined on SHA-256,** not on Python's `random`, so a recorded plan can be drawn again by any version.

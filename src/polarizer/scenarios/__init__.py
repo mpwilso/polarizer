@@ -103,6 +103,10 @@ class ScenarioSet:
     def ids(self, answer: str) -> list[str]:
         return sorted(i for i, s in self.scenarios.items() if s["answer"] == answer)
 
+    def shapes(self) -> dict[str, str]:
+        """{id: shape} of every planted scenario."""
+        return {i: s["shape"] for i, s in self.scenarios.items() if s["answer"] == "planted"}
+
 
 def printable_line(text) -> bool:
     return isinstance(text, str) and all(0x20 <= ord(c) <= 0x7E for c in text)

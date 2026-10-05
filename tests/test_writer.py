@@ -321,6 +321,41 @@ def test_listener_failure_at_open_refuses_to_start(tmp_path, head_at):
     LedgerWriter.open(directory, lock_wait=0).close()  # the lock was released
 
 
+def test_listener_ledger_error_at_open_is_passed_on(tmp_path):
+    """A listener that raises LedgerError at open refuses with its own line and code (serve on
+    a drill ledger, a drill on a serve ledger); nothing is written, not even a missing
+    ledger.head, and the lock is released. The same ledger opened with a listener that raises
+    any other error refuses with the fold line and exit 1, and opened with no listener it opens
+    and rebuilds its head, both as before stage 8."""
+    directory = tmp_path / "l"
+    build_chain(directory, [note(1), ("note", {"refuse": True}), note(3)], head_at=None)
+    before = {p.name: p.read_bytes() for p in directory.iterdir()}
+
+    def opened_with(error):
+        def listener(entry):
+            if entry["data"].get("refuse"):
+                raise error
+
+        with pytest.raises(LedgerError) as raised:
+            LedgerWriter.open(directory, on_entry=listener)
+        after = {
+            p.name: p.read_bytes() for p in directory.iterdir() if p.name != "ledger.jsonl.lock"
+        }
+        assert after == before
+        return raised.value
+
+    refused = opened_with(LedgerError("polarizer: not this ledger", 2))
+    assert (type(refused), refused.line, refused.exit_code) == (
+        LedgerError, "polarizer: not this ledger", 2)  # fmt: skip
+    failed = opened_with(ValueError("no"))
+    assert (failed.line, failed.exit_code) == (
+        "polarizer: could not fold seq 2 into pin state: no",
+        1,
+    )
+    LedgerWriter.open(directory, lock_wait=0).close()  # no listener; the lock was released
+    assert ledger_entries(directory)[-1]["kind"] == "ledger.head_rebuilt"
+
+
 class SlowPutQueue(queue.Queue):
     """A queue whose put pauses before it enqueues work (not the close sentinel), which
     widens the gap between an append's closed check and its put."""

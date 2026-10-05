@@ -49,8 +49,9 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 ## Drills
 
 - A drill measures attention when the person knows it is a test, and that some calls are planted. People read more carefully then, so drill rates are closer to a person's best than to an ordinary afternoon.
-- A drill plants 4 to 8 calls in 20, far above any real rate of bad calls, so that one drill measures something. Rare targets are missed more often than common ones, so drill catch rates likely run above a person's catch rate at a realistic rate. A condition with fewer planted calls may come later.
-- One drill has about 6 planted calls; its rates come with wide intervals, and below 5 calls of a kind no rate is printed.
+- A drill plants 8 calls in 20, far above any real rate of bad calls, so that one drill measures something. Rare targets are missed more often than common ones, so drill catch rates likely run above a person's catch rate at a realistic rate. A condition with fewer planted calls may come later.
+- One drill gives a wide interval: with 8 planted calls, a catch rate's 95% interval is 33 to 58 points wide (7 of 8 caught is 52% to 98%). Below 5 calls of a kind, as in a drill stopped early, no rate is printed.
+- Every drill of 20 has 8 planted calls, and the intro says so. Each answer is revealed, so a person who counts knows the remaining answers once 8 planted or 12 clean calls have been shown.
 - The people who run drills are the people who care about oversight; their numbers say nothing about anyone else's.
 - Drill calls are invented, short and self-contained, and come with the task written above them, which real holds don't have.
 - The scenario set is finite (150 calls). After many drills a person may recognize one; the report counts repeats.

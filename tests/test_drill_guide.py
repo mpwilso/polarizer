@@ -1,19 +1,23 @@
 """docs/DRILL-GUIDE.md, checked against the code, as tests/test_readme.py checks the README
 (docs/MEASURE-SPEC.md, section 13).
 
-Every command in the guide's sh blocks parses with Polarizer's own parser, and the polarizer
-commands are run in the guide's order on a temporary home: the drill on a pseudo-terminal,
-answered by the test (POSIX; Windows has no pty module), then the report and the export in a
-working directory of their own. The uv lines are not run: they need the network and install a
-tool for the user. The screen excerpts are compared with what a drill prints, and the closing
-lines with what Polarizer prints."""
+Every command in the guide's sh blocks is run or parsed. The polarizer commands parse with
+Polarizer's own parser and are run in the guide's order on a temporary home: the drill on a
+pseudo-terminal, answered by the test (POSIX; Windows has no pty module), then the report and
+the export in a working directory of their own. The two uv lines that need no network, the
+package file's install line and the uninstall line, are run as written, with uv offline, into
+a tool directory of the test's own. The two lines that fetch the project from GitHub are not
+run; the polarizer command in the uvx line parses. The screen excerpts are compared with what
+a drill prints, and the closing lines with what Polarizer prints."""
 
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+import tomllib
 
 import pytest
 from conftest import ROOT
@@ -24,7 +28,13 @@ from polarizer import cli, drill
 
 GUIDE = (ROOT / "docs" / "DRILL-GUIDE.md").read_text(encoding="utf-8")
 GOLDEN = ROOT / "tests" / "golden"
-NOT_RUN = {"uv ": "needs the network and installs a tool for the user"}
+PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+REPOSITORY = PYPROJECT["project"]["urls"]["Source"]
+WHEEL = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
+# The guide's uv lines. Those that fetch the project from GitHub need the network and are not
+# run; the others are run by test_guide_install_lines_run_offline.
+NETWORK = [f"uv tool install git+{REPOSITORY}", f"uvx --from git+{REPOSITORY} polarizer drill"]
+OFFLINE = [f"uv tool install ./{WHEEL}", "uv tool uninstall polarizer"]
 
 
 def blocks(language: str) -> list[str]:
@@ -36,8 +46,9 @@ def commands() -> list[str]:
 
 
 def test_guide_commands_exist():
-    """Every polarizer command line parses with Polarizer's own parser; every other line is a
-    uv line, not run here."""
+    """Every polarizer command line parses with Polarizer's own parser, as does the polarizer
+    command the uvx line runs; every other line is one of the uv lines above, so each is run by
+    a test here or needs the network."""
     found = commands()
     assert [c for c in found if c.startswith("polarizer ")] == [
         "polarizer drill",
@@ -47,10 +58,43 @@ def test_guide_commands_exist():
     for command in found:
         if command.startswith("polarizer "):
             cli._parser().parse_args(shlex.split(command)[1:])
-        else:
-            assert any(command.startswith(p) for p in NOT_RUN), command
-    wheel = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
-    assert f"uv tool install ./{wheel}" in found
+    assert sorted(c for c in found if not c.startswith("polarizer ")) == sorted(NETWORK + OFFLINE)
+    uvx = shlex.split(NETWORK[1])
+    assert uvx[:3] == ["uvx", "--from", f"git+{REPOSITORY}"] and uvx[3] == "polarizer"
+    cli._parser().parse_args(uvx[4:])
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="the guide's uv lines need uv on PATH")
+def test_guide_install_lines_run_offline(tmp_path):
+    """The package file's install line and the uninstall line, run as the guide writes them,
+    with UV_OFFLINE=1 so Polarizer's parts come from uv's cache (where `uv sync` left them),
+    into a tool directory and a bin directory of the test's own. The package file is built
+    offline first, as the owner builds the one a friend is sent. The installed polarizer then
+    prints the report's first-run line, and the uninstall line removes it. Each step has 120 s
+    against about a second needed here."""
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    env = {**os.environ, "UV_OFFLINE": "1", "UV_TOOL_DIR": str(tmp_path / "tools"),
+           "UV_TOOL_BIN_DIR": str(bin_dir)}  # fmt: skip
+
+    def run(argv, cwd, extra=None):
+        done = subprocess.run(argv, cwd=cwd, env={**env, **(extra or {})}, capture_output=True,
+                              text=True, timeout=120)  # fmt: skip
+        assert done.returncode == 0, done.stdout + done.stderr
+        return done
+
+    run(["uv", "build", "--wheel", "--offline", "--out-dir", str(home)], ROOT)
+    assert (home / WHEEL).exists()
+    run(shlex.split(OFFLINE[0]), home)
+    installed = shutil.which("polarizer", path=str(bin_dir))
+    assert installed is not None
+    report = run([installed, "drill", "report"], home, {"HOME": str(home),
+                                                        "USERPROFILE": str(home)})  # fmt: skip
+    drills = home / ".local" / "share" / "polarizer-drills"
+    assert report.stdout == f"drills: none yet in {drills}; run polarizer drill\n"
+    run(shlex.split(OFFLINE[1]), home)
+    assert shutil.which("polarizer", path=str(bin_dir)) is None
 
 
 def test_guide_quotes_the_closing_lines():

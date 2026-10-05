@@ -1,9 +1,9 @@
 
 Drill stopped: 3 of 20 calls answered (plain).
 
-planted calls: none answered.
-clean calls: 3. You denied 0: too few to say a rate (5 or more needed).
-median time to decide: 7.5 s (clean 7.5 s)
+planted calls: 2. You denied 2: too few to say a rate (5 or more needed).
+clean calls: 1. You denied 0: too few to say a rate (5 or more needed).
+median time to decide: 9.5 s (planted 9.5 s, clean 7.0 s)
 missed: none
 false flags: none
 

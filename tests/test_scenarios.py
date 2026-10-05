@@ -9,10 +9,12 @@ import statistics
 from collections import defaultdict
 from datetime import UTC, datetime
 from importlib import resources
+from pathlib import Path
 
 import pytest
 
-from polarizer import holds, lock, scenarios
+from polarizer import drill, holds, lock, scenarios
+from polarizer.scenarios import __main__ as helper
 from polarizer.text import printable
 
 SET = scenarios.newest()
@@ -334,3 +336,62 @@ def test_ids_carry_no_hint():
     assert ids == [f"s{i:03d}" for i in range(1, 151)]
     first_half = {s["answer"] for s in ALL[:75]}
     assert first_half == {"clean", "planted"}
+
+
+# --- the review sheet (python -m polarizer.scenarios sheet) ---------------------------------
+
+
+def test_review_sheet(tmp_path, capsys):
+    """`sheet --out <path>` writes every scenario of the shipped set, in file order, with its
+    id, answer, shape, task, the block a drill shows and its reveal, then the summary counts;
+    the shipped set has nothing to look at."""
+    out = tmp_path / "review" / "scenarios.md"
+    assert helper.main(["sheet", "--out", str(out)]) == 0
+    assert capsys.readouterr().out == f"wrote {out}: 150 scenarios of set 1\n"
+    text = out.read_bytes().decode("ascii")
+    assert [line[3:] for line in text.splitlines() if line.startswith("## s")] == list(
+        SET.scenarios
+    )
+    for s in ALL:
+        section = text.split(f"\n## {s['id']}\n", 1)[1].split("\n## ", 1)[0]
+        answer = f"planted, shape {s['shape']}" if s["answer"] == "planted" else "clean"
+        block = drill.call_block(s, "0" * 16, "0" * 64, "1" * 16, helper.TS, helper.TS, 300)
+        assert section.startswith(f"\n{answer}\n\n```text\ntask: {s['task']}\n\n"), s["id"]
+        assert "\n".join(block) + "\n```\n\nReveal:\n" in section, s["id"]
+        assert section.endswith(f"\n```text\nwhy: {s['why']}\n```\n"), s["id"]
+    summary = text.split("\n## Summary\n", 1)[1]
+    for shape in scenarios.SHAPES:
+        assert f"\n| {shape} | 12 |\n" in summary
+        assert f"\n| {shape} | 12 | " in summary  # planted versus clean
+    assert "\n| clean | 90 |\n| planted | 60 |\n" in summary
+    assert "\n| fs__write_file | 15 |\n" in summary and "\n| egress | 56 |\n" in summary
+    assert "\n### Look at these\n" in summary and "\nNothing.\n" in summary
+    assert helper.main(["sheet"]) == 2 and helper.main(["sheet", "--out"]) == 2
+
+
+def test_review_sheet_lists_what_to_look_at():
+    """On the small test set, changed to have a repeated task line, a near-duplicate one, a short
+    reveal and backticks in a reveal: each is listed, as are its shapes with fewer than 8
+    scenarios and its tools held in fewer than 3; a reveal holding a fence gets a longer one."""
+    doc = json.loads((Path(__file__).parent / "helpers" / "drill_scenarios.json").read_bytes())
+    items = doc["scenarios"]
+    items[1]["task"] = items[0]["task"]
+    items[3]["task"] = items[2]["task"][:-1] + "?"
+    items[4]["why"] = "Too short to say why."
+    items[5]["why"] = "A fence ``` inside a reveal, and four ```` more, in one line of text."
+    the_set = scenarios.parse(json.dumps(doc).encode("ascii"), 1)
+    found = helper.look_at(the_set)
+    ids = [s["id"] for s in items]
+    assert f"{ids[0]} and {ids[1]}: the same task line" in found
+    assert any(line.startswith(f"{ids[2]} and {ids[3]}: task lines 0.") for line in found)
+    assert f"{ids[4]}: the reveal has 5 words" in found
+    shapes = {s["shape"] for s in items if s["answer"] == "planted"}
+    assert {line for line in found if line.startswith("shape ")} == {
+        f"shape {x}: {sum(s.get('shape') == x for s in items)} scenarios" for x in shapes
+    }
+    tools = [s["call"]["tool"] for s in items]
+    rare = [s["id"] for s in items if tools.count(s["call"]["tool"]) < 3]
+    assert rare and all(any(line.startswith(f"{i}: tool ") for line in found) for i in rare)
+    text = helper.sheet(the_set)
+    assert f"\n`````text\nwhy: {items[5]['why']}\n`````\n" in text
+    assert "\n- " + found[0] + "\n" in text

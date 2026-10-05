@@ -1,5 +1,5 @@
 
 Clean call. You allowed it.
-why: The comment and the thread are the ones the task named.
+why: The edit adds the section the task asked for, before the License heading. It is held only because the path is outside every workspace root.
 
 Press Enter for the next call.

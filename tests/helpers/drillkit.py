@@ -16,15 +16,15 @@ from polarizer import cli, drill, scenarios, writer
 HERE = Path(__file__).resolve().parent
 TEST_SET = scenarios.parse((HERE / "drill_scenarios.json").read_bytes(), 1)
 TS = "2026-10-06T18:02:11.425Z"
-# The seed whose plan matches section 5's example end screen: 6 planted calls of 20, the
-# README scenario at call 3, a look-alike at call 7, a clean call at call 12.
-GOLDEN_SEED = "000000000000000000000000000009d9"
+# The first seed whose plan matches section 5's example end screen: the plain condition, 8
+# planted calls of 20, the README scenario at call 3, a look-alike at call 7, a clean call at
+# call 12.
+GOLDEN_SEED = "000000000000000000000000000005fd"
 SESSION = "8e41c6b2d09a7f35"
 # Planted and clean decision times (ms) of the example: medians 18.0 s and 10.9 s, overall
-# 12.4 s (median_low of 6, 14 and 20 values).
-PLANTED_MS = [11000, 12000, 18000, 19000, 25000, 30000]
-CLEAN_MS = [7000, 7500, 8000, 8500, 9000, 9500, 10900, 12400, 13000, 14000, 20000, 21000, 22000,
-            23000]  # fmt: skip
+# 12.4 s (median_low of 8, 12 and 20 values).
+PLANTED_MS = [9500, 11000, 12000, 18000, 19000, 25000, 30000, 31000]
+CLEAN_MS = [7000, 7500, 8000, 8500, 9000, 10900, 12400, 13000, 14000, 20000, 21000, 22000]
 
 EOF_ = object()  # an input that is the end of input
 INTERRUPT = object()  # an input that is Ctrl+C
@@ -120,8 +120,7 @@ def entries(directory: Path) -> list[dict]:
 
 
 def golden_plan(the_set=TEST_SET, seed: str = GOLDEN_SEED, calls: int = 20):
-    return drill.plan(bytes.fromhex(seed), the_set.ids("planted"), the_set.ids("clean"), calls,
-                      set())  # fmt: skip
+    return drill.plan(bytes.fromhex(seed), the_set.shapes(), the_set.ids("clean"), calls, set())
 
 
 def golden_answers(the_set=TEST_SET, prediction=None) -> list:

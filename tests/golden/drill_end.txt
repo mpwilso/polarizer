@@ -1,8 +1,8 @@
 
 Drill finished: 20 of 20 calls answered (plain).
 
-planted calls: 6. You denied 5: caught 83%, 95% interval 43% to 97%.
-clean calls: 14. You denied 1: false flags 7%, 95% interval 1% to 32%.
+planted calls: 8. You denied 7: caught 88%, 95% interval 52% to 98%.
+clean calls: 12. You denied 1: false flags 8%, 95% interval 1% to 36%.
 median time to decide: 12.4 s (planted 18.0 s, clean 10.9 s)
 missed: call 7 (look-alike)
 false flags: call 12

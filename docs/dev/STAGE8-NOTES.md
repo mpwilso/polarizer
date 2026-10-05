@@ -148,3 +148,75 @@ From docs/MEASURE-SPEC.md as committed in 29bca55; each is recorded in its secti
 | Every command in the guide parses, and its polarizer commands run | `tests/test_drill_guide.py` | yes, Linux only for the run |
 | The installed package carries the scenario set | the wheel built and installed offline in Step 3, 6 | yes, by hand |
 | Drills work on Windows and macOS | CI | no |
+
+## Stage 8 review (Oct 5, 2026, UTC)
+
+The owner's review of stage 8, after the tool check of Step 4: five items, worked in order, in one commit. Guard snapshot `snapshot-20261005T181739Z.txt` taken first. Written as the work goes.
+
+### 1. The sampler: a fixed 8 planted and 12 clean
+
+**How the old sampler decided the count.** `drill.plan` drew the condition (`below(s, 2)`), then `k = lo + below(s, hi - lo + 1)` with `lo = ceil(calls / 5)` and `hi = floor(2 * calls / 5)`: for 20 calls, uniform on 4 to 8. The planted ids were shuffled and the first `k` taken, with no regard to shape.
+
+**Measured, before any change** (`sim_old.py` in the session's scratch directory, the code at 98ade25 and the shipped set): seeds 0, 1, 2, ... as 16-byte counters, `--calls` 20, nothing excluded, until each drawn condition had 10,000 sessions (20,201 seeds):
+
+| Condition | 4 planted | 5 | 6 | 7 | 8 | catch rate reportable (5+ planted) | false-flag rate reportable (5+ clean) | a shape missing |
+|---|---|---|---|---|---|---|---|---|
+| plain | 1,961 | 1,965 | 2,083 | 1,982 | 2,009 | 80.39% | 100.00% | 83.47% |
+| prediction gate | 1,889 | 2,020 | 1,975 | 2,072 | 2,044 | 81.11% | 100.00% | 83.49% |
+
+Under 95%, so the sampler changed as the brief says.
+
+**The new sampler** (`drill.plan`, `drill.planted_count`, `ScenarioSet.shapes`): `k = min(floor(2 * calls / 5), planted ids)`, 8 of 20. The shapes the set has are shuffled into a dealing order, and calls are dealt one per shape per round, skipping a shape that has run out, so shape counts differ by at most one. Each shape's ids are drawn from those not excluded, or from all of that shape when too few are left. The clean draw is as before. The seed is drawn and recorded as before. MEASURE-SPEC.md section 6 has the pseudo-code.
+
+**The vectors were computed twice.** First, `indep_sampler.py` in the scratch directory: stdlib only, written from the new pseudo-code without importing Polarizer. Then the code. Both gave the same values:
+
+- the stream's first values: 8468598625902157147, 15816047190215027138 (script and code);
+- a: `prediction-gate`, 8, `c02, c09, p07, p06, p10, c04, c11, p09, c05, c06, c08, c10, p05, p03, c03, c01, c12, p01, c07, p04` (script and code);
+- b: `prediction-gate`, 8, `c07, c11, c09, c05, c10, c01, c04, c02, p04, c08, p07, p05, p03, p10, p02, c03, c12, p09, c06, p06` (script and code);
+- c: `prediction-gate`, 4, `c02, c05, c06, p08, c09, p04, p06, c01, c07, p10` (script and code).
+
+The tests changed only after that comparison. The Wilson values for the new example end screen, 7 of 8 (0.529112 to 0.977583, `88% (52% to 98%)`) and 1 of 12 (0.014865 to 0.353880, `8% (1% to 36%)`), were also computed first by a stdlib-only script (`wilson.py`) and matched `measure.rate_parts`. They are now rows of section 7's table and of `tests/test_measure.py`.
+
+**Measured after the change** (`sim_new.py`, the same seeds): 10,000 sessions in each condition, every one with 8 planted and 12 clean calls. Catch rate and false-flag rate reportable in 100.00% of sessions, no shape missing, and the shape counts 2, 2, 2, 1, 1 in every session (asserted). Repeats (`gaps.py`, 2,000 drills in a row on one ledger, last two excluded): a planted or clean scenario comes back after 3 drills at the least, 6 at the median, 7.5 on average.
+
+**What else item 1 changed:**
+- **The intro** now reads `8 of the 20 calls are planted: ... Real work has far fewer.`, because its old sentence, that the count changes from drill to drill, is no longer true (MEASURE-SPEC.md section 17, Stage 8 review, 2). The guide and LIMITS.md state the count too, and the new limit that a person can count down.
+- **The golden seed** is now `000...05fd`: the first counter seed whose plan on the test set draws plain and puts the README scenario at call 3, a look-alike at call 7 and a clean call at call 12 (`find_seed.py` in the scratch directory). The example times are now 8 planted and 12 clean values with the same medians, so the median line is unchanged.
+- **Golden files changed** (regenerated with `POLARIZER_UPDATE_GOLDEN=1`, each diff read): `drill_intro_plain.txt`, `drill_intro_prediction_gate.txt` (the count); `drill_end.txt` (8 and 12, 88% and 8%); `drill_end_over_300.txt`, `drill_end_stopped.txt`, `drill_reveal_caught.txt`, `drill_reveal_false_flag.txt`, `drill_reveal_over_300.txt` and `drill_reveal_right.txt` (another order: call 1 is now a planted call). `drill_call_*.txt` and `drill_reveal_missed.txt` are unchanged.
+- **Not changed:** the report fixture (`tests/helpers/drillledger.py`, `drill_report.txt`, `drill_export.json`, section 9's example). It is a hand-built ledger, not drawn by the sampler, so its drills of 20 keep 5 or 6 planted calls. Changing it would change section 7's report vectors too. The spec says so in section 9.
+- **Tests:** `test_sampler_vector` (new vectors), `test_planted_count_and_shapes` (new: 2,000 drills in a row on the shipped set, each 8 and 12 with shape counts 2, 2, 2, 1, 1, and nothing from the two before), `test_end_screen_equals_report_line` (8 and 12), `test_drill_golden` (the spec's new text), and two new rows in `tests/test_measure.py`.
+
+### 2. The guide, for a reader who is not an engineer
+
+docs/DRILL-GUIDE.md: the opening says a terminal is needed (what it is called on each system) and that a friend who works with computers can do the install in five minutes. The install is two numbered steps in plain words. "Words you will see" gives planted call, clean call, caught and false flag in three lines. "How to read an action" follows the sample screen, which now shows the arguments in braces. The guide says clean calls are held too, as real holds are, and that the reveal explains each one. It gives the `uvx --from git+https://github.com/mpwilso/polarizer polarizer drill` line, marked as working once the repository is public and uv is installed. It says the planted share is far above any real rate and that one drill's interval is wide (88%, 52% to 98%, the new example). Every other statement is kept: the privacy list, the closing lines and the not-for-grading text. The package file now goes in the home folder, so the guide needs no `cd`. It is about 800 words of prose (935 in all), up from about 560, and section 13 of the spec says so.
+
+**`tests/test_drill_guide.py`** now accounts for every command line in the guide. The three polarizer lines run as before. `test_guide_commands_exist` also parses the polarizer command inside the uvx line, and checks that every other line is one of four uv lines. `test_guide_install_lines_run_offline` (new) builds the wheel offline, then runs the guide's `uv tool install ./polarizer-0.1.0-py3-none-any.whl` and `uv tool uninstall polarizer` exactly as written, with `UV_OFFLINE=1` and its own `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`. Between the two, the installed `polarizer drill report` prints the "none yet" line. Only the two lines that fetch from GitHub are not run. It skips if `uv` is not on the PATH, which CI has. It takes about a second. `~/.local/share/uv/tools` and `~/.local/bin` held no polarizer afterwards.
+
+### 3. `writer.py` at 98ade25
+
+The only change in 98ade25 to `src/polarizer/writer.py` is two lines in `_check_existing`, plus its docstring. At open, each verified entry is handed to the `on_entry` listener. Before, any exception from the listener became `LedgerError("polarizer: could not fold seq <n> into pin state: <error>", 1)`. Now a `LedgerError` raised by the listener itself is re-raised unchanged, with its own line and exit code. Every other exception is wrapped as before.
+
+**Who calls it:** two listeners raise `LedgerError` on purpose. `serve`'s `no_drills` (`cli.py`) refuses a ledger with `drill.*` entries with exit 2, and `drill`'s `listen` (`drill.py`) refuses a ledger with `session.started` with exit 2. Neither existing listener raises it (`pins.PinState.apply`, `holds.HoldState.apply`, through `decisions.py` and `serve`): neither `pins.py` nor `holds.py` raises anything. The after-open path (`_hand_over`) is unchanged: a listener error there, a `LedgerError` included, still stops the writer.
+
+**Tests that cover it:** `tests/test_drill.py::test_serve_refuses_drill_ledger` and `::test_drill_refuses_serve_ledger` (the two callers, end to end); `tests/test_writer.py::test_listener_failure_at_open_refuses_to_start` (other errors, unchanged); and, new in this review, `tests/test_writer.py::test_listener_ledger_error_at_open_is_passed_on`. That test opens one ledger three ways: with a listener raising `LedgerError` (its line and code 2, nothing written), with a listener raising `ValueError` (the fold line, exit 1, nothing written, as before), and with no listener (it opens and rebuilds the missing head, as before).
+
+**Shown against the old code.** `src/polarizer` was copied to the scratch directory with `writer.py` from 29bca55, the commit before 98ade25, and put first on `PYTHONPATH`. There, `tests/test_writer.py`, `tests/test_pin_startup.py` and `tests/test_pin_durability.py` gave `1 failed, 42 passed`. The one failure is the new test's first assertion: the old code reports `polarizer: could not fold seq 2 into pin state: polarizer: not this ledger` with exit 1. On the current code: `43 passed`. Those three test files are unchanged between 29bca55 and 98ade25. No existing behavior changed: no listener before stage 8 raised `LedgerError`.
+
+### 4. The review sheet
+
+`python -m polarizer.scenarios sheet --out <path>` (`src/polarizer/scenarios/__main__.py`; `show` now shares its block function). It writes one markdown file with every scenario in file order: its id, answer and shape, its task line and the block a drill shows (zero ids, the fixed time `show` uses) in one text fence, and its reveal in another. Each fence is longer than any run of backticks inside it. Then come the summary tables (per shape, tool, class, rule, answer, and planted versus clean per shape), "Look at these", and one line on the nearest misses. Tests: `test_review_sheet` and `test_review_sheet_lists_what_to_look_at` in `tests/test_scenarios.py`. `/drill-review/` is in `.gitignore`. The sheet was written to `drill-review/scenarios.md`: 3,834 lines, 104,579 bytes.
+
+- **Guess:** clean scenarios have no shape, so "planted versus clean per shape" counts, for each shape, the clean scenarios held on the tools that shape's planted scenarios use. The sheet says so above its table.
+- **Thresholds,** written in the sheet: task lines the same or at least 0.85 alike by `difflib.SequenceMatcher.ratio()` on lowercased text; reveals under 8 words; shapes under 8; tools held in fewer than 3 scenarios.
+- **Set 1 found nothing.** Nearest: s026 and s147 at 0.84; seven reveals of exactly 8 words (s036, s060, s083, s110, s119, s122, s144).
+- **The Windows path:** this distro is registered as `parallax` (`$WSL_DISTRO_NAME`), so the sheet is at `\\wsl$\parallax\` followed by the repo's path with backslashes. `wsl.exe` is not on the PATH here, and `/etc/os-release` says Ubuntu 24.04, the release, not the registered name. In PowerShell, `wsl -l -q` lists the registered names.
+
+### 5. Runs
+
+- **`scripts/test.sh`:** `1251 passed, 13 skipped in 269.95s`, exit 0, 271 s wall (1244 at 98ade25, plus 7 new tests).
+- **The new and changed test files** (`tests/test_drill.py`, `test_measure.py`, `test_drill_guide.py`, `test_writer.py`, `test_scenarios.py`; 464 tests), five times in a row: 464 passed each time, in 14.79 s to 16.93 s.
+- **Once under load,** with two busy-loop Python processes (`python3 -c 'while True: pass'`, PIDs 54469 and 54470, each at about 99% CPU), started before and stopped by their PIDs after: 464 passed in 15.71 s.
+- **Time bounds in the new tests:** `test_guide_install_lines_run_offline` gives each of its four subprocesses 120 s against about a second of work. The sampler, sheet and writer tests do not wait.
+- **`scripts/dev/guard.sh check`** against `snapshot-20261005T181739Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too; exit 0.
+- **The pre-push scan** (the owner's home path, the Windows users path, the Windows user name and five other words, case-insensitive), over all 370 files in the commit: 0 of each.
+- **Not run:** `uv tool install` with the network or into the user's own tool directory; the guide's two GitHub lines; anything on Windows or macOS; a person's drill under the new sampler. CI has not run this change.

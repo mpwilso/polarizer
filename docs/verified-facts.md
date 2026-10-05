@@ -751,6 +751,15 @@ Run in this session on WSL2 (Linux), Python 3.12.3, with the repo's `.venv`. Not
 - **The wheel:** `uv build --wheel --offline` (uv_build 0.12.19 from the uv cache) wrote `polarizer-0.1.0-py3-none-any.whl`, which holds `polarizer/scenarios/drill-set-1.json`. Installed offline into a throwaway venv in the session's scratch directory (`uv venv --offline`, `uv pip install --offline`), it reported `__version__` 0.1.0 from its metadata, loaded set 1 (150 scenarios, sha256 `e2010c06...`) through `importlib.resources`, and `polarizer drill report` on a missing directory printed the "none yet" line and exited 0. `uv tool install` was not run: it installs for the user, outside the repo.
 - **The hold-check expire step:** with a 3 s delay injected between `holds --wait` returning and the lookup, the old script stopped with `no open hold of a running session was found`, as in CI run 37259695458, and the new script passed (STAGE8-NOTES.md, Step 1).
 
+## Stage 8 review (Oct 5, 2026, UTC)
+
+Run in this session on WSL2 (Linux), Python 3.12.3, uv 0.12.19, with the repo's `.venv`. Nothing was fetched and no model was run. docs/dev/STAGE8-NOTES.md, Stage 8 review, has the details.
+
+- **The planted count under the first sampler:** over 10,000 seeded drills of 20 in each drawn condition (seeds 0 to 20,200 as 16-byte counters, the shipped set), the count was uniform on 4 to 8, and 80.39% (plain) and 81.11% (prediction gate) had 5 or more planted calls. Under the new sampler, the same seeds give 8 in every drill, with all five shapes.
+- **The new sampler's test vectors:** a stdlib-only script written from docs/MEASURE-SPEC.md section 6's new pseudocode, without Polarizer's code, and the code gave the same stream values and three plans.
+- **`uv tool install` from a package file, offline:** with `UV_OFFLINE=1`, `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` set to temporary directories, `uv tool install ./polarizer-0.1.0-py3-none-any.whl` (the wheel from `uv build --wheel --offline`) installed Polarizer and its dependencies from the uv cache, the installed `polarizer drill report` printed its "none yet" line, and `uv tool uninstall polarizer` removed it. Nothing was written to the user's own uv tool directory (`tests/test_drill_guide.py::test_guide_install_lines_run_offline`).
+- **The WSL distro's name** for a `\\wsl$` path is in `$WSL_DISTRO_NAME`; `wsl.exe` is not on the PATH inside this distro (no Windows drive is mounted), and `/etc/os-release` names the Linux release, not the registered distro name.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -777,6 +786,6 @@ These are assumed or open. Nothing here has been observed.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.
 - **Drills on a native Windows console:** reading answers with `readline` in PowerShell or the Command Prompt, and Ctrl+C there, have not been run; on Windows CI only the in-process drill tests run.
 - **Drills on macOS:** the pseudo-terminal drill tests are written for macOS too but have only run on Linux.
-- **Installing from a package file with `uv tool install`,** as docs/DRILL-GUIDE.md says, has not been run.
+- **Installing with `uv tool install`** with the network, into the user's own tool directory, or on Windows or macOS: only the offline install into temporary directories on Linux has run (Stage 8 review). The guide's two lines that fetch from GitHub (`uv tool install git+...` and `uvx --from git+...`) have never run; the repository is private.
 - **The invented package names** in the scenario set were not checked against any package registry.
 - **Windows and macOS behavior of the stage 1 code:** the lock, `os.replace` retry, binary-mode file access and the read-only verify test are written for both, but have only run on Linux. The Windows test that holds `ledger.head` open runs only on the Windows CI runner.

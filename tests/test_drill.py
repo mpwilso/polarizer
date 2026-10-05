@@ -12,6 +12,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -58,21 +59,48 @@ def golden_drill(monkeypatch, directory, *args, prediction=None):
 
 
 def test_sampler_vector():
+    """Section 6, Sampling: the stream's first values and three plans, computed first by an
+    independent script from the spec's text. The vector set has 3, 2, 2, 2 and 1 planted
+    scenarios of the five shapes; plan b falls back to a shape's whole pool and to every clean
+    id, and plan c, with 4 planted calls, can't have all five shapes."""
     s = drill.stream(bytes(range(16)))
     assert (next(s), next(s)) == (8468598625902157147, 15816047190215027138)
-    planted = [f"p{i:02d}" for i in range(1, 7)]
-    clean = [f"c{i:02d}" for i in range(1, 11)]
+    shapes = ["changed-argument"] * 3 + ["different-tool"] * 2 + ["extra-effect"] * 2
+    shapes += ["misleading-summary"] * 2 + ["look-alike"]
+    planted = {f"p{i:02d}": shape for i, shape in enumerate(shapes, 1)}
+    clean = [f"c{i:02d}" for i in range(1, 13)]
 
     def order(text):
         return text.split(", ")
 
     seed = bytes(range(16))
-    assert drill.plan(seed, planted, clean, 10, set()) == (
-        "prediction-gate", 4, order("c08, c02, c06, c10, p01, c01, p06, p04, c03, p05"))  # fmt: skip
-    assert drill.plan(seed, planted, clean, 10, {"p01", "p02", "c01"}) == (
-        "prediction-gate", 4, order("p06, p05, c04, p03, c07, c09, c10, p04, c05, c08"))  # fmt: skip
+    assert drill.plan(seed, planted, clean, 20, set()) == ("prediction-gate", 8, order(
+        "c02, c09, p07, p06, p10, c04, c11, p09, c05, c06, c08, c10, p05, p03, c03, c01, c12, "
+        "p01, c07, p04"))  # fmt: skip
+    assert drill.plan(seed, planted, clean, 20, {"p01", "p04", "p10", "c01"}) == (
+        "prediction-gate", 8, order(
+        "c07, c11, c09, c05, c10, c01, c04, c02, p04, c08, p07, p05, p03, p10, p02, c03, c12, "
+        "p09, c06, p06"))  # fmt: skip
     assert drill.plan(b"\xff" * 16, planted, clean, 10, set()) == (
-        "prediction-gate", 3, order("p02, p01, c03, p05, c06, c01, c02, c05, c08, c09"))  # fmt: skip
+        "prediction-gate", 4, order("c02, c05, c06, p08, c09, p04, p06, c01, c07, p10"))  # fmt: skip
+
+
+def test_planted_count_and_shapes():
+    """With the shipped set, every 20-call plan has exactly 8 planted and 12 clean calls, with
+    all five shapes, two each of three and one each of two: 2,000 drills in a row, each leaving
+    out what the two before it showed, as drills on one ledger do."""
+    the_set = scenarios.newest()
+    planted, clean = the_set.shapes(), the_set.ids("clean")
+    last = [set(), set()]
+    for i in range(2000):
+        seed = hashlib.sha256(i.to_bytes(4, "big")).digest()[:16]
+        _, k, order = drill.plan(seed, planted, clean, 20, last[0] | last[1])
+        shapes = [planted[x] for x in order if x in planted]
+        assert k == len(shapes) == 8 and len(order) == 20
+        assert sorted(Counter(shapes).values()) == [1, 1, 2, 2, 2]
+        assert not (last[0] | last[1]) & set(order)
+        last = [last[1], set(order)]
+    assert [drill.planted_count(n) for n in (10, 13, 20, 40)] == [4, 5, 8, 16]
 
 
 def test_plan_is_reproducible_from_the_ledger(monkeypatch, tmp_path):
@@ -87,7 +115,7 @@ def test_plan_is_reproducible_from_the_ledger(monkeypatch, tmp_path):
     started = [e["data"] for e in dk.entries(directory) if e["kind"] == "drill.started"]
     for data in started:
         assert data["set"] == the_set.version and data["set_sha256"] == the_set.sha256
-        condition, k, order = drill.plan(bytes.fromhex(data["seed"]), the_set.ids("planted"),
+        condition, k, order = drill.plan(bytes.fromhex(data["seed"]), the_set.shapes(),
                                          the_set.ids("clean"), data["calls"],
                                          set(data["excluded"]))  # fmt: skip
         shown = [e["data"]["scenario"] for e in dk.entries(directory)
@@ -323,9 +351,9 @@ def test_end_screen_equals_report_line(monkeypatch, tmp_path, capsys):
     report = capsys.readouterr().out
     end = console.text(len(console.segments) - 1)
     # the end screen's counts and median, and the report's line for that drill
-    assert "planted calls: 6. You denied 5:" in end and "clean calls: 14. You denied 1:" in end
+    assert "planted calls: 8. You denied 7:" in end and "clean calls: 12. You denied 1:" in end
     assert "median time to decide: 12.4 s" in end
-    assert "plain, 20 of 20: caught 5 of 6, false flags 1 of 14, median 12.4 s" in report
+    assert "plain, 20 of 20: caught 7 of 8, false flags 1 of 12, median 12.4 s" in report
 
 
 # --- the ledger ---------------------------------------------------------------------------
@@ -635,9 +663,9 @@ SPEC_INTRO = """Polarizer drill: practice with held calls
 
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
-deny. Some calls are planted: they differ from the task in a way that should be
-denied. How many changes from drill to drill. After each answer you see whether
-the call was clean or planted, and why.
+deny. 8 of the 20 calls are planted: they differ from the task in a way
+that should be denied. Real work has far fewer. After each answer you see
+whether the call was clean or planted, and why.
 
 Nothing here is real. There is no agent and no server, nothing is sent
 anywhere, and nothing times out. Your answers and times stay on this computer,
@@ -652,8 +680,8 @@ Press Enter to start."""
 SPEC_END = """
 Drill finished: 20 of 20 calls answered (plain).
 
-planted calls: 6. You denied 5: caught 83%, 95% interval 43% to 97%.
-clean calls: 14. You denied 1: false flags 7%, 95% interval 1% to 32%.
+planted calls: 8. You denied 7: caught 88%, 95% interval 52% to 98%.
+clean calls: 12. You denied 1: false flags 8%, 95% interval 1% to 36%.
 median time to decide: 12.4 s (planted 18.0 s, clean 10.9 s)
 missed: call 7 (look-alike)
 false flags: call 12

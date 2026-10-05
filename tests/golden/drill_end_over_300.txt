@@ -1,14 +1,14 @@
 
 Drill finished: 20 of 20 calls answered (plain).
 
-planted calls: 6. You denied 5: caught 83%, 95% interval 43% to 97%.
-clean calls: 14. You denied 1: false flags 7%, 95% interval 1% to 32%.
-median time to decide: 14.0 s (planted 18.0 s, clean 13.0 s)
+planted calls: 8. You denied 7: caught 88%, 95% interval 52% to 98%.
+clean calls: 12. You denied 1: false flags 8%, 95% interval 1% to 36%.
+median time to decide: 14.0 s (planted 25.0 s, clean 10.9 s)
 missed: call 7 (look-alike)
 false flags: call 12
 over 300 s: call 1. Without it:
-  planted calls: 6. You denied 5: caught 83%, 95% interval 43% to 97%.
-  clean calls: 13. You denied 1: false flags 8%, 95% interval 1% to 34%.
+  planted calls: 7. You denied 6: caught 86%, 95% interval 48% to 98%.
+  clean calls: 12. You denied 1: false flags 8%, 95% interval 1% to 36%.
 
 One drill says little; the intervals show how little. Run polarizer drill report
 to see every drill so far.
