@@ -43,8 +43,21 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 
 ## People
 
-- A hold is only as good as the person reading it. If you allow without reading, Polarizer records that you allowed it, and nothing measures that yet.
+- A hold is only as good as the person reading it. If you allow without reading, Polarizer records that you allowed it. Drills measure how often a person catches a planted call, under practice conditions only (Drills, below); nothing measures it during real work yet.
 - An agent that can run commands as you can also run `polarizer approve` or `polarizer allow`. They refuse to run without a terminal unless told they are run by a script, which only stops accidents.
+
+## Drills
+
+- A drill measures attention when the person knows it is a test, and that some calls are planted. People read more carefully then, so drill rates are closer to a person's best than to an ordinary afternoon.
+- A drill plants 4 to 8 calls in 20, far above any real rate of bad calls, so that one drill measures something. Rare targets are missed more often than common ones, so drill catch rates likely run above a person's catch rate at a realistic rate. A condition with fewer planted calls may come later.
+- One drill has about 6 planted calls; its rates come with wide intervals, and below 5 calls of a kind no rate is printed.
+- The people who run drills are the people who care about oversight; their numbers say nothing about anyone else's.
+- Drill calls are invented, short and self-contained, and come with the task written above them, which real holds don't have.
+- The scenario set is finite (150 calls). After many drills a person may recognize one; the report counts repeats.
+- The answers are in the installed package. A person who reads the scenario file, or draws the plan from the seed in their own ledger, can score 100%.
+- Real holds time out after 300 s and drill calls never do; answers that took longer are marked, and results are shown with and without them.
+- No drill entry is fsynced inline, and a drill ledger's `ledger.head` stays at its genesis entry, so a lost tail of a drill ledger is not detected.
+- Drills on a native Windows console (PowerShell or the Command Prompt) have not been tried.
 
 ## The ledger
 

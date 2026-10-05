@@ -740,6 +740,17 @@ Not verified by this check:
 - what happens to a backgrounded held call when the session exits;
 - whether the 123 s before a call is moved to the background is fixed or configurable.
 
+## Stage 8 (Oct 5, 2026, UTC)
+
+Run in this session on WSL2 (Linux), Python 3.12.3, with the repo's `.venv`. Nothing was fetched and no model was run. docs/dev/STAGE8-NOTES.md has the details.
+
+- **The sampler's test vectors:** a throwaway script written from docs/MEASURE-SPEC.md section 6's pseudocode, before the code existed, drew the stream's first two values and the three plans exactly as the spec states them.
+- **The statistics' test vectors:** every Wilson and Newcombe row of section 7 matches `polarizer.measure` to within 1e-6, with the printed forms exact, on the first run.
+- **An audit hook sees processes and connections:** in Python 3.12.3, a hook installed with `sys.addaudithook` records `subprocess.Popen` for `subprocess.run` and `socket.connect` for a connection attempt to 127.0.0.1 port 9 (`tests/test_drill.py::test_audit_hook_sees_what_it_watches`). With the same hook, a whole drill and `drill report --export` in one process raised none of the watched events (`socket.connect`, `socket.bind`, `socket.getaddrinfo`, `subprocess.Popen`, `os.system`, `os.exec`, `os.posix_spawn`, `os.spawn`, `os.fork`, `os.forkpty`, `os.startfile`).
+- **A drill on a pseudo-terminal:** `python -m polarizer drill` ran to its end screen and exited 0 with each prompt answered through a pty, in both conditions (the guide's test drew one at random).
+- **The wheel:** `uv build --wheel --offline` (uv_build 0.12.19 from the uv cache) wrote `polarizer-0.1.0-py3-none-any.whl`, which holds `polarizer/scenarios/drill-set-1.json`. Installed offline into a throwaway venv in the session's scratch directory (`uv venv --offline`, `uv pip install --offline`), it reported `__version__` 0.1.0 from its metadata, loaded set 1 (150 scenarios, sha256 `e2010c06...`) through `importlib.resources`, and `polarizer drill report` on a missing directory printed the "none yet" line and exited 0. `uv tool install` was not run: it installs for the user, outside the repo.
+- **The hold-check expire step:** with a 3 s delay injected between `holds --wait` returning and the lookup, the old script stopped with `no open hold of a running session was found`, as in CI run 37259695458, and the new script passed (STAGE8-NOTES.md, Step 1).
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -764,4 +775,8 @@ These are assumed or open. Nothing here has been observed.
 - **Windows `ledger.head`:** the `os.replace` failure when the file is held open is expected from Windows semantics, not observed.
 - **A third-party upstream on 2026-07-28:** Everything, Filesystem and the probe all answer at 2025-11-25 (Definition hashes on real definitions). The definition hash of a tool from a 2026-07-28 upstream has been checked only with SDK servers written for the tests (M1a spec round), never with a real one.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.
+- **Drills on a native Windows console:** reading answers with `readline` in PowerShell or the Command Prompt, and Ctrl+C there, have not been run; on Windows CI only the in-process drill tests run.
+- **Drills on macOS:** the pseudo-terminal drill tests are written for macOS too but have only run on Linux.
+- **Installing from a package file with `uv tool install`,** as docs/DRILL-GUIDE.md says, has not been run.
+- **The invented package names** in the scenario set were not checked against any package registry.
 - **Windows and macOS behavior of the stage 1 code:** the lock, `os.replace` retry, binary-mode file access and the read-only verify test are written for both, but have only run on Linux. The Windows test that holds `ledger.head` open runs only on the Windows CI runner.

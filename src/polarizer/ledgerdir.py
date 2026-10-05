@@ -55,16 +55,17 @@ def is_inside(child: Path, parent: Path) -> bool:
     return False
 
 
-def check_location(ledger_dir: Path, forbidden: Iterable[Path]) -> str | None:
+def check_location(ledger_dir: Path, forbidden: Iterable[Path], find_tree=None) -> str | None:
     """Raise ForbiddenPath if ledger_dir is inside any forbidden path. Otherwise return the
-    git-tree warning line, or None."""
+    git-tree warning line, or None. `find_tree` finds the working tree; by default it asks git
+    (git_toplevel), and a drill passes git_tree_by_files, which starts no process."""
     for path in forbidden:
         if is_inside(ledger_dir, path):
             raise ForbiddenPath(
                 f"polarizer: ledger_dir {ledger_dir} is inside {path}, "
                 "which Polarizer must not write to"
             )
-    top = git_toplevel(ledger_dir)
+    top = (find_tree or git_toplevel)(ledger_dir)
     if top:
         return f"polarizer: warning: ledger_dir {ledger_dir} is inside the git working tree {top}"
     return None
@@ -90,3 +91,16 @@ def git_toplevel(path: Path) -> str | None:
         return None
     top = done.stdout.strip()
     return top if done.returncode == 0 and top else None
+
+
+def git_tree_by_files(path: Path) -> str | None:
+    """The git working tree that contains path (or its nearest existing parent), found by looking
+    for a .git directory or file there and in each parent, with no process started. A tree found
+    only through GIT_DIR is missed (docs/MEASURE-SPEC.md, section 17, stage 8's step 0)."""
+    start = _nearest_existing(Path(os.path.realpath(path)))
+    if start is not None and not start.is_dir():
+        start = start.parent
+    for directory in [start, *start.parents] if start is not None else []:
+        if (directory / ".git").exists():
+            return str(directory)
+    return None

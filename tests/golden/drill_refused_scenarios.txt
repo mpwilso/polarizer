@@ -1,0 +1,1 @@
+polarizer: the drill scenarios in this installation fail their check: scenario s001: call.reason does not match the template of rule destructive

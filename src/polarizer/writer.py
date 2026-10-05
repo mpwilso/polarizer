@@ -224,10 +224,12 @@ class LedgerWriter:
     process wrote but may not have made durable.
 
     A listener that raises at open refuses the open (LedgerError, exit 1): pin state could not
-    be folded. Once open, the entry is already in the ledger when the listener runs, so the
-    append or catch-up that wrote or adopted it still resolves; but pin state now lacks it, so
-    the writer stops, as for a ledger that changed under it, and nothing acts on that state
-    again (docs/PIN-SPEC.md, section 8).
+    be folded. A listener that raises LedgerError itself refuses with that line and code, before
+    anything is appended (serve on a drill ledger, a drill on a serve ledger). Once open, the
+    entry is already in the ledger when the listener runs, so the append or catch-up that wrote
+    or adopted it still resolves; but pin state now lacks it, so the writer stops, as for a
+    ledger that changed under it, and nothing acts on that state again (docs/PIN-SPEC.md,
+    section 8).
     """
 
     def __init__(self, ledger_dir, lock, fd, rfd, state, offset, ops, idle_fsync, on_entry=None):
@@ -319,6 +321,8 @@ class LedgerWriter:
             for entry in verified:
                 try:
                     on_entry(entry)
+                except LedgerError:
+                    raise  # a listener refusing this ledger, with its own line and code
                 except Exception as e:
                     raise LedgerError(f"polarizer: {_fold_failed(entry, e)}", 1) from None
         if head is None:

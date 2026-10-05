@@ -1,0 +1,1 @@
+polarizer: <dir> holds drill entries; serve keeps its own ledger (drills default to ~/.local/share/polarizer-drills)

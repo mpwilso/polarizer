@@ -1,0 +1,14 @@
+
+Drill stopped: 3 of 20 calls answered (plain).
+
+planted calls: none answered.
+clean calls: 3. You denied 0: too few to say a rate (5 or more needed).
+median time to decide: 7.5 s (clean 7.5 s)
+missed: none
+false flags: none
+
+One drill says little; the intervals show how little. Run polarizer drill report
+to see every drill so far.
+
+Drills measure attention when you know you are being tested. Use them to see
+trends in your own oversight, not to grade or rank anyone.

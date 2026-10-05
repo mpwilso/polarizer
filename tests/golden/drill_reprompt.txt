@@ -1,0 +1,2 @@
+type allow or deny (a or d), or q to stop
+allow or deny? 

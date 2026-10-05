@@ -1,6 +1,6 @@
 """The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md),
-pending, approve and reject (docs/PIN-SPEC.md, section 7), and holds, allow and deny
-(docs/HOLD-SPEC.md, section 8).
+pending, approve and reject (docs/PIN-SPEC.md, section 7), holds, allow and deny
+(docs/HOLD-SPEC.md, section 8), and drill and drill report (docs/MEASURE-SPEC.md, section 9).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
 The other commands print results to stdout. Usage errors, config errors, unreadable files,
@@ -23,6 +23,7 @@ import anyio.from_thread
 import anyio.lowlevel
 
 from polarizer import config, defhash, holds, ledgerdir, lock, pins, sidefiles, writer
+from polarizer import drill as drill_mod
 from polarizer.decisions import Decider, HoldDecider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 
@@ -93,6 +94,21 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument(
                 "--bell", action="store_true", help="with --wait: ring once per new hold"
             )
+    text = "practice with held calls, offline; drill report: every drill so far"
+    drill = commands.add_parser("drill", help=text, description=text)
+    drill.add_argument("action", nargs="?", choices=["report"], help="report: every drill so far")
+    drill.add_argument(
+        "--ledger-dir", metavar="DIR", help="absolute path to the drill ledger directory"
+    )
+    drill.add_argument("--calls", metavar="N", help="calls in the drill, 10 to 40 (default 20)")
+    drill.add_argument("--condition", metavar="NAME", help="plain or prediction-gate")
+    drill.add_argument("--seed", metavar="HEX", help="32 hex characters: the same drill again")
+    drill.add_argument(
+        "--keep-predictions",
+        action="store_true",
+        help="keep what you type before each call, not only its length",
+    )
+    drill.add_argument("--export", metavar="PATH", help="with report: write a summary to share")
     return parser
 
 
@@ -141,12 +157,59 @@ def _check_decision_args(args) -> None:
         )
 
 
+_SEED = re.compile("[0-9a-f]{32}")
+
+
+def _drill_options(args):
+    """drill's and drill report's usage checks, then drill's terminal check. Returns the
+    options for drill, or None for drill report. Raises UsageError."""
+    if args.ledger_dir is not None and not os.path.isabs(args.ledger_dir):
+        raise UsageError(f"--ledger-dir must be an absolute path, got {args.ledger_dir}")
+    if args.action == "report":
+        if args.calls is not None or args.condition is not None or args.seed is not None:
+            raise UsageError("drill report takes only --ledger-dir and --export")
+        if args.keep_predictions:
+            raise UsageError("--keep-predictions goes with drill")
+        return None
+    if args.export is not None:
+        raise UsageError("--export goes with drill report")
+    calls = drill_mod.DEFAULT_CALLS
+    if args.calls is not None:
+        low, high = drill_mod.CALLS_RANGE
+        if not re.fullmatch("[0-9]+", args.calls) or not low <= int(args.calls) <= high:
+            raise UsageError(f"--calls must be a whole number from {low} to {high}")
+        calls = int(args.calls)
+    if args.condition is not None and args.condition not in drill_mod.CONDITIONS:
+        raise UsageError("--condition must be plain or prediction-gate")
+    if args.seed is not None and not _SEED.fullmatch(args.seed):
+        raise UsageError("--seed must be 32 lowercase hex characters")
+    directory = Path(args.ledger_dir) if args.ledger_dir else drill_mod.default_dir()
+    seed = bytes.fromhex(args.seed) if args.seed is not None else None
+    return drill_mod.Options(directory, calls, args.condition, seed, args.keep_predictions)
+
+
+def drill(args) -> int:
+    """polarizer drill and drill report (docs/MEASURE-SPEC.md, section 9)."""
+    try:
+        opts = _drill_options(args)
+    except UsageError as e:
+        return _err(f"polarizer: {e}")
+    if opts is None:
+        directory = Path(args.ledger_dir) if args.ledger_dir else drill_mod.default_dir()
+        return drill_mod.report(directory, args.export)
+    if not drill_mod.is_terminal():
+        return _err(drill_mod.NO_TERMINAL)
+    return drill_mod.run(opts)
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] != ["serve"]:
         _set_up_streams()
     try:
         args = _parser().parse_args(argv)
+        if args.command == "drill":
+            return drill(args)
         if args.command == "serve":
             if args.config is None:
                 raise UsageError("serve needs --config <absolute path to polarizer.toml>")
@@ -432,6 +495,12 @@ def repair(ledger_dir: Path, forbidden: list[Path]) -> int:
     return outcome.exit_code
 
 
+DRILL_LEDGER = (
+    "polarizer: {} holds drill entries; serve keeps its own ledger "
+    "(drills default to ~/.local/share/polarizer-drills)"
+)
+
+
 def serve(config_path: Path, no_holds: bool = False) -> int:
     """polarizer serve (PROXY-SPEC.md, Startup): read the config and build the policy (a
     missing workspace root is a config error), check ledger_dir's location, open the ledger,
@@ -452,9 +521,17 @@ def serve(config_path: Path, no_holds: bool = False) -> int:
     if warning:
         print(warning, file=sys.stderr)
     state, held = pins.PinState(), holds.HoldState()
+
+    def no_drills(entry: dict) -> None:
+        """serve refuses a ledger with drill entries, before anything is appended
+        (docs/MEASURE-SPEC.md, section 9)."""
+        kind = entry.get("kind")
+        if isinstance(kind, str) and kind.startswith("drill."):
+            raise writer.LedgerError(DRILL_LEDGER.format(cfg.ledger_dir), 2)
+
     try:
         ledger = writer.LedgerWriter.open(
-            cfg.ledger_dir, on_entry=holds.listener(state.apply, held.apply)
+            cfg.ledger_dir, on_entry=holds.listener(no_drills, state.apply, held.apply)
         )
     except writer.LedgerError as e:
         print(e.line, file=sys.stderr)

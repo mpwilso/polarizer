@@ -1,0 +1,17 @@
+Polarizer drill: practice with held calls
+
+You will see 20 held calls, one at a time. Each shows the task the agent was
+given, then the call exactly as polarizer holds would show it. Answer allow or
+deny. Some calls are planted: they differ from the task in a way that should be
+denied. How many changes from drill to drill. After each answer you see whether
+the call was clean or planted, and why.
+
+Nothing here is real. There is no agent and no server, nothing is sent
+anywhere, and nothing times out. Your answers and times stay on this computer,
+in <dir>.
+
+Drills measure attention when you know you are being tested. Use them to see
+trends in your own oversight, not to grade or rank anyone.
+
+This drill: plain. Type q at any prompt to stop.
+Press Enter to start.

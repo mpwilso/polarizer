@@ -232,6 +232,52 @@ def holds_chain():
     )  # fmt: skip
 
 
+DRILL = "d1a2b3c4d5e6f708"
+
+
+def drills_chain():
+    """Every kind stage 8 adds (docs/MEASURE-SPEC.md, section 8), with each data field: a
+    prediction-gate drill kept with --keep-predictions, one call caught and one a false flag,
+    stopped with q, then a plain drill that never ended. Written to a drill ledger, which has no
+    session.started."""
+    started = {
+        "polarizer_version": "0.1.0",
+        "set": 1,
+        "set_sha256": "e" * 64,
+        "seed": "5eed" * 8,
+        "seed_from": "random",
+        "calls": 20,
+    }
+    shown = {"session": DRILL, "args_commit": "c" * 64, "seen_before": 0}
+    return build(
+        [
+            ("drill.started", {"session": DRILL, **started, "condition": "prediction-gate",
+                               "condition_from": "random", "excluded": [],
+                               "keep_predictions": True}),
+            ("drill.shown", {**shown, "n": 1, "scenario": "s042", "hold": "0123456789abcdef"}),
+            ("drill.predicted", {"session": DRILL, "n": 1, "length": 21,
+                                 "prediction": "it writes a git hook", "elapsed_ms": 3100}),
+            ("drill.decided", {"session": DRILL, "n": 1, "scenario": "s042", "decision": "deny",
+                               "elapsed_ms": 9400, "actor": "person"}),
+            ("drill.revealed", {"session": DRILL, "n": 1, "scenario": "s042",
+                                "answer": "planted", "shape": "changed-argument",
+                                "outcome": "caught"}),
+            ("drill.shown", {**shown, "n": 2, "scenario": "s107", "hold": "fedcba9876543210",
+                             "seen_before": 1}),
+            ("drill.predicted", {"session": DRILL, "n": 2, "length": 12, "prediction": None,
+                                 "elapsed_ms": 1800}),
+            ("drill.decided", {"session": DRILL, "n": 2, "scenario": "s107", "decision": "deny",
+                               "elapsed_ms": 301250, "actor": "person"}),
+            ("drill.revealed", {"session": DRILL, "n": 2, "scenario": "s107", "answer": "clean",
+                                "shape": None, "outcome": "false-flag"}),
+            ("drill.ended", {"session": DRILL, "how": "stopped", "answered": 2, "calls": 20}),
+            ("drill.started", {"session": "d2a2b3c4d5e6f708", **started, "condition": "plain",
+                               "condition_from": "flag", "excluded": ["s042", "s107"],
+                               "keep_predictions": False}),
+        ]
+    )  # fmt: skip
+
+
 def unicode_chain():
     values = {
         "controls": "".join(chr(c) for c in range(32)) + "\x7f",
@@ -435,6 +481,7 @@ def fixtures(v0_data):
     u = unicode_chain()
     p = pins_chain()
     h = holds_chain()
+    d = drills_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -448,6 +495,8 @@ def fixtures(v0_data):
         "valid/no_head": (text(s), None, expect("intact", n, n - 1)),
         "valid/pins": (text(p), head_of(p[10]), expect("intact", len(p), len(p) - 1)),
         "valid/holds": (text(h), head_of(h[15]), expect("intact", len(h), len(h) - 1)),
+        # A drill ledger's ledger.head stays at its genesis: no drill kind is fsynced inline.
+        "valid/drills": (text(d), head_of(d[0]), expect("intact", len(d), len(d) - 1)),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (

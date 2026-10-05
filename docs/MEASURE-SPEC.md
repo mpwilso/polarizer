@@ -70,10 +70,11 @@ trends in your own oversight, not to grade or rank anyone.
 
 ### Starting
 
-1. The person runs `polarizer drill`. Usage is checked, then the terminal (section 9), then the location of the drill directory, then the ledger is opened as a writer (2 s lock wait, full verification). A ledger holding any `session.started` entry is a serve ledger and is refused (section 9).
-2. The scenario set is loaded from the package and checked (section 6, Loading). A set that fails its check stops the drill before anything is written.
-3. The plan is drawn (section 6, Sampling): the condition, the number of planted calls, and the order of calls. `drill.started` is appended with the seed and everything else needed to draw the plan again.
-4. The intro screen is printed (section 5), and the drill waits for Enter.
+1. The person runs `polarizer drill`. Usage is checked, then the terminal (section 9), then the location of the drill directory.
+2. The scenario set is loaded from the package and checked (section 6, Loading). A set that fails its check stops the drill before anything is written, so this comes before the ledger is opened, which would write a genesis entry into a new directory (section 17, Stage 8 build).
+3. The ledger is opened as a writer (2 s lock wait, full verification). A ledger holding any `session.started` entry is a serve ledger and is refused (section 9).
+4. The plan is drawn (section 6, Sampling): the condition, the number of planted calls, and the order of calls. `drill.started` is appended with the seed and everything else needed to draw the plan again.
+5. The intro screen is printed (section 5), and the drill waits for Enter.
 
 ### Each call
 
@@ -141,7 +142,7 @@ The prediction is never scored, never shown again during the drill, and never ex
 
 ## 5. Drill screens
 
-The screens below are exact; placeholders are in angle brackets, and `<dir>` is the drill directory. Every golden file is stdout's bytes from an in-process drill with injected input, clocks, seed, hold ids and salts, and a small test scenario set (`tests/helpers/drill_scenarios.json`), so the files don't change when the shipped set does. Typed input is not echoed in the files.
+The screens below are exact; placeholders are in angle brackets, and `<dir>` is the drill directory. Every golden file is stdout's bytes from an in-process drill with injected input, clocks, seed, hold ids and salts, and a small test scenario set (`tests/helpers/drill_scenarios.json`), so the files don't change when the shipped set does. Typed input is not echoed in the files. A file for one screen (the intro, a call, a reveal, the end) holds what the drill wrote between two reads of input, so `drill_end.txt` is the end screen alone. A line that waits for Enter (`Press Enter to start.`, `Press Enter for the next call.`) is written without a newline; the person's Enter ends it.
 
 **Intro, plain** (`drill_intro_plain.txt`; 20 is the drill's `--calls`):
 
@@ -1160,6 +1161,21 @@ Read on Oct 5, 2026 (UTC) at commit f03a29e, with `git status` clean and `script
 4. **A second reader for each scenario** (section 6, Adding a scenario) can't be found in a development session. Decided: set 1 is written and pinned in stage 8 and reviewed by the owner at stage 8's stop; until then it has not shipped, so the owner's corrections edit set 1 and update its pin instead of making set 2. The stage notes say which scenarios the owner reviewed.
 5. **Which strings are package and host names** in the invented-names test. Decided: a package name is the value of an argument named `package` (or an element of `packages`); a host is the host part of a URL, the domain of an e-mail address, or the value of an argument named `host`.
 6. **Where `serve` refuses a drill ledger.** Opening the ledger as a writer can append `ledger.head_rebuilt`. Decided: the refusal comes from the fold that runs while the ledger is verified at open, before anything is appended; a listener at open may refuse the open with its own line and code, which the writer passes on unchanged instead of reporting a fold failure.
+
+### Stage 8 build (Oct 5, 2026, UTC)
+
+Decided while building stage 8; docs/dev/STAGE8-NOTES.md has the detail.
+
+1. **The scenario set is loaded before the ledger is opened** (section 4, Starting), so a set that fails its check writes nothing, not even a genesis entry in a new directory.
+2. **`drill` finds a git working tree without git** (stage 8's step 0, 1), by looking for `.git` in the directory and its parents, and prints the usual warning.
+3. **A drill ended by Ctrl+C or the end of input** reads `Drill stopped` on its end screen, and `, stopped` in the report's line for it, as a drill stopped with `q` does; the ledger keeps `interrupted`.
+4. **The report's first line always gives both counts,** `<f> finished, <s> stopped early`, zero included; "stopped early" counts every drill that did not finish, `did not end` included.
+5. **One-screen golden files** hold what the drill wrote between two reads (section 5).
+6. **The test scenario set** says `"set": 1` like the shipped set; it is never installed. Both are written by `tools/make_drill_set.py` (`--test-set` for the test set).
+7. **`python -m polarizer.scenarios show <id>`** takes `--answer` to print the answer and its `why` after the screen, for a reviewer who has answered.
+8. **`--keep-predictions` with `drill report`** is a usage error, `polarizer: --keep-predictions goes with drill` (section 9, Usage errors), with its golden file.
+9. **An unknown word after `drill`** is argparse's error, `polarizer: argument action: invalid choice: ...`, exit 2.
+10. **The guide** quotes section 3's closing lines as its paragraph on what drills are not, word for word, after one plain sentence of its own; `tests/test_drill_guide.py` also runs the guide's polarizer commands, as `tests/test_readme.py` runs the README's.
 
 ### Deviations from the decisions and the existing documents
 

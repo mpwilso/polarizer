@@ -214,30 +214,44 @@ def class_text(hold: Hold) -> str:
     return hold.cls
 
 
-def block(hold: Hold, folded: HoldState, ledger_dir: Path, now: datetime, state: str) -> list[str]:
-    """One hold's block, every string from the ledger through printable()."""
-    started = folded.session_started(hold.session)
-    lines = [
+def _head(hold: Hold, started: str | None, state: str, now: datetime) -> list[str]:
+    """The block's first four lines, every string from the ledger through printable()."""
+    return [
         f"hold {printable(hold.hold)} {printable(hold.tool)} {printable(class_text(hold))}",
         f"held by {printable(hold.rule)}: {printable(hold.reason)}",
         f"waiting about {age(hold.ts, now)}; times out after {hold.timeout_seconds} s",
         f"session {printable(hold.session)} started "
         f"{printable(started) if started is not None else 'unknown'}, {STATE_TEXT[state]}",
     ]
-    commit = printable(hold.args_commit)
+
+
+def render_block(
+    hold: Hold, started: str | None, state: str, now: datetime, arguments, size: int
+) -> list[str]:
+    """One hold's block from its arguments and their size in bytes (the side file's size minus
+    its salt), with no file read: `holds` calls it after reading and checking the side file,
+    and a drill calls it with a scenario's arguments (docs/MEASURE-SPEC.md, section 4)."""
+    lines = _head(hold, started, state, now)
+    lines.append(f"args_commit {printable(hold.args_commit)}, {size} bytes of arguments")
+    lines.extend(render_arguments(arguments).split("\n"))
+    return lines
+
+
+def block(hold: Hold, folded: HoldState, ledger_dir: Path, now: datetime, state: str) -> list[str]:
+    """One hold's block, reading and checking its side file."""
+    started = folded.session_started(hold.session)
     try:
         arguments, size = sidefiles.read_args(ledger_dir, hold.args_commit)
     except sidefiles.ArgsProblem as e:
+        commit = printable(hold.args_commit)
         size_text = f", {e.size} bytes of arguments" if e.size is not None else ""
-        lines.append(f"args_commit {commit}{size_text}")
-        lines.append(
+        return [
+            *_head(hold, started, state, now),
+            f"args_commit {commit}{size_text}",
             f"arguments: side file args/{commit}.bin {printable(str(e))}; "
-            "this hold cannot be allowed"
-        )
-        return lines
-    lines.append(f"args_commit {commit}, {size} bytes of arguments")
-    lines.extend(render_arguments(arguments).split("\n"))
-    return lines
+            "this hold cannot be allowed",
+        ]
+    return render_block(hold, started, state, now, arguments, size)
 
 
 def listing(folded: HoldState, ledger_dir: Path, now: datetime, states=None) -> list[str]:

@@ -1,0 +1,1 @@
+polarizer: --condition must be plain or prediction-gate

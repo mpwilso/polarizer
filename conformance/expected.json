@@ -323,6 +323,13 @@
    "seq": 2,
    "status": "invalid"
   },
+  "valid/drills": {
+   "check": null,
+   "head": true,
+   "line": 12,
+   "seq": 11,
+   "status": "intact"
+  },
   "valid/head_at_last": {
    "check": null,
    "head": true,

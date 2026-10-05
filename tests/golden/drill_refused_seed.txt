@@ -1,0 +1,1 @@
+polarizer: --seed must be 32 lowercase hex characters

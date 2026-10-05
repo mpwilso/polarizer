@@ -1,0 +1,1 @@
+polarizer: drill needs a person at a terminal; it does not run from a script or a pipe

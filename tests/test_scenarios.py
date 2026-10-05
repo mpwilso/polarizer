@@ -1,0 +1,336 @@
+"""The shipped drill scenario set passes the validation of docs/MEASURE-SPEC.md, section 6: its
+schema, that every clean call is what its task asked and every planted call differs from its
+task exactly as its shape says, that every name is invented, and the set's balance."""
+
+import hashlib
+import json
+import re
+import statistics
+from collections import defaultdict
+from datetime import UTC, datetime
+from importlib import resources
+
+import pytest
+
+from polarizer import holds, lock, scenarios
+from polarizer.text import printable
+
+SET = scenarios.newest()
+ALL = list(SET.scenarios.values())
+PLANTED = [s for s in ALL if s["answer"] == "planted"]
+CLEAN = [s for s in ALL if s["answer"] == "clean"]
+
+# sha256 of each shipped set file. Any edit to a shipped set fails here, so a change needs a new
+# set version (section 6, Versioning). Set 1 is pinned unreviewed: until the owner's review at
+# stage 8's stop it has not shipped, and the owner's corrections edit it and update this value.
+PINNED = {1: "e2010c060409e8ba27147b4c9d7542cb33dd47f2556919ada5ff6b396692eb80"}
+
+# Look-alike characters, each mapped to the Latin letter it imitates (section 6, look-alike).
+CONFUSABLES = {
+    **{chr(c): v for c, v in [(0x0430, "a"), (0x0435, "e"), (0x043E, "o"), (0x0440, "p"),
+                              (0x0441, "c"), (0x0445, "x"), (0x0443, "y"), (0x0456, "i"),
+                              (0x03B1, "a"), (0x03BF, "o"), (0x03C1, "p"), (0x03BD, "v")]},
+    "0": "o", "1": "l", "-": "_",
+}  # fmt: skip
+PAIRS = {"rn": "m", "vv": "w"}
+AFFIXES = ("-js", "-py", "-dev", "-cli", "-official")
+PREFIXES = ("py-", "node-")
+
+# Well-known companies, products and package registries: no entry of `names` may be one, or
+# hold one as a part. Written in lowercase.
+DENY = set(
+    "google alphabet amazon aws microsoft azure apple icloud meta facebook instagram whatsapp "
+    "twitter slack discord stripe paypal openai anthropic claude chatgpt gemini copilot docker "
+    "kubernetes jira atlassian confluence notion linear github gitlab bitbucket heroku vercel "
+    "netlify cloudflare npm npmjs pypi pip cargo crates rubygems maven nuget homebrew react "
+    "angular vue django flask rails lodash requests numpy pandas express netflix uber oracle "
+    "ibm intel nvidia samsung adobe dropbox zoom outlook yahoo ubuntu debian redhat postgres "
+    "postgresql mysql mongodb redis".split()
+)
+# Prefixes and headers of real credentials.
+CREDENTIALS = [
+    re.compile(p)
+    for p in (
+        r"sk-[A-Za-z0-9]{8,}", r"sk_live_", r"ghp_[A-Za-z0-9]", r"gho_", r"github_pat_",
+        r"AKIA[0-9A-Z]{12,}", r"xox[abpr]-", r"-----BEGIN", r"AIza[0-9A-Za-z_-]{20,}",
+        r"eyJ[A-Za-z0-9_-]{10,}\.", r"glpat-", r"AAAA[A-Za-z0-9+/]{20,}",
+    )
+]  # fmt: skip
+RESERVED_LAST = {"example", "test", "invalid"}
+RESERVED_DOMAINS = ("example.com", "example.net", "example.org")
+
+
+def strings(value):
+    """Every string in a JSON value, keys included."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield k
+            yield from strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from strings(v)
+
+
+def contains(value, part) -> bool:
+    """Substring for strings, element-of for lists (section 6, Validation)."""
+    if isinstance(value, str):
+        return isinstance(part, str) and part in value
+    if isinstance(value, list):
+        return part in value
+    return False
+
+
+def covers(call_value, intent_value) -> bool:
+    if call_value == intent_value:
+        return True
+    if isinstance(call_value, str) and isinstance(intent_value, str):
+        return intent_value in call_value
+    if isinstance(call_value, list) and isinstance(intent_value, list):
+        rest = iter(call_value)
+        return all(any(x == y for y in rest) for x in intent_value)
+    return False
+
+
+def levenshtein(a: str, b: str) -> int:
+    row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, cb in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (ca != cb))
+    return row[-1]
+
+
+def skeleton(text: str) -> str:
+    for pair, letter in PAIRS.items():
+        text = text.replace(pair, letter)
+    return "".join(CONFUSABLES.get(c, c) for c in text)
+
+
+def close(intended: str, planted: str) -> bool:
+    return (
+        levenshtein(intended, planted) <= 3
+        or skeleton(intended) == skeleton(planted)
+        or planted in {intended + a for a in AFFIXES}
+        or planted in {p + intended for p in PREFIXES}
+    )
+
+
+def planted_value(s) -> str:
+    return s["call"]["tool"] if s["shape"] == "different-tool" else s["plant"]["planted"]
+
+
+def differing(intent: dict, call: dict) -> set:
+    return {k for k in set(intent) | set(call) if intent.get(k, object()) != call.get(k)}
+
+
+# --- the schema ---------------------------------------------------------------------------
+
+
+def test_scenario_file_schema():
+    files = scenarios.shipped()
+    assert files and all(name == f"drill-set-{v}.json" for v, name in files.items())
+    for version, name in files.items():
+        data = resources.files(scenarios).joinpath(name).read_bytes()
+        loaded = scenarios.parse(data, version)
+        assert loaded.doc["format"] == "polarizer-drill-scenarios"
+        assert loaded.doc["set"] == version
+        assert data.isascii()
+    assert SET.version == max(files)
+
+
+def test_scenario_set_hash_pinned():
+    for version, name in scenarios.shipped().items():
+        data = resources.files(scenarios).joinpath(name).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == PINNED[version], name
+
+
+def test_clean_calls_match_their_task():
+    for s in CLEAN:
+        assert s["call"]["tool"] == s["intent"]["tool"], s["id"]
+        assert s["call"]["arguments"] == s["intent"]["arguments"], s["id"]
+
+
+@pytest.mark.parametrize("s", PLANTED, ids=[s["id"] for s in PLANTED])
+def test_planted_calls_differ_as_stated(s):
+    intent, call, plant = s["intent"], s["call"], s["plant"]
+    ia, ca = intent["arguments"], call["arguments"]
+    shape = s["shape"]
+    if shape == "different-tool":
+        assert call["tool"] != intent["tool"]
+        return
+    assert call["tool"] == intent["tool"]
+    changed = differing(ia, ca)
+    if shape == "changed-argument":
+        assert set(ia) == set(ca)
+        assert changed == {plant["argument"]}
+        assert ia[plant["argument"]] == plant["intended"]
+        assert ca[plant["argument"]] == plant["planted"]
+        assert plant["cue"] in plant["intended"]
+    elif shape == "extra-effect":
+        assert set(ia) <= set(ca)
+        assert all(covers(ca[k], ia[k]) for k in ia)
+        assert changed and plant["argument"] in changed
+        assert contains(ca[plant["argument"]], plant["planted"])
+        assert not contains(ia.get(plant["argument"], ""), plant["planted"])
+    elif shape == "misleading-summary":
+        summary, argument = plant["summary_argument"], plant["argument"]
+        assert summary != argument
+        assert ca[summary] == ia[summary]
+        assert ca[argument] != ia[argument]
+        assert contains(ca[argument], plant["planted"])
+        assert not contains(ia[argument], plant["planted"])
+    elif shape == "look-alike":
+        argument = plant["argument"]
+        assert changed == {argument}
+        assert ia[argument].count(plant["intended"]) == 1
+        assert ca[argument] == ia[argument].replace(plant["intended"], plant["planted"])
+        assert close(plant["intended"], plant["planted"])
+    else:
+        pytest.fail(f"unknown shape {shape}")
+
+
+def test_planted_value_not_in_task_and_named_in_why():
+    for s in PLANTED:
+        value = planted_value(s)
+        assert isinstance(value, str), s["id"]
+        assert value.lower() not in s["task"].lower(), s["id"]
+        assert printable(value) in s["why"], s["id"]
+
+
+def test_reasons_match_rule_templates():
+    for s in ALL:
+        call = s["call"]
+        pattern = scenarios.reason_pattern(call["rule"], call["class_from"])
+        assert pattern.fullmatch(call["reason"]), (s["id"], call["reason"])
+    # The templates refuse what they should.
+    write = scenarios.reason_pattern("write-pattern", "config")
+    assert write.fullmatch('argument "path": /a/.git/hooks/x matches .git/hooks/**')
+    assert not write.fullmatch('argument "path": /a/b is outside every workspace root')
+    destructive = scenarios.reason_pattern("destructive", "annotations")
+    assert destructive.fullmatch("class destructive is held on every call (class from annotations)")
+    assert not destructive.fullmatch("class destructive is held on every call")
+
+
+# --- invented names -----------------------------------------------------------------------
+
+URL_HOST = re.compile(r"[a-z][a-z0-9+.-]*://([^/\s\"'@]+@)?([^/\s\"':]+)")
+MAIL_HOST = re.compile(r"[A-Za-z0-9._+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+BARE_DOMAIN = re.compile(r"\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?:com|net|org|io|dev|ai|co|app)\b")
+HOME_USER = re.compile(r"/(?:home|Users)/([^/\s\"']+)")
+
+
+def reserved(host: str) -> bool:
+    host = host.lower().rstrip(".")
+    labels = host.split(".")
+    if labels[-1] in RESERVED_LAST:
+        return True
+    return any(host == d or host.endswith("." + d) for d in RESERVED_DOMAINS)
+
+
+def hosts_in(s) -> set:
+    found = set()
+    for text in strings(s):
+        found |= {m.group(2) for m in URL_HOST.finditer(text)}
+        found |= {m.group(1) for m in MAIL_HOST.finditer(text)}
+        found |= {m.group(0) for m in BARE_DOMAIN.finditer(text)}
+    for side in (s["intent"]["arguments"], s["call"]["arguments"]):
+        if isinstance(side.get("host"), str):
+            found.add(side["host"])
+    return found
+
+
+def package_names(s) -> set:
+    found = set()
+    for side in (s["intent"]["arguments"], s["call"]["arguments"]):
+        if isinstance(side.get("package"), str):
+            found.add(side["package"])
+        found |= {p for p in side.get("packages", []) if isinstance(p, str)}
+    return found
+
+
+def test_names_are_invented():
+    names = set(SET.doc["names"])
+    for name in names:
+        parts = set(re.split(r"[^a-z0-9]+", name.lower())) | {name.lower()}
+        assert not parts & DENY, name
+    for s in ALL:
+        for host in hosts_in(s):
+            assert reserved(host), (s["id"], host)
+        for text in strings(s):
+            for user in HOME_USER.findall(text):
+                assert user in names, (s["id"], user)
+            for pattern in CREDENTIALS:
+                assert not pattern.search(text), (s["id"], text)
+        for package in package_names(s):
+            assert package in names, (s["id"], package)
+
+
+def test_name_checks_catch_real_looking_names():
+    """The checks above refuse what they are for."""
+    assert not reserved("files.examp1e.net") and not reserved("example.com.evil.net")
+    assert reserved("docs.example.com") and reserved("relay.invalid")
+    assert hosts_in({"intent": {"arguments": {}}, "call": {"arguments": {}},
+                     "why": "see https://real-site.io/x and ops@corp.com"}) == {
+        "real-site.io", "corp.com"}  # fmt: skip
+    assert any(p.search("-----BEGIN OPENSSH PRIVATE KEY-----") for p in CREDENTIALS)
+    assert HOME_USER.findall("/home/someone/.ssh") == ["someone"]
+
+
+# --- balance ------------------------------------------------------------------------------
+
+
+def block_lines(s) -> list[str]:
+    call = s["call"]
+    hold = holds.Hold(
+        hold="0" * 16, seq=0, ts="2026-10-06T18:02:11.425Z", session="1" * 16,
+        tool=call["tool"], args_commit="2" * 64, cls=call["class"], class_from=call["class_from"],
+        rule=call["rule"], reason=call["reason"], timeout_seconds=SET.timeout_seconds,
+    )  # fmt: skip
+    size = len(json.dumps(call["arguments"], separators=(",", ":"), ensure_ascii=False).encode())
+    now = datetime(2026, 10, 6, 18, 2, 11, 425000, tzinfo=UTC)
+    return holds.render_block(hold, "2026-10-06T18:00:00.000Z", lock.RUNNING, now,
+                              call["arguments"], size)  # fmt: skip
+
+
+def test_set_balance():
+    assert len(ALL) == 150 and len(CLEAN) == 90 and len(PLANTED) == 60
+    shapes = defaultdict(int)
+    for s in PLANTED:
+        shapes[s["shape"]] += 1
+    assert dict(shapes) == {shape: 12 for shape in scenarios.SHAPES}
+    for key in ("rule", "class", "tool"):
+        counts = defaultdict(lambda: [0, 0])
+        for s in ALL:
+            counts[s["call"][key]][s["answer"] == "planted"] += 1
+        for value, (clean, planted) in counts.items():
+            if planted:
+                assert clean / (clean + planted) >= 0.4, (key, value, clean, planted)
+    tools = defaultdict(set)
+    for s in PLANTED:
+        tools[s["shape"]].add(s["call"]["tool"])
+    assert all(len(t) >= 3 for t in tools.values()), dict(tools)
+    planted_median = statistics.median(len(block_lines(s)) for s in PLANTED)
+    clean_median = statistics.median(len(block_lines(s)) for s in CLEAN)
+    assert abs(planted_median - clean_median) <= 0.2 * clean_median
+    # Alarming holds that are right, and routine-looking holds that are planted.
+    assert any(s["call"]["arguments"].get("path", "").endswith(".env.example")
+               and s["call"]["tool"] == "fs__write_file" for s in CLEAN)  # fmt: skip
+    assert any(s["call"]["tool"] == "fs__move_file" for s in CLEAN)
+    assert any(s["call"]["rule"] == "outside-roots" for s in PLANTED)
+
+
+def test_every_scenario_renders():
+    for s in ALL:
+        lines = block_lines(s)
+        assert len(lines) <= 60, s["id"]
+        assert all(line.isascii() for line in lines), s["id"]
+
+
+def test_ids_carry_no_hint():
+    """Ids are given in task-hash order, so neither answer nor shape follows from them."""
+    ids = [s["id"] for s in ALL]
+    assert ids == [f"s{i:03d}" for i in range(1, 151)]
+    first_half = {s["answer"] for s in ALL[:75]}
+    assert first_half == {"clean", "planted"}
