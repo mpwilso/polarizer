@@ -107,7 +107,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
    - **(M1a)** Before it runs `claude`, it primes its temp ledger with no model call: a `serve` run with stdin closed, then the group approval through the library (`live_check.py prime`), so the probe's tools are exposed.
 
    It is manual only: it calls a model, so it's a script, never a CI test. It reports `~/.claude.json` bookkeeping. Steps 7 and 8 are implementation stage 3, with `docs/dev/MANUAL-CHECK.md` (the checklist below) and the claims table.
-8. **Manual-check files:** `manual/mcp.json.example` (the filled-in `manual/mcp.json` is gitignored and passed with `--mcp-config`; there is no `.mcp.json` at the repo root) and `polarizer.example.toml`, with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/dev/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from docs/PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
+8. **Manual-check files:** `manual/mcp.json.example` (the filled-in `manual/mcp.json` is gitignored and passed with `--mcp-config`; there is no `.mcp.json` at the repo root) and `polarizer.example.toml` (since v0.1 `manual/polarizer.manual.toml`), with the probe and the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <dir>`. The Everything server stays pinned at `npx -y @modelcontextprotocol/server-everything@2026.8.31 stdio` for the local reference tests. Also `docs/dev/QUICKSTART-DRAFT.md`, a draft and not yet a README. It includes the limits text from docs/PROXY-SPEC.md, and tells people to pre-warm each pinned `npx` server once (run it by hand and stop it) before first use, because a first fetch can take longer than the 10 s connect timeout.
 
 ## Test methods
 
@@ -178,7 +178,7 @@ Not in M0: anchoring, signatures (the field name is reserved), OCSF, OpenTelemet
 4. **Cancel.** Press Esc during a 30 s `wait` call, and check whether the probe log shows `notifications/cancelled`. Verified interactively on Oct 3, 2026, with Claude Code 2.1.288: the cancel reached the probe and the ledger recorded `cancelled` (docs/verified-facts.md, Interactive). Closing a session without pressing Esc during a call is still unverified.
 5. **A hung upstream.** Set an upstream's command to something that never answers. Claude Code should still start Polarizer, with the other upstream's tools, within about 10 s.
 6. **Optional:** run the benchmark once on native Windows Python.
-7. **Guard.** Run `scripts/guard.sh check`. Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file whenever it runs.
+7. **Guard.** Run `scripts/dev/guard.sh check`. Expect no changes in the guarded repos, Parallax's directories or the MCP config hashes. The `~/.claude.json` size and mtime line is informational, because Claude Code updates that file whenever it runs.
 
 ## Credits
 

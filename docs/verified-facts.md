@@ -1,6 +1,6 @@
 # Verified facts for Polarizer
 
-Checked on Oct 2, 2026, on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2, ext4, system Python 3.12.3). Each fact says how it was checked. "Headless" means it was observed only through `claude -p`, never in an interactive Claude Code session. "Binary" means it was read from strings in the Claude Code executable, not observed. Anything not listed here is unverified. "The owner" is the project's author, who ran the interactive checks; "this session" or "a development session" is a Claude Code session that built Polarizer.
+Checked on Oct 2, 2026, on WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2, ext4, system Python 3.12.3). Each fact says how it was checked. "Headless" means it was observed only through `claude -p`, never in an interactive Claude Code session. "Binary" means it was read from strings in the Claude Code executable, not observed. Anything not listed here is unverified. "The owner" is the project's author, who ran the interactive checks; "this session" or "a development session" is a Claude Code session that built Polarizer. Records made before v0.1 name `scripts/guard.sh` (now `scripts/dev/guard.sh`) and, for the manual check's config, `polarizer.example.toml` (now `manual/polarizer.manual.toml`).
 
 ## Claude Code
 
@@ -652,6 +652,17 @@ What it does not show:
 - **A real third-party server.** The only upstream was the test probe.
 - **Windows or macOS.** It ran on Linux (WSL2) only.
 - **The documented conditions.** It ran inside a Claude Code session, not from a plain terminal. The script now says so in its first line when `CLAUDE_CODE_SESSION_ID` is set, and names the `CLAUDE_CODE_*` variables it passes on.
+
+## Rug-pull check, second run (Oct 4, 2026, headless, plain terminal, Claude Code 2.1.289)
+
+`scripts/rugpull-check.sh`, run a second time by the owner, from a plain terminal, on 2026-10-04 at about 17:08 UTC, with Claude Code 2.1.289. The same three headless `claude -p` runs as the first (Rug-pull check, above). These are the owner's results, from the script's output; no development session saw the run, and the commit it ran at was not recorded.
+
+- **All nine checks passed:** the same nine as in the first run.
+- **The ledger:** intact, 32 entries, 4 sessions, 2 calls. `tool.drift` at seq 24, `tool.approved` for the new hash at seq 26, and `call.sent` and `call.returned` outcome `ok` for run C at seq 30 and 31, as in the first run.
+- **No `CLAUDE_*` or `ANTHROPIC_*` variables** were set in the run.
+- **Cost,** from Claude Code's own `total_cost_usd`: A 0.0250936, B 0.0106096 and C 0.0100122 USD, 0.045715 USD in total.
+
+What it adds to the first run: the documented conditions. The first run was started inside a Claude Code session, with that session's `CLAUDE_CODE_*` variables passed on; this one ran from a plain terminal with none. Everything else the first run does not show still holds: the refusal path, re-listing within one live session, a real third-party server, and Windows or macOS.
 
 ## Stage 6 (Oct 4, 2026, UTC)
 

@@ -7,7 +7,7 @@ Run steps 1 to 8 in a real, interactive Claude Code session. They cover what no 
 ## 1. Prepare
 
 ```
-scripts/guard.sh snapshot
+scripts/dev/guard.sh snapshot
 uv sync --locked
 mkdir -p /tmp/polarizer-manual
 echo "hello from the manual check" > /tmp/polarizer-manual/note.txt
@@ -19,14 +19,14 @@ Expect the snapshot path, then `Secure MCP Filesystem Server running on stdio`, 
 ## 2. polarizer.toml and manual/mcp.json
 
 ```
-sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
+sed "s|/home/<you>|$HOME|g" manual/polarizer.manual.toml > polarizer.toml
 sed "s|/home/<you>|$HOME|g" manual/mcp.json.example > manual/mcp.json
 grep -A5 ledger_forbidden_paths polarizer.toml
 git status --short
 .venv/bin/polarizer verify --config "$HOME/code/polarizer/polarizer.toml"
 ```
 
-`polarizer.example.toml` uses POSIX paths (`/home/<you>/...`, `/tmp/polarizer-manual`); on native Windows, the `sed` lines don't apply: edit each path to a real absolute path with a drive.
+`manual/polarizer.manual.toml` is the manual check's config; `polarizer.example.toml` at the repo root is the example for users. It uses POSIX paths (`/home/<you>/...`, `/tmp/polarizer-manual`); on native Windows, the `sed` lines don't apply: edit each path to a real absolute path with a drive.
 
 Expect:
 - `ledger_forbidden_paths` lists `~/code/parallax`, `~/code/parallax-backup-before-rewrite`, `~/code/loupe` and `~/code/isr`;
@@ -110,7 +110,7 @@ Any other first line, or a nonzero exit, means paste the output.
 
 ```
 pgrep -a -f 'tests/helpers/probe_server.py|server-filesystem'
-scripts/guard.sh check
+scripts/dev/guard.sh check
 ```
 
 `pgrep` lists any probe or Filesystem server still running. Expect no output once Claude Code has exited: both end when their stdin closes. If it lists any, paste it; stop each with `kill <pid>`.
@@ -142,15 +142,15 @@ What it does not prove:
 
 This one needs an interactive Claude Code session, because it asks what Claude Code shows while a call waits for you. Use two plain terminals, both in `~/code/polarizer`, never from inside another Claude Code session: terminal A runs Claude Code, and terminal B runs `scripts/hold-check.sh`. The script finds each hold in the ledger itself, so you never copy an id or a hash. Every command it prints is complete. Each step prints what it did and appends it to `/tmp/hold-check-results.txt`; `scripts/hold-check.sh status` says which step is next. A blank answer or Ctrl+C stops a step with a line saying what was done, and running the step again carries on. Each answer is one line: type a short answer and do not paste multi-line text; anything after the first line is thrown away, with a line saying how much.
 
-The check uses its own ledger, `~/.local/share/polarizer-m2a-check`, and the example's policy: `workspace_roots = ["/tmp/polarizer-manual"]`, the Filesystem server's writes classed `local-write` and `move_file` classed `destructive`. A model session costs whatever your interactive Claude Code session costs for about five short requests.
+The check uses its own ledger, `~/.local/share/polarizer-m2a-check`, and the manual-check config's policy: `workspace_roots = ["/tmp/polarizer-manual"]`, the Filesystem server's writes classed `local-write` and `move_file` classed `destructive`. A model session costs whatever your interactive Claude Code session costs for about five short requests.
 
-1. **Terminal B:** `scripts/hold-check.sh reset`. It takes a guard snapshot, runs `uv sync --locked`, writes `manual/mcp.json` if it is missing, pre-warms the pinned Filesystem server, creates `/tmp/polarizer-manual/.git/hooks` and `/tmp/polarizer-manual/note.txt`, moves an earlier check's ledger aside (nothing is deleted), and writes `polarizer.toml` from the example with the check's ledger and `hold_timeout_seconds = 300`. Then it records the tools' definitions with `polarizer serve` and its input closed (no model), and asks you to type `yes` to approve them as one group. It ends with the command for terminal A.
+1. **Terminal B:** `scripts/hold-check.sh reset`. It takes a guard snapshot, runs `uv sync --locked`, writes `manual/mcp.json` if it is missing, pre-warms the pinned Filesystem server, creates `/tmp/polarizer-manual/.git/hooks` and `/tmp/polarizer-manual/note.txt`, moves an earlier check's ledger aside (nothing is deleted), and writes `polarizer.toml` from `manual/polarizer.manual.toml` with the check's ledger and `hold_timeout_seconds = 300`. Then it records the tools' definitions with `polarizer serve` and its input closed (no model), and asks you to type `yes` to approve them as one group. It ends with the command for terminal A.
 2. **Terminal A:** `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config`, then `/mcp`: `polarizer` should be connected, with its tools listed.
 3. **Terminal B:** `scripts/hold-check.sh deny`. It prints a request to type to Claude: a call to `fs__write_file` for a new file under `/tmp/polarizer-manual/.git/hooks`. It then waits with `polarizer holds --wait --bell` until the call is held, rings the terminal's bell, and shows the hold with its exact arguments. The reason should be `write-pattern`, naming `.git/hooks/**`. Answer `y` if it is the call you asked for; the script denies it, then asks what Claude Code showed.
 4. **Terminal B:** `scripts/hold-check.sh allow`. The same request again; the script allows the new hold, checks that the forwarded call returned `ok` and that the file holds the text asked for, and asks what Claude Code showed.
 5. **Terminal B:** `scripts/hold-check.sh long-wait`. One more write, held. Leave it: the script waits 65 seconds, printing how long the call has been held, then asks what Claude Code showed while it waited and whether you could type in terminal A. Type `yes` to allow it; it asks what Claude Code showed when the call finished. This is the long wait of docs/HOLD-SPEC.md, section 9. With Claude Code 2.1.289, a call still waiting after about 123 seconds is moved to the background as a task and Claude carries on; the result arrives as a task notification when you allow it.
 6. **Terminal B:** `scripts/hold-check.sh expire`. It sets `hold_timeout_seconds = 30` in `polarizer.toml` and asks you to reconnect `polarizer` from `/mcp` in terminal A, so it starts again with that timeout; it waits until the ledger shows the new start. Then it prints a request for `fs__move_file`, which is held on every call. Do not decide it: after 30 seconds the hold expires. The script checks that the file was not moved and asks what Claude Code showed and how long the call appeared to run.
-7. **Terminal A:** exit Claude Code. **Terminal B:** `scripts/hold-check.sh finish`. It verifies the ledger, lists any open holds, writes `polarizer.toml` again from the example, looks for a leftover probe or Filesystem server, and runs `scripts/guard.sh check`. Then paste the output of `cat /tmp/hold-check-results.txt`.
+7. **Terminal A:** exit Claude Code. **Terminal B:** `scripts/hold-check.sh finish`. It verifies the ledger, lists any open holds, writes `polarizer.toml` again from `manual/polarizer.manual.toml`, looks for a leftover probe or Filesystem server, and runs `scripts/dev/guard.sh check`. Then paste the output of `cat /tmp/hold-check-results.txt`.
 
 Before each call reaches Polarizer, Claude Code may ask whether to allow the `polarizer` tool: that is Claude Code's own permission prompt (docs/HOLD-SPEC.md, section 1). Allow it there; the hold comes after. If Claude writes the file with its own file tools instead of `fs__write_file`, nothing reaches Polarizer and the script keeps waiting: press Ctrl+C in terminal B, ask Claude again to use the polarizer tool, and run the step again. If Claude retries a call it was not allowed, the retry is a new hold; the script says so and prints the complete `polarizer deny` command that ends it.
 

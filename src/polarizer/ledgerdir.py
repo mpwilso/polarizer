@@ -2,7 +2,7 @@
 
 serve and repair refuse a ledger_dir inside a forbidden path, and warn inside any other git
 working tree. Paths are compared as resolved real paths, component by component, never as
-string prefixes. The installed tool never reads .guard-paths; that is scripts/guard.sh's file.
+string prefixes. The installed tool never reads .guard-paths; that is scripts/dev/guard.sh's file.
 """
 
 import os

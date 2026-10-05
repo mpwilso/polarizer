@@ -112,6 +112,8 @@ A line that isn't valid JSON is `invalid`, not a torn tail, unless it is the byt
 
 ### v0 (Parallax's existing format)
 
+Parallax is the author's earlier project, and v0 is its ledger format.
+
 A line with no `v` key is a v0 entry, the format Parallax's ledger writes today.
 
 - **Keys:** exactly `id`, `ts`, `kind`, `actor`, `reason`, `data`, `prev`, `hash`.
@@ -141,7 +143,7 @@ The ledger directory is `ledger_dir` from polarizer.toml, by default `~/.local/s
 - **The comparison** uses resolved real paths (symlinks followed) compared component by component, never as string prefixes, so `/a/parallax2` is not inside `/a/parallax`. Where a forbidden path and some ancestor of `ledger_dir` both exist, they also count as the same when the operating system says they are the same directory, which covers case-insensitive file systems.
 - **A git working tree** that isn't forbidden only gets a warning on stderr: `serve` and `repair` continue if `git rev-parse --show-toplevel` succeeds in `ledger_dir` (or its nearest existing parent).
 - **`verify`** only reads, so it checks no locations.
-- The installed tool never reads `.guard-paths`. That file belongs to the development guard, `scripts/guard.sh`.
+- The installed tool never reads `.guard-paths`. That file belongs to the development guard, `scripts/dev/guard.sh`.
 
 The exact messages are in PROXY-SPEC.md, Startup.
 

@@ -18,7 +18,7 @@ The order puts M2b before the practice range, because the range's exfiltration c
 | Stretch | OpenTelemetry | Spans carry the ledger seq and hash, viewable in a local dashboard. The SDK's own middleware does most of it. | small |
 | Stretch | OCSF export | `polarizer export --ocsf` maps ledger fields to OCSF names. | small |
 | Stretch | Anchoring and signatures | A signed checkpoint (chain id, size, head hash) is anchored in a commit trailer, and verify reports the last anchored position. | medium |
-| Stretch | Parallax and ISR adoption | Parallax gets a dual-version verifier and the identical `conformance/` folder. One Parallax task routes its MCP calls through Polarizer, and ISR names what the agents touched. This needs a separate, explicit prompt, run in its own session and branch with that project's tests. | large |
+| Stretch | Parallax and ISR adoption | Parallax gets a dual-version verifier and the identical `conformance/` folder. One Parallax task routes its MCP calls through Polarizer, and ISR names what the agents touched. The changes are made in those projects, with their own tests. | large |
 
 ## Status
 

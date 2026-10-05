@@ -77,7 +77,7 @@ print(f"model reply: {out.get('result')!r}")
 print(f"cost: {out.get('total_cost_usd')} USD (claude's own total_cost_usd)")
 EOF
 echo "~/.claude.json bookkeeping: before $BEFORE; after $AFTER"
-echo "  (Claude Code updates it on every run; scripts/guard.sh check compares its MCP config)"
+echo "  (Claude Code updates it on every run; scripts/dev/guard.sh check compares its MCP config)"
 
 echo "== polarizer verify"
 "$PY" -m polarizer verify --ledger-dir "$DIR/ledger" || true

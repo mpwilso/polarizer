@@ -1,4 +1,4 @@
-"""scripts/guard.sh, run on a copy of itself in a sandbox: a fake repo root with its own
+"""scripts/dev/guard.sh, run on a copy of itself in a sandbox: a fake repo root with its own
 .guard-paths naming one throwaway git repo, and HOME pointing into the test's directory, so no
 real repo, tool directory or ~/.claude.json is read. POSIX only: the script needs bash and
 python3. It must run on macOS's bash 3.2 and BSD tools, which these tests can't show on Linux;
@@ -24,8 +24,8 @@ pytestmark = pytest.mark.skipif(
 def guard(tmp_path):
     """run(*args) runs the sandboxed guard.sh and returns (exit code, stdout, stderr)."""
     root, home, repo = tmp_path / "root", tmp_path / "home", tmp_path / "repo"
-    (root / "scripts").mkdir(parents=True)
-    shutil.copy(ROOT / "scripts" / "guard.sh", root / "scripts" / "guard.sh")
+    (root / "scripts" / "dev").mkdir(parents=True)
+    shutil.copy(ROOT / "scripts" / "dev" / "guard.sh", root / "scripts" / "dev" / "guard.sh")
     (home / "isr-notes").mkdir(parents=True)
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(repo)]
     repo.mkdir()
@@ -36,7 +36,7 @@ def guard(tmp_path):
 
     def run(*args):
         done = subprocess.run(
-            ["bash", str(root / "scripts" / "guard.sh"), *args],
+            ["bash", str(root / "scripts" / "dev" / "guard.sh"), *args],
             env=env,
             capture_output=True,
             text=True,

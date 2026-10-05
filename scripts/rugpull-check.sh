@@ -183,7 +183,7 @@ AFTER="$(claude_json_stat)"
 echo "== cost"
 helper costs "$DIR"
 echo "~/.claude.json bookkeeping: before $BEFORE; after $AFTER"
-echo "  (Claude Code updates it on every run; scripts/guard.sh check compares its MCP config)"
+echo "  (Claude Code updates it on every run; scripts/dev/guard.sh check compares its MCP config)"
 
 echo "== checks"
 CODE=0

@@ -37,7 +37,11 @@ class _Parser(argparse.ArgumentParser):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="polarizer", description="Polarizer's ledger tools.")
+    parser = _Parser(
+        prog="polarizer",
+        description="A local MCP gateway: pins tool definitions, holds risky calls for a person, "
+        "and keeps a verifiable ledger.",
+    )
     commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
     text = "run the proxy over stdio (started by the MCP client)"
     serve = commands.add_parser("serve", help=text, description=text)

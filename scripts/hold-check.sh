@@ -23,7 +23,7 @@
 #
 # Testing only: POLARIZER_CHECK_TOML and POLARIZER_CHECK_LEDGER_DIR replace polarizer.toml and the
 # ledger directory. With POLARIZER_CHECK_TESTING=1 as well, the other files live next to that toml
-# (polarizer.example.toml, hold-check-results.txt, and manual/ in place of /tmp/polarizer-manual),
+# (polarizer.manual.toml, hold-check-results.txt, and manual/ in place of /tmp/polarizer-manual),
 # the processes looked for are that directory's fs_stub.py, the long wait and the timeout are 1 s,
 # and no guard, uv or npx runs. Every command refuses either override without
 # POLARIZER_CHECK_TESTING=1.
@@ -65,7 +65,7 @@ if [ "$TESTING" = 1 ]; then
     exit 2
   fi
   BASE="$(dirname "$TOML")"
-  EXAMPLE="$BASE/polarizer.example.toml"
+  EXAMPLE="$BASE/polarizer.manual.toml"
   RESULTS="$BASE/hold-check-results.txt"
   MANUAL="$BASE/manual"
   PATTERN="$BASE/fs_stub.py"
@@ -74,7 +74,7 @@ if [ "$TESTING" = 1 ]; then
   TIMEOUT=1
   RECONNECT_WAIT=60
 else
-  EXAMPLE="$REPO/polarizer.example.toml"
+  EXAMPLE="$REPO/manual/polarizer.manual.toml"
   RESULTS=/tmp/hold-check-results.txt
   MANUAL=/tmp/polarizer-manual
   PATTERN='tests/helpers/probe_server.py|server-filesystem'
@@ -300,7 +300,7 @@ cmd_reset() {
 
   if [ "$TESTING" != 1 ]; then
     local package mcp_json
-    "$REPO/scripts/guard.sh" snapshot
+    "$REPO/scripts/dev/guard.sh" snapshot
     (cd "$REPO" && uv sync --locked) || stop "uv sync --locked failed"
     mcp_json="$(sed "s|/home/<you>|$HOME|g" "$REPO/manual/mcp.json.example")"
     if [ ! -e "$REPO/manual/mcp.json" ]; then
@@ -482,14 +482,14 @@ cmd_finish() {
   "$POLARIZER" holds --ledger-dir "$LEDGER" || code=$?
   echo "holds exit code: $code"
   write_toml plain
-  echo "polarizer.toml written again from polarizer.example.toml, without the M2a lines"
+  echo "polarizer.toml written again from manual/polarizer.manual.toml, without the M2a lines"
   found="$(leftovers)"
   echo "probe or Filesystem server processes still running: ${found:-none}"
   if [ "$TESTING" = 1 ]; then
     echo "guard: not run in testing"
   else
     code=0
-    "$REPO/scripts/guard.sh" check || code=$?
+    "$REPO/scripts/dev/guard.sh" check || code=$?
     echo "guard exit code: $code"
   fi
   printf -- '-- finish: complete\n'

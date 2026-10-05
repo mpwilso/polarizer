@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Shows that a Polarizer session changed nothing in the other projects.
+# A development guard for the author's machine, not part of Polarizer: it shows that a session
+# working on Polarizer changed nothing in the author's other projects (Parallax, Loupe and ISR)
+# or in Claude Code's MCP config. It needs a gitignored .guard-paths listing those clones, and is
+# of no use on any other machine.
 #
-#   scripts/guard.sh snapshot          record the state now in .guard/snapshot-<UTC timestamp>.txt
-#   scripts/guard.sh check [FILE]      report what changed since the newest snapshot, or since FILE
+#   scripts/dev/guard.sh snapshot          record the state now in .guard/snapshot-<UTC timestamp>.txt
+#   scripts/dev/guard.sh check [FILE]      report what changed since the newest snapshot, or since FILE
 #                                      (exit 1 if anything did)
 #
 # Repos come from .guard-paths (gitignored), one path per line; # starts a comment.
@@ -39,7 +42,7 @@
 # date -d, in exactly the format GNU find printed it, so older snapshots still compare.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 paths_file="$root/.guard-paths"
 state_dir="$root/.guard"
 # A search by name on Oct 2, 2026 found no Loupe or ISR directories under ~/.local/share,
@@ -244,7 +247,7 @@ check() {
   local file="${1:-}"
   if [ -z "$file" ]; then
     file=$(ls -1 "$state_dir"/snapshot-*.txt 2>/dev/null | LC_ALL=C sort | tail -1 || true)
-    [ -n "$file" ] || { echo "no snapshot; run scripts/guard.sh snapshot first" >&2; exit 2; }
+    [ -n "$file" ] || { echo "no snapshot; run scripts/dev/guard.sh snapshot first" >&2; exit 2; }
   fi
   [ -f "$file" ] || { echo "no such snapshot: $file" >&2; exit 2; }
   local epoch changed=0 now diffs sec d newer h p was is
@@ -293,5 +296,5 @@ check() {
 case "${1:-}" in
   snapshot) snapshot ;;
   check) check "${2:-}" ;;
-  *) echo "usage: scripts/guard.sh snapshot | check [snapshot-file]" >&2; exit 2 ;;
+  *) echo "usage: scripts/dev/guard.sh snapshot | check [snapshot-file]" >&2; exit 2 ;;
 esac

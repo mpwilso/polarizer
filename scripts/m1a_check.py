@@ -20,7 +20,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-# How many tools each upstream of polarizer.example.toml lists (docs/dev/MANUAL-CHECK.md, M1a).
+# How many tools each upstream of manual/polarizer.manual.toml lists (docs/dev/MANUAL-CHECK.md,
+# M1a).
 EXPECTED_TOOLS = {"probe": 7, "fs": 14}
 NOTHING = "pending: nothing waits for a decision"
 HEX = "[0-9a-f]{64}"

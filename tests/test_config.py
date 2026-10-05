@@ -65,27 +65,31 @@ def test_defaults(tmp_path, fake_home):
     )
 
 
-def example(tmp_path, fake_home) -> str:
-    """polarizer.example.toml filled in as docs/dev/MANUAL-CHECK.md step 2 does, with its POSIX
-    /tmp/polarizer-manual replaced by a directory under tmp_path. The example's paths are POSIX
+MANUAL_TOML = REPO / "manual" / "polarizer.manual.toml"
+EXAMPLE_TOML = REPO / "polarizer.example.toml"
+
+
+def manual(tmp_path, fake_home) -> str:
+    """manual/polarizer.manual.toml filled in as docs/dev/MANUAL-CHECK.md step 2 does, with its
+    POSIX /tmp/polarizer-manual replaced by a directory under tmp_path. Its paths are POSIX
     only; on Windows "/tmp/..." has no drive and is rightly not absolute, so every platform
-    gets a real absolute path here (docs/dev/QUICKSTART-DRAFT.md says to edit them by hand)."""
-    text = (REPO / "polarizer.example.toml").read_text(encoding="utf-8")
+    gets a real absolute path here (README.md says to edit them by hand)."""
+    text = MANUAL_TOML.read_text(encoding="utf-8")
     assert '"/tmp/polarizer-manual"' in text
     text = text.replace("/tmp/polarizer-manual", (tmp_path / "manual").as_posix())
     return text.replace("/home/<you>", fake_home.as_posix())
 
 
-def test_example_config_uses_the_manual_ledger(tmp_path, fake_home):
-    """polarizer.example.toml, filled in as docs/dev/MANUAL-CHECK.md step 2 does, parses, and its
-    ledger is the manual check's own directory, not the default."""
-    cfg = load(write(tmp_path, example(tmp_path, fake_home)))
+def test_manual_config_uses_the_manual_ledger(tmp_path, fake_home):
+    """manual/polarizer.manual.toml, filled in as docs/dev/MANUAL-CHECK.md step 2 does, parses,
+    and its ledger is the manual check's own directory, not the default."""
+    cfg = load(write(tmp_path, manual(tmp_path, fake_home)))
     assert cfg.ledger_dir == fake_home / ".local/share/polarizer-manual"
     assert [u.prefix for u in cfg.upstreams] == ["probe", "fs"]
 
 
-def test_example_config_policy(tmp_path, fake_home):
-    """The example's policy (docs/HOLD-SPEC.md, section 11): the probe's seven tools local-read,
+def test_manual_config_policy(tmp_path, fake_home):
+    """The manual-check config's policy (docs/HOLD-SPEC.md, section 11): the probe's seven tools local-read,
     the Filesystem tools classified, /tmp/polarizer-manual the root (here a directory under
     tmp_path). So the manual check holds fs__write_file outside the directory and fs__move_file
     always, and nothing of the probe."""
@@ -93,7 +97,7 @@ def test_example_config_policy(tmp_path, fake_home):
 
     from polarizer import policy
 
-    cfg = load(write(tmp_path, example(tmp_path, fake_home)))
+    cfg = load(write(tmp_path, manual(tmp_path, fake_home)))
     assert cfg.policy.workspace_roots == (tmp_path / "manual",)
     assert cfg.policy.hold_timeout_seconds == 300
     probe, fs = cfg.upstreams
@@ -131,6 +135,40 @@ def test_example_config_policy(tmp_path, fake_home):
         "move": ("hold", "destructive"),
         "read": ("allow", "local-read"),
     }
+
+
+def test_manual_config_forbids_the_guarded_repos(tmp_path, fake_home):
+    """CLAUDE.md rule 6: the manual check's ledger is refused inside the Parallax, Loupe and ISR
+    clones and the backup clone. polarizer.toml is written from this file, so these must stay."""
+    cfg = load(write(tmp_path, manual(tmp_path, fake_home)))
+    code = fake_home / "code"
+    for name in ("parallax", "parallax-backup-before-rewrite", "loupe", "isr"):
+        assert code / name in cfg.ledger_forbidden_paths, name
+
+
+def test_example_config_for_users(tmp_path, fake_home):
+    """polarizer.example.toml, with /home/you replaced as its header says, parses: the default
+    ledger, nothing of this repository (no probe, no forbidden paths beyond Parallax's own two),
+    a workspace root, and the pinned Filesystem server with every tool classified as in the
+    manual check's config."""
+    import tomllib
+
+    text = EXAMPLE_TOML.read_text(encoding="utf-8")
+    assert "/home/<you>" not in text and "/tmp/polarizer-manual" not in text
+    root = fake_home / "projects" / "demo"
+    root.mkdir(parents=True)
+    cfg = load(write(tmp_path, text.replace("/home/you", fake_home.as_posix())))
+    assert cfg.ledger_dir == fake_home / ".local/share/polarizer"
+    assert cfg.ledger_forbidden_paths == (
+        fake_home / ".local/share/parallax",
+        fake_home / ".config/parallax",
+    )
+    assert [u.prefix for u in cfg.upstreams] == ["fs"]
+    assert cfg.policy.workspace_roots == (root,)
+    example_fs = tomllib.loads(text)["upstream"]["fs"]
+    manual_fs = tomllib.loads(MANUAL_TOML.read_text(encoding="utf-8"))["upstream"]["fs"]
+    assert example_fs["tools"] == manual_fs["tools"]
+    assert example_fs["args"][:2] == manual_fs["args"][:2]
 
 
 def test_verify_and_repair_do_not_need_upstream_secrets(tmp_path, fake_home):

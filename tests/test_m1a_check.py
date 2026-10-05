@@ -187,9 +187,9 @@ def test_toml_values(tmp_path, fake_home):
         m1a_check.toml_value(toml, "expected")
 
 
-def test_example_toml_expects_21():
-    """The real example lists the probe and the Filesystem server: 7 and 14 tools."""
-    assert m1a_check.toml_value(ROOT / "polarizer.example.toml", "expected") == "21"
+def test_manual_toml_expects_21():
+    """The real manual-check config lists the probe and the Filesystem server: 7 and 14 tools."""
+    assert m1a_check.toml_value(ROOT / "manual" / "polarizer.manual.toml", "expected") == "21"
 
 
 # --- scripts/m1a-check.sh on a pseudo-terminal, POSIX only
@@ -285,12 +285,12 @@ def drive(env, command, replies=(), timeout=60, on_start=None):
 
 @pytest.fixture
 def check(tmp_path, fake_home):
-    """A check directory: the probe as the only upstream, the example toml next to it, and the
+    """A check directory: the probe as the only upstream, the manual-check toml next to it, and the
     environment that points the script there."""
     base = tmp_path / "check"
     base.mkdir()
     shutil.copy(ROOT / "tests" / "helpers" / "probe_server.py", base / "probe_server.py")
-    (base / "polarizer.example.toml").write_text(
+    (base / "polarizer.manual.toml").write_text(
         'ledger_dir = "~/.local/share/polarizer-manual"\n'
         "ledger_forbidden_paths = []\n\n"
         "[upstream.probe]\n"
@@ -406,7 +406,7 @@ def test_whole_check(check):
     assert "intact: " in out and "verify exit code: 0" in out
     assert "probe or Filesystem server processes still running: none" in out
     assert out.rstrip().endswith(f"Paste this: cat {results}")
-    example = (base / "polarizer.example.toml").read_text(encoding="utf-8")
+    example = (base / "polarizer.manual.toml").read_text(encoding="utf-8")
     assert (base / "polarizer.toml").read_text(encoding="utf-8") == example
     assert not (base / "polarizer-rugpull").exists()
     assert status(env) == f"Next: nothing: the check is finished. Paste this: cat {results}"

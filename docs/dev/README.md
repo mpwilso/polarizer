@@ -12,4 +12,4 @@ The work went in stages: a spec round for each milestone, then implementation st
 - **QUICKSTART-DRAFT.md:** the draft that README.md replaced.
 - **PUSHING.md:** the owner's steps for the first push to GitHub and reading CI.
 
-File names written without a directory in these files (such as HOLD-SPEC.md) mean the file in docs/ or here, whichever has it.
+File names written without a directory in these files (such as HOLD-SPEC.md) mean the file in docs/ or here, whichever has it. Two files were renamed for v0.1, and records made before then use the old names: `scripts/guard.sh` is now `scripts/dev/guard.sh`, and the manual check's config, `polarizer.example.toml`, is now `manual/polarizer.manual.toml` (`polarizer.example.toml` became the example for users).

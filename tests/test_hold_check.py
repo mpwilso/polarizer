@@ -134,13 +134,13 @@ class Claude:
 
 @pytest.fixture
 def check(tmp_path, fake_home):
-    """A check directory: the Filesystem stand-in as the only upstream, the example toml next
+    """A check directory: the Filesystem stand-in as the only upstream, the manual-check toml next
     to it, and the environment that points the script there."""
     base = tmp_path / "check"
     base.mkdir()
     shutil.copy(ROOT / "tests" / "helpers" / "fs_stub.py", base / "fs_stub.py")
     manual = base / "manual"
-    (base / "polarizer.example.toml").write_text(
+    (base / "polarizer.manual.toml").write_text(
         'ledger_dir = "~/.local/share/polarizer-manual"\n'
         "ledger_forbidden_paths = []\n\n"
         "[policy]\n"

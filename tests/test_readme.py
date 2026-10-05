@@ -279,18 +279,16 @@ def test_quickstart_runs_as_written(tmp_path):
 
 
 def test_quickstart_config_matches_the_example():
-    """The README's polarizer.toml is polarizer.example.toml's Filesystem server, as it says,
+    """The README's polarizer.toml is polarizer.example.toml without its comments, as it says,
     and its npx commands name the same pinned version."""
     [toml] = blocks("toml")
     readme = tomllib.loads(toml)
     example = tomllib.loads((ROOT / "polarizer.example.toml").read_text(encoding="utf-8"))
-    assert readme["upstream"]["fs"]["tools"] == example["upstream"]["fs"]["tools"]
-    assert list(readme["upstream"]) == ["fs"]
+    assert readme == example
     package = example["upstream"]["fs"]["args"][1]
-    assert readme["upstream"]["fs"]["args"][:2] == ["-y", package]
+    assert package.startswith("@modelcontextprotocol/server-filesystem@")
     npx = [c for c in commands() if c.startswith("npx ")]
     assert npx and all(f" {package} " in c for c in npx)
-    assert readme["policy"]["hold_timeout_seconds"] == example["policy"]["hold_timeout_seconds"]
 
 
 def test_quickstart_mcp_config():

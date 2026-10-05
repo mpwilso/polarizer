@@ -1,5 +1,5 @@
-"""scripts/*.sh run on macOS too, where bash is 3.2 and find, sed, date, stat and grep are the BSD
-ones. CI's macOS job would show a break there; this shows it on Linux first, by keeping out the
+"""scripts/*.sh and scripts/dev/*.sh run on macOS too, where bash is 3.2 and find, sed, date,
+stat and grep are the BSD ones. CI's macOS job would show a break there; this shows it on Linux first, by keeping out the
 bash 4 and 5 features and the GNU-only options and commands that macOS lacks. It reads the
 scripts as text and runs nothing, so it says nothing about how they behave: that is for the
 tests that run them (test_guard.py, test_m1a_check.py, test_rugpull_check.py) and for CI on
@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = sorted((Path(__file__).resolve().parent.parent / "scripts").glob("*.sh"))
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+SCRIPTS = sorted([*_SCRIPTS_DIR.glob("*.sh"), *_SCRIPTS_DIR.glob("dev/*.sh")])
 OPTS = r"(?:\s+-[-\w]+)*"  # any options before the one that matters
 
 NOT_IN_BASH_3_2 = {

@@ -1,55 +1,39 @@
-# Copy to polarizer.toml (gitignored) and replace /home/<you> with your home directory:
-#   sed "s|/home/<you>|$HOME|g" polarizer.example.toml > polarizer.toml
-# docs/PROXY-SPEC.md describes every key.
+# An example polarizer.toml: the reference Filesystem MCP server, pinned to an exact version,
+# behind Polarizer. Copy it with /home/you replaced by your home directory:
+#   mkdir -p ~/.config/polarizer ~/projects/demo
+#   sed "s|/home/you|$HOME|g" polarizer.example.toml > ~/.config/polarizer/polarizer.toml
+# README.md walks through it. docs/PROXY-SPEC.md describes every key, and docs/HOLD-SPEC.md the
+# [policy] table and the classes.
 
-# Not the default ~/.local/share/polarizer: manual-check runs keep their own ledger.
-ledger_dir = "~/.local/share/polarizer-manual"
+# Where the ledger goes. This is the default; set it to keep a ledger elsewhere.
+# ledger_dir = "~/.local/share/polarizer"
 
-# The ledger must never be inside these. Parallax's ~/.local/share/parallax and
-# ~/.config/parallax are always forbidden as well.
-ledger_forbidden_paths = [
-    "~/code/parallax",
-    "~/code/parallax-backup-before-rewrite",
-    "~/code/loupe",
-    "~/code/isr",
-]
+# Directories the ledger must never be written to, such as your other repositories. Optional.
+# ledger_forbidden_paths = ["~/code/some-project"]
 
-# Which calls are held for a person (docs/HOLD-SPEC.md, section 2). A local-write call runs
-# without a hold only when every path it names resolves inside a workspace root and matches no
-# hold pattern; destructive and egress calls, and calls to tools with no class, are always
-# held. Each root must exist when serve starts.
+# Which calls are held for you. A local-write call runs without a hold only when every path it
+# names resolves inside a workspace root and matches no hold pattern; destructive and egress
+# calls, and calls to tools with no class, are always held. Each root must exist when serve
+# starts.
 [policy]
-workspace_roots = ["/tmp/polarizer-manual"]
+workspace_roots = ["/home/you/projects/demo"]
+# A held call is refused if nobody decides within this many seconds (1 to 1200).
 hold_timeout_seconds = 300
+# Added to the built-in hold patterns, which can't be removed. Optional.
+# write_hold_patterns = ["deploy/**"]
+# read_hold_patterns = ["~/.kube/**"]
 
-# The stdlib test probe: wait(seconds), crash, env, fail, rich, invalid, change.
-[upstream.probe]
-command = "/home/<you>/code/polarizer/.venv/bin/python"
-args = ["/home/<you>/code/polarizer/tests/helpers/probe_server.py"]
-env = { PROBE_LOG = "/tmp/polarizer-probe.log" }
-connect_timeout_seconds = 5
-
-# All seven are harmless test tools, so none is held.
-[upstream.probe.tools]
-wait = { class = "local-read" }
-crash = { class = "local-read" }
-env = { class = "local-read" }
-fail = { class = "local-read" }
-rich = { class = "local-read" }
-invalid = { class = "local-read" }
-change = { class = "local-read" }
-
-# The reference Filesystem server, pinned, confined to one directory. Pre-warm it once first
-# (docs/dev/MANUAL-CHECK.md, step 1).
+# One MCP server; its tools are exposed as fs__<tool>. Run its command once by hand before the
+# first start, so the npx fetch doesn't miss Polarizer's connect timeout:
+#   npx -y @modelcontextprotocol/server-filesystem@2026.8.31 "$HOME/projects/demo" < /dev/null
 [upstream.fs]
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/tmp/polarizer-manual"]
+args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/home/you/projects/demo"]
 connect_timeout_seconds = 20
 
-# Reads run; writes outside /tmp/polarizer-manual, or into .git/hooks and the other built-in
-# patterns, are held; move_file is held on every call. These are the 14 tools the pinned server
-# lists, checked against it with POLARIZER_REFERENCE=1 (docs/HOLD-SPEC.md, section 13).
-# read_file is the server's deprecated name for read_text_file.
+# A class for each of the 14 tools this version of the server lists. Reads run; writes outside
+# the workspace root, or into .git/hooks and the other built-in patterns, are held; move_file is
+# held on every call. read_file is the server's deprecated name for read_text_file.
 [upstream.fs.tools]
 read_file = { class = "local-read", path_args = ["path"] }
 read_text_file = { class = "local-read", path_args = ["path"] }
