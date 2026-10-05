@@ -441,3 +441,37 @@ In the scratch directory, with `UV_OFFLINE=1`, so everything came from uv's cach
 - **`scripts/dev/guard.sh check`** against `snapshot-20261005T222311Z.txt`, before the commit: exit 1. No changes in any guarded repository (the ISR repository has no commit after 7b1df40), `~/.config/parallax` and `~/.claude/settings.json` unchanged, the MCP config hashes in `~/.claude.json` unchanged (6 locations); its size and mtime changed (94,699 to 92,274 bytes), Claude Code's own bookkeeping. Two tool directories changed: `~/.local/share/parallax` (87,318 files to 86,884, newest mtime 22:28:50 UTC) and `~/isr-notes` (in `real-run-3`, files written 22:31 to 22:43 UTC, among them an `isr-run` output folder). This session ran no Parallax, ISR or Loupe command and wrote nothing there; the changes match the owner's own concurrent work, which the brief said to expect.
 - **`~/.local/share/polarizer-drills`** was only read, by `cp`, for item 1; every drill in this round ran in a temporary directory.
 - **Not run:** CI; anything on Windows or macOS; a drill by a person.
+
+## Release fixes (Oct 5, 2026, UTC)
+
+Three fixes before the repository goes public. Guard snapshot `snapshot-20261005T231339Z.txt` taken first. Nothing was fetched and no model was run.
+
+### Fix 1. README code fences
+
+**What was found:** the Setup section's MCP config already had its opening `json` fence, in the working tree and at fd8b948 (README.md line 202), and the closing fence did not swallow the `claude` command. The brief described it as missing; nothing in README.md needed changing.
+
+**The test, written first:** `fence_problems` in `tests/test_readme.py` pairs fence lines in order (three backticks after any list indentation): an opening fence may carry a language, a closing fence carries none, a fence with a language inside an open block is reported, an unclosed block is reported, and a block whose content starts with `{` must be labelled `json`. `test_readme_fences_pair_up` runs it on README.md and also on README.md with that opening fence removed, which it must flag; `test_docs_fences_pair_up` runs it on every Markdown file at the root and under docs/ (28 files). With the fence removed from README.md for the run, three tests failed: `test_readme_fences_pair_up` and `test_docs_fences_pair_up` with `line 212: ```sh inside the block opened at line 210`, and the existing `test_quickstart_mcp_config`, which found no json block. With the file restored, all passed. No Markdown file at the root or under docs/ fails the check, so no fence was changed. Two files have indented fences inside list items (docs/HOLD-SPEC.md and docs/dev/m0-plan.md); they pair up.
+
+### Fix 2. The CI record
+
+The latest commit recorded as passing on all five CI jobs is now 0f32e11, CI run 37380445365, as observed by the owner, with 1270 passed and 13 skipped in the local Linux run at that commit (docs/verified-facts.md, CI run 37380445365 at 0f32e11). README.md's Proof, docs/EVIDENCE.md (CI and Drills) and docs/milestones.md (a new CI line in Status, and the M1a and M2a lines) now give it. The earlier record, kept here as history: all five jobs passed at 9270c97 (as reported by the owner), with 784 passed and 13 skipped locally (docs/dev/STAGE7-NOTES.md, Follow-up: macOS output). docs/MEASURE-SPEC.md, section 17, item 8 still names 784 at 9270c97: it records what the README and EVIDENCE.md cited at 03cedbd during that spec round, not the latest run, so it was left.
+
+### Fix 3. CI: the install step
+
+`.github/workflows/ci.yml`'s install step no longer depends on uv's tool bin directory being on a runner's PATH. Both install-check steps name `shell: bash`. The first builds the wheel, requires exactly one `dist/polarizer-*-py3-none-any.whl`, gives it to `uv tool install` as a native path on Windows (`cygpath -w`), asks `uv tool dir --bin` for the bin directory, appends it to `$GITHUB_PATH`, and runs `polarizer --help` and `polarizer drill --help` by the executable's full path (`polarizer.exe` on Windows, with the directory converted by `cygpath -u` for bash). The second step runs `command -v polarizer`, `polarizer --help` and `polarizer drill --help` from PATH. `$GITHUB_PATH` applies only to later steps, so the PATH check stays a step of its own.
+
+**What it proves:** the wheel built from the checkout installs as a uv tool, with its dependencies resolved from the package index, and the executable uv puts in its own bin directory runs `--help` and `drill --help` on Linux, Windows and macOS. The next step shows that adding that directory to PATH, as the README tells a reader, makes `polarizer` the command found there.
+
+**Run locally, not in CI:** nothing in this session can run CI. The two steps' `run` blocks, taken from the edited ci.yml by a script, ran with `bash --noprofile --norc -eo pipefail` (GitHub's bash flags) in the scratch directory, on a `git archive` copy of HEAD, with `UV_OFFLINE=1`, `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` set to scratch directories, `GITHUB_PATH` a scratch file and `RUNNER_OS=Linux`. The bin directory was not on PATH before. Step 1: exit 0; it built the sdist and wheel, installed 30 packages and 1 executable from uv's cache, wrote the bin directory to the PATH file, and both full-path `--help` runs printed their usage lines. Step 2, with that line prepended to PATH as GitHub does: exit 0, `command -v` named the scratch bin directory's `polarizer`. Step 2 without it: exit 1. The wheel check, run alone on an empty `dist/`: exit 1 with `expected one wheel in dist/`. The Windows branch (`cygpath`, `polarizer.exe`) did not run anywhere, and nothing was installed from the package index. The user's own uv tool directory was not written.
+
+### Fix 4. Runs
+
+- **`scripts/test.sh`:** ruff check and format clean, `check_docs: 28 files, 0 findings`, `1283 passed, 13 skipped in 270.03s (0:04:30)`, exit 0, 276 s wall (1281 before, plus the 2 fence tests). Run before this section was written; after it, `scripts/check_docs.py` and the fence tests ran again (Fix 5).
+- **Not run:** CI; anything on Windows or macOS.
+- **A slip:** while making the scratch directory, `rm -rf repo` ran there, outside this repository, on a path that did not exist, and removed nothing. CLAUDE.md rule 10 allows deletes only inside this repository.
+
+### Fix 5. After the notes
+
+- **`scripts/check_docs.py`:** the first run after this section was written found one repeated heading (this round's runs heading had the release round's name), now renamed; then `check_docs: 28 files, 0 findings`. `tests/test_readme.py`: 14 passed.
+- **The pre-push scan** of the working tree's tracked files, case-insensitive: 0 for each of the brief's eight words (the owner's home path, the Windows users path, the Windows user name, a mail domain and four other names).
+- **`scripts/dev/guard.sh check`** against `snapshot-20261005T231339Z.txt`, before the commit: exit 1. No changes in any guarded repository, `~/.local/share/parallax`, `~/.config/parallax` or `~/.claude/settings.json`; the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too. One tool directory changed: `~/isr-notes` (in `real-run-3`, a changed notes file, a screenshots folder and a new folder holding a git repository, written 23:15 to 23:21 UTC). This session ran no Parallax, ISR or Loupe command and wrote nothing there; the changes match the owner's own concurrent work, which the brief said to expect.

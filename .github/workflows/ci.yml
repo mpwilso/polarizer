@@ -35,13 +35,37 @@ jobs:
       - name: Append benchmark (printed, never asserted)
         run: uv run --locked python scripts/bench_append.py
       # The install a reader does: the built wheel, installed as a uv tool with its dependencies
-      # resolved from the package index (not uv.lock), into this job's tool directory.
+      # resolved from the package index (not uv.lock), into this job's tool directory. Whether
+      # uv's tool bin directory is already on a runner's PATH doesn't matter: the step asks uv
+      # for it, runs the executable there by its full path, and adds it to PATH for the next
+      # step. On Windows uv is given the wheel as a native path, and $GITHUB_PATH takes one.
       - name: Install check (build the wheel, uv tool install it)
+        shell: bash
         run: |
           uv build --out-dir dist
-          uv tool install dist/polarizer-*-py3-none-any.whl
-          uv tool dir --bin >> "$GITHUB_PATH"
-      - name: Install check (run the installed polarizer)
+          wheels=(dist/polarizer-*-py3-none-any.whl)
+          if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then
+            echo "expected one wheel in dist/, found: ${wheels[*]}" >&2
+            exit 1
+          fi
+          wheel="${wheels[0]}"
+          exe=polarizer
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            wheel="$(cygpath -w "$wheel")"
+            exe=polarizer.exe
+          fi
+          uv tool install "$wheel"
+          bin="$(uv tool dir --bin)"
+          echo "uv tool bin directory: $bin"
+          echo "$bin" >> "$GITHUB_PATH"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bin="$(cygpath -u "$bin")"
+          fi
+          test -f "$bin/$exe"
+          "$bin/$exe" --help
+          "$bin/$exe" drill --help
+      - name: Install check (run the installed polarizer from PATH)
+        shell: bash
         run: |
           command -v polarizer
           polarizer --help

@@ -776,6 +776,14 @@ Run in this session on WSL2 (Linux), Python 3.12.3, uv 0.12.19, with the repo's 
 - **`uv tool install` has no dry run:** in uv 0.12.19 its help lists neither `--dry-run` nor `--no-deps`. `uv pip install --dry-run --target <dir> <wheel>` with `UV_OFFLINE=1` resolves the same wheel against the cache and installs nothing (it leaves only a `.lock` file in the target): it failed on the empty cache with the same `mcp was not found in the cache` line and hint, and on the owner's cache resolved 30 packages and exited 0. Given a wheel filename with no version it fails with `The wheel filename "missing.whl" is invalid: Must have a version`, without the hint.
 - **The fixed test:** on the empty caches with `UV_OFFLINE=1`, the install test is skipped with uv's line naming mcp and the rest of the file passes; on the owner's cache it runs the install and uninstall and passes. `test_offline_skips_only_for_a_cache_miss` passes on an empty cache: a hand-written wheel with no dependencies resolves, one requiring a package no cache holds is a cache miss naming it, and an invalid wheel is a failure, not a skip.
 
+## CI run 37380445365 at 0f32e11 (Oct 5, 2026, UTC, observed by the owner)
+
+Observed by the owner on GitHub Actions and given in the brief of Oct 5, 2026. No session can see CI runs, so nothing here was checked in this repo.
+
+- **All five jobs passed** at commit 0f32e11 in CI run 37380445365: Linux (ubuntu-24.04) with Python 3.11, 3.12 and 3.13, and Windows and macOS with Python 3.12. It is the latest commit recorded as passing on all five, and replaces the earlier record (docs/dev/STAGE7-NOTES.md, Follow-up: macOS output) as the latest.
+- **The local run at that commit:** `scripts/test.sh` on Linux gave 1270 passed, 13 skipped.
+- **Not recorded:** the per-job test counts and times. The run predates the CI install check, which came in fd8b948 and was changed after it; no CI run of that check is recorded.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. The README's Related projects section is written from this list.

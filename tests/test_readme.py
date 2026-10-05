@@ -362,6 +362,59 @@ def test_readme_links_resolve():
         assert re.search(r'\balt="[^"]+"', tag), tag
 
 
+FENCE = re.compile(r"^ *```(.*)$")
+
+
+def fence_problems(text: str) -> list[str]:
+    """What is wrong with the code fences of Markdown text. Fence lines (three backticks, after
+    any list indentation) pair up in order: an opening fence may carry a language, a closing
+    fence carries none, so a fence with a language inside an open block means an opening fence
+    above it is missing. A block whose content starts with "{" is labelled json."""
+    problems, opened, language, content = [], 0, "", []
+    for number, line in enumerate(text.splitlines(), 1):
+        match = FENCE.match(line)
+        if not match:
+            if opened:
+                content.append(line)
+            continue
+        label = match.group(1).strip()
+        if not opened:
+            opened, language, content = number, label, []
+        elif label:
+            problems.append(f"line {number}: ```{label} inside the block opened at line {opened}")
+            opened, language, content = number, label, []
+        else:
+            if "\n".join(content).strip().startswith("{") and language != "json":
+                problems.append(f"line {opened}: a block starting with {{ is not labelled json")
+            opened = 0
+    if opened:
+        problems.append(f"line {opened}: the block opened here is never closed")
+    return problems
+
+
+def test_readme_fences_pair_up():
+    """README.md's code fences pair up, and its JSON is labelled json. The check catches the
+    Setup section's MCP config with its opening ```json fence missing, which turns the JSON
+    into plain text and lets its closing fence swallow the claude command."""
+    assert fence_problems(README) == []
+    opening = '```json\n{\n  "mcpServers"'
+    assert README.count(opening) == 1
+    broken = README.replace(opening, opening.removeprefix("```json\n"))
+    assert fence_problems(broken)
+
+
+def test_docs_fences_pair_up():
+    """The same fence check for every Markdown file at the root and under docs/."""
+    paths = sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").rglob("*.md"))
+    assert len(paths) > 20
+    found = {}
+    for path in paths:
+        problems = fence_problems(path.read_text(encoding="utf-8"))
+        if problems:
+            found[path.relative_to(ROOT).as_posix()] = problems
+    assert found == {}
+
+
 def test_absolute_links_are_well_formed():
     """Every absolute link (Markdown links, src, srcset and href) is an https URL with a host
     name, no spaces and no trailing punctuation caught from the sentence. Nothing is fetched."""
