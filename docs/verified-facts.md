@@ -672,14 +672,39 @@ Checked while building M2a's lifetime, progress and visibility, on Python 3.12.3
 - **A killed process's flock** (executed, `tests/test_hold_restart.py::test_killed_process_releases_its_session_lock`): after SIGKILL to a process holding its session lock, the probe read ended within the test's 10 s bound in each of six runs. On Windows the same test uses TerminateProcess; it has not run there.
 - **Progress for a held call** (executed, in memory and over stdio, `tests/test_holds.py::test_progress_during_a_hold` and `tests/test_hold_restart.py::test_progress_during_a_hold_over_stdio`): `ctx.session.report_progress` from the waiting `tools/call` handler reaches a client that asked for progress, under its own token (`tok-7` over stdio), with no `total` and no `message` keys; a client that asked for none receives no `notifications/progress`. This is the SDK behavior the spike found for a forwarding handler.
 
+## M2a check, interactive (Oct 5, 2026, UTC, observed by the owner)
+
+Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts/hold-check.sh` (docs/MANUAL-CHECK.md, M2a) at commit c986088, from two plain terminals, between 00:28:57Z and 00:51:15Z. These are the owner's results, from the script's results file (`/tmp/hold-check-results.txt`), the check's ledger (`~/.local/share/polarizer-m2a-check`) and the owner's own account; no development session saw the run. The ledger's entries were read afterwards, read-only, to confirm the sequence numbers and times below.
+
+| Step | What happened | Ledger |
+|---|---|---|
+| deny | `fs__write_file` to `/tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt`, held by `write-pattern` (`.git/hooks/**`), denied from terminal B about 11 s after it was held. The file was not created. Claude saw only `polarizer: fs__write_file was not allowed`. | seq 52 `hold.created`, 53 `hold.decided` deny, 54 `call.refused`, 0.16 s after the decision |
+| allow | The same call, asked for again, made a new hold with a new id and a different `args_commit`: the earlier deny did not carry over. Allowed; the file holds exactly the text `holds` showed. Claude Code showed `Successfully wrote to /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt`. | seq 55 to 58: `call.sent` with `allowed_by` `hold` 0.13 s after the decision, `call.returned` `ok`, latency 36 ms |
+| long wait | A held write left for 65 s, then allowed at about 2m08s (128 s by the ledger's times). The owner could type in terminal A while it waited. | seq 59 to 62, `call.returned` `ok`, latency 2 ms |
+| expire | `fs__move_file`, held by `destructive`, after a `/mcp` reconnect that started serve again with `hold_timeout_seconds = 30` (a new session, seq 63 to 67, with `policy.loaded` at 30). Not decided; it expired. The file was not moved. | seq 68 `hold.created`, 69 `hold.expired` (`timeout after 30 s`, 30.8 s after the hold), 70 `call.refused` |
+| finish | `polarizer verify`: intact, 71 entries, 3 sessions, 2 calls. `polarizer holds`: nothing is held. No leftover probe or Filesystem server processes. `scripts/guard.sh check`: no changes. | |
+
+- **While a call is held,** Claude Code shows the call line `polarizer - fs__write_file (MCP)(path: "...", content: "...")`, and the person can keep typing.
+- **After about 123 s, Claude Code moved the still-running call to the background as a task.** It said the call was "still running after 123s. It was moved to the background as task k1sxdm07l and keeps running; you'll receive a notification with the result when it completes. You can keep working in the meantime. To stop it, use TaskStop ... Note: it does not survive exiting this session." The model then went on working. When the owner allowed the hold, the result arrived as a task-completed notification (the results file records it as `MCP task k1sxdm07 (polarizer/fs__write_file) completed.`; the owner's quote above has `k1sxdm07l`). By the ledger's times the hold was allowed about 128 s after it was created, so the move to the background came a few seconds before the allow (inferred from the two numbers, not timed).
+- **A refused call and other routes.** When its `fs__move_file` call expired, the model said it did not retry and did not try another route such as Bash `mv`, "because that would get around the proxy this check is testing". It could have: Polarizer guards only calls routed through it, and the agent's own shell is outside it.
+- **The script's one-line answers:** the owner pasted multi-line text at a free-text question; the first line was recorded and the other lines reached the owner's shell as commands after the script ended (harmless `command not found` lines). The deny step's recorded answer is cut off for that reason. `scripts/hold-check.sh` now throws away input left waiting after each answer.
+- **Bookkeeping:** `~/.claude.json` went from 92,290 bytes (mtime 00:28:38Z) to 92,240 bytes (00:50:17Z) during the check; its MCP config was unchanged in all 6 locations.
+
+Not verified by this check:
+
+- whether `TaskStop` on a backgrounded held call sends `notifications/cancelled` to Polarizer;
+- what happens to a backgrounded held call when the session exits;
+- whether the 123 s before a call is moved to the background is fixed or configurable.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
 
-- **Interactive sessions:** apart from the facts the owner observed interactively (Interactive, Manual check follow-up, and M1a check, interactive: Esc to cancel, the `/mcp` names, and re-listing after an approval), every Claude Code fact above is headless. Not tested interactively:
+- **Interactive sessions:** apart from the facts the owner observed interactively (Interactive, Manual check follow-up, M1a check, interactive, and M2a check, interactive: Esc to cancel, the `/mcp` names, re-listing after an approval, how a held call is shown, and the move to the background after about 123 s), every Claude Code fact above is headless. Not tested interactively:
   - closing a session without pressing Esc while a call is in flight (does Claude Code send `notifications/cancelled`, or only close stdin?);
   - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap);
   - whether interactive sessions open `subscriptions/listen` the same way;
+  - whether `TaskStop` on a call moved to the background sends `notifications/cancelled`, what happens to such a call when the session exits, and whether the 123 s is fixed or configurable (M2a check, interactive);
   - elicitation forms.
 - **Idle timeout:** it did not fire headless. Whether it applies interactively is unknown.
 - **Hard limit settings:** the default of 27.8 hours and the per-server `timeout` key are read from the binary, not observed.

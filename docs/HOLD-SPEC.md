@@ -580,13 +580,20 @@ Every row gets a file under `tests/golden/`, on a ledger built by a deterministi
 - **The idle timeout** is 1,800,000 ms (30 minutes) for stdio by default, reset by a response or a progress notification. That is read from the binary only. Headless, with `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=6000` and no progress, a 14 s call completed normally: the idle timeout did not fire. Decision 5 cited it as headless; it is binary (section 17, deviation 9). Whether it applies at all is unknown. The 1200 s cap keeps a hold under it either way, and the progress every 10 s costs nothing.
 - **Esc** ends serve (section 7).
 
+**What the owner observed interactively** (the M2a check, Oct 5, 2026, Claude Code 2.1.289; verified-facts.md, M2a check, interactive):
+- **While a call is held,** Claude Code shows its call line (`polarizer - fs__write_file (MCP)(path: ..., content: ...)`), and the person can keep typing.
+- **After about 123 s, Claude Code moves a still-running call to the background** as a task, says so, and the agent keeps working. The held call still waits in serve, and the hold is unchanged; when the person decides, the result reaches the agent as a task-completed notification. In the check, a call held for 128 s and then allowed returned `ok` that way. So while the first call waits, the agent can make other calls, including the same call again, which is a new hold with its own id (section 6), and `polarizer holds` lists both.
+- **The default `hold_timeout_seconds` (300) is deliberately longer than that window.** A person usually needs more than two minutes to notice a hold, read it and decide, and a call that Claude Code has moved to the background but that still waits for the person is acceptable: it is still held, still bound to its exact arguments, and still refused if nobody answers. A shorter default would refuse calls a person was about to allow, to avoid a state that does no harm.
+- **A deny and an expiry** reach the agent as the one line `polarizer: <tool> was not allowed`. A retry after a deny is a new hold; the earlier deny does not carry over.
+
 **What is not verified, and is not assumed:**
-- how an interactive Claude Code session shows a call that waits for minutes, and whether the person can type while it waits;
+- whether `TaskStop` on a call Claude Code moved to the background sends `notifications/cancelled` to Polarizer (if it does, the hold ends as `the client cancelled the call`; if not, it waits for the person or the timeout);
+- what happens to a backgrounded held call when the session exits (Claude Code says the task "does not survive exiting this session"; whether serve sees end of input, a signal or a cancel first is unknown);
+- whether the 123 s before a call is moved to the background is fixed or configurable;
 - whether an interactive session applies the idle timeout, and whether it honors progress there;
-- whether Claude Code retries a call that ended with `was not allowed`, or how the model reads that line;
 - whether anything else in Claude Code ends a call that waits for 20 minutes.
 
-The stage 7 manual check (section 11) asks the owner to hold one call in an interactive session, wait past 60 s, allow it from another terminal, and note what Claude Code showed.
+**Open question for M3:** should the card show that a held call has probably been moved to the background, once its age passes about 120 s, so the person knows the agent may already have gone on (and may have asked again)? The 123 s is Claude Code's, observed once, and may change between versions.
 
 ## 10. Failing closed
 
@@ -745,11 +752,11 @@ Draft text, describing only M2a with M1a:
 
 > **What holding does.** You give each tool a class in `polarizer.toml`. Reads run. Writes run when every path you told Polarizer to check is inside your workspace, and isn't one of a few sensitive places such as `.git/hooks`, your shell start-up files, `~/.ssh` or Claude Code's own settings. Destructive and outgoing calls, and calls to tools you haven't classified, are held: the call waits, and nothing reaches the server until you run `polarizer allow` with the hold's id. `polarizer holds` shows each waiting call with its exact arguments, every unusual character escaped. If you deny it or don't answer within five minutes, the call is refused, and the agent sees only that it was not allowed. Every hold, decision and outcome is in the ledger.
 >
-> **What it does not do.** It sees only calls that go through Polarizer, not the agent's shell, its own file tools, or MCP servers configured directly in Claude Code. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the top-level arguments you name, and only when the call arrives; a path nested inside an argument (a list of edits, each with its own path) is not checked in this version. A tool's own annotations are shown as a hint and are trusted only if you say so; a server you mark with `trust_annotations` chooses its own class, so its tools' annotations decide which of its calls wait, and Polarizer says at start how many tools that covers. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
+> **What it does not do.** Polarizer only sees calls routed through it; the agent's own shell, file tools and MCP servers configured directly in Claude Code are outside it. An agent whose call was refused can try another route itself: in the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take, because it would get around the proxy. A class is your statement about a tool; Polarizer cannot check what the tool really does, and a tool can reach files in ways that never appear in its arguments. Paths are checked only in the top-level arguments you name, and only when the call arrives; a path nested inside an argument (a list of edits, each with its own path) is not checked in this version. A tool's own annotations are shown as a hint and are trusted only if you say so; a server you mark with `trust_annotations` chooses its own class, so its tools' annotations decide which of its calls wait, and Polarizer says at start how many tools that covers. A hold is only as good as the person reading it: if you allow without reading, Polarizer records that you allowed it. An agent that can run commands as you can also run `polarizer allow`; Polarizer refuses unless the command is started from a terminal or told it is a script, which only stops accidents.
 >
 > **Known gaps in the path checks.** On Windows, the device names `COM1` to `COM3` and `LPT1` to `LPT3` written with a superscript digit are not recognized as device names. If you move Claude Code's configuration with `CLAUDE_CONFIG_DIR`, the built-in patterns don't follow it; add the new place to `write_hold_patterns`. A `~` in a pattern means the home directory in Polarizer's `HOME` when it starts, not your account's home.
 >
-> **What it relies on.** A held call lives inside the Polarizer process Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding; none of them reaches the server, and the ledger says so. If you allow a call and that process dies before it forwards it, the call does not run either: `polarizer holds` no longer lists it, because you decided it, and if the agent tries the call again you are asked again. Polarizer has no page or notification for holds yet: run `polarizer holds --wait` in another terminal to see them as they arrive (add `--bell` to have the terminal ring).
+> **What it relies on.** A held call lives inside the Polarizer process Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding; none of them reaches the server, and the ledger says so. If you allow a call and that process dies before it forwards it, the call does not run either: `polarizer holds` no longer lists it, because you decided it, and if the agent tries the call again you are asked again. A call that waits does not stop the agent: after about two minutes, Claude Code moves the waiting call to the background and the agent keeps working, so it can make other calls, or ask for the same one again (a new hold), while the first still waits for you. The hold doesn't change: nothing runs until you allow it, and it is refused at the timeout. Polarizer has no page or notification for holds yet: run `polarizer holds --wait` in another terminal to see them as they arrive (add `--bell` to have the terminal ring).
 
 ## 15. Build order and size
 
@@ -776,7 +783,7 @@ M2a stays **medium**, as milestones.md says: about one to two weeks, in two stag
 6. **Reference check of the example config:** `test_example_config_matches_reference_servers`, run locally with `POLARIZER_REFERENCE=1`. Small.
 7. **Docs:** MANUAL-CHECK.md's M2a section, QUICKSTART-DRAFT.md's `--no-holds` and the threat model, STAGE6 and STAGE7 notes with claims tables. Small.
 
-**Stop for review,** then the owner's manual check, including the long wait in section 9.
+**Stop for review,** then the owner's manual check, including the long wait in section 9. The owner ran it on Oct 5, 2026 (section 17, The owner's M2a check).
 
 ## 16. Decided
 
@@ -867,3 +874,9 @@ Decided while building stage 7, recorded in docs/STAGE7-NOTES.md, and folded int
 2. **Shutdown after an allow, before forwarding** (sections 5 and 6) has its own `call.refused` reason, `polarizer shut down before the call was forwarded`, as the client's cancel has its own.
 3. **`hold.abandoned` is a conditional append** (section 7), so two starts at once, or an allow racing a start, never give a hold two endings or a held call two terminal entries.
 4. **`read_file` joins the example config** (section 2), found by the reference check.
+
+### The owner's M2a check (Oct 5, 2026)
+
+The owner ran `scripts/hold-check.sh` interactively with Claude Code 2.1.289 (verified-facts.md, M2a check, interactive). Every step behaved as sections 6 and 9 say. It added two facts, folded into the sections above; neither changes the ledger format, a status, an exit code or any behavior of Polarizer.
+1. **Claude Code moves a call to the background after about 123 s,** and the agent keeps working while the call is still held (section 9, with why the 300 s default stays, the three points not verified, and an open question for M3; section 14, What it relies on).
+2. **A refused agent can take another route.** The model whose call expired named Bash `mv` as one it could have used. Section 14's "What it does not do" now opens with the routing limit and says so.

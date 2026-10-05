@@ -100,7 +100,7 @@ The test files with new subprocess, signal, lock or timing tests (`test_hold_res
 ## Not run
 
 - **CI,** so nothing from stage 7 has run on Windows or macOS, or on Python 3.11 or 3.13. Only Linux (WSL2, Python 3.12.3) ran it. The Windows-only tests (the four junction tests) have never run.
-- **Claude Code, any model, and an interactive session.** Nothing in this session ran `claude`. The M2a manual check (`scripts/hold-check.sh`) ran only against its stand-ins in `tests/test_hold_check.py`; its real run, with interactive Claude Code, the pinned Filesystem server and a person, is the owner's. What Claude Code shows while a call is held, after a deny, after a minute, and after a timeout, is unknown until then.
+- **Claude Code, any model, and an interactive session.** Nothing in this session ran `claude`. The M2a manual check (`scripts/hold-check.sh`) ran only against its stand-ins in `tests/test_hold_check.py`; its real run, with interactive Claude Code, the pinned Filesystem server and a person, is the owner's. The owner ran it on Oct 5, 2026 (Follow-up: the owner's M2a check, below).
 - **`scripts/live-check.sh` and `scripts/rugpull-check.sh` with real Claude Code.** Unchanged in stage 7; their tests ran with the stub.
 - **Esc during a hold with real Claude Code.** Only the two signals Claude Code was seen to send, from a test.
 
@@ -136,7 +136,25 @@ The test files with new subprocess, signal, lock or timing tests (`test_hold_res
 | The new subprocess, signal and lock tests pass five times in a row and once under load, leaving no process running | the script in Repeated runs | yes |
 | The whole suite, ruff and the docs check | `scripts/test.sh` | yes: see the summary below |
 | All of the above on Windows and macOS, and on Python 3.11 and 3.13 | CI | no |
-| The M2a manual check with interactive Claude Code | `scripts/hold-check.sh` (docs/MANUAL-CHECK.md, M2a) | no: for the owner |
+| The M2a manual check with interactive Claude Code: a held write denied and not created; the same call asked again a new hold with a new id and `args_commit`, allowed, `call.sent` with `allowed_by` `hold`, `call.returned` `ok`; a call held 128 s, then allowed, `ok`; a destructive call expired after 30 s and not moved; ledger intact, 71 entries | `scripts/hold-check.sh` (docs/MANUAL-CHECK.md, M2a; verified-facts.md, M2a check, interactive) | yes, once, by the owner, interactive (Oct 5, 2026, Claude Code 2.1.289) |
+| While a call is held, Claude Code 2.1.289 shows the call line and the person can keep typing; after about 123 s it moves the call to the background as a task, the agent keeps working, and the result arrives as a task-completed notification when the hold is allowed | the long-wait step of `scripts/hold-check.sh` | yes, once, by the owner, interactive |
+| A refused agent did not try another route, and named Bash `mv` as one it could have taken | the expire step of `scripts/hold-check.sh` | yes, once, by the owner, interactive (what the model said; nothing stops such a route) |
+| `TaskStop` on a backgrounded held call sends `notifications/cancelled`; what a backgrounded held call does when the session exits; whether the 123 s is fixed or configurable | none | no: unverified |
 | The pre-push scan finds none of the owner's private strings | `git grep --cached -i -c` per string, and the commit's message, author and committer | yes: every count 0 |
 
 The final `scripts/test.sh` on the committed code, apart from this paragraph: ruff (lint and format) clean, the docs check 18 files with 0 findings, and pytest 768 passed, 13 skipped in 214.57 s; 3 min 39 s in all. The 13 skips on Linux are stage 6's 8 (stage 1's 4 platform skips, the 3 reference tests and the Windows names test), the four new Windows-only junction tests, and the new reference test. After this paragraph was written, the docs check ran again with 0 findings.
+
+## Follow-up: the owner's M2a check (Oct 5, 2026)
+
+The owner ran `scripts/hold-check.sh` interactively with Claude Code 2.1.289 at commit c986088; the results and the two new facts are in docs/verified-facts.md (M2a check, interactive) and in the claims table above. This follow-up is one commit, "record the M2a check; background tasks after 123 s; shell bypass". It records them in HOLD-SPEC.md (sections 9, 14, 15 and 17), QUICKSTART-DRAFT.md (the same README text, and the Holds section), MANUAL-CHECK.md and milestones.md (M2a done as of the check), and fixes one thing the check found in the script. No change to Polarizer itself.
+
+- **Pasted answers reached the shell.** The script's answers are one line each, read with `read -r`; when the owner pasted several lines at a free-text question, the first was recorded and the rest stayed in the terminal's input, to be read by the shell as commands once the script ended (harmless `command not found` lines). After each answer, `ask`, `confirm` and `describe` now run `hold_check.py discard-input`, which reads how many bytes wait on the terminal (`FIONREAD`), throws them away with `tcflush(TCIFLUSH)`, and says how many; it never waits for input, and does nothing when stdin is not a terminal. Bash 3.2 has no non-blocking `read -t 0` to do this in the script. The free-text questions now say "Type a short answer; do not paste multi-line text"; the y/n and yes questions don't, since their answers are single words.
+- **Test:** `tests/test_hold_check.py::test_whole_check` now pastes two lines at the deny step's last question (only the first is recorded, the second is reported as ignored and never appears in the results) and two at the long wait's first free-text question (without the discard, the second line, `not tried`, would answer the next question). With the discard replaced by a no-op, the test fails at the first of those assertions.
+- **The tail of a paste** that has not reached the terminal when the answer is read is not thrown away. A terminal normally delivers a paste in one piece; not tested with a slow paste.
+
+| Claim | Command | Run? |
+|---|---|---|
+| After each answer, input already waiting on the terminal is thrown away and reported, so it neither answers the next question nor is left for the shell; the free-text questions say not to paste multi-line text | `pytest tests/test_hold_check.py` | yes, POSIX only |
+| The test fails without the discard | the same, with `discard_input` made a no-op, then restored | yes, once |
+| The whole suite, ruff and the docs check | `scripts/test.sh` | yes: ruff (lint and format) clean, the docs check 18 files with 0 findings, pytest 768 passed, 13 skipped in 212.08 s; 3 min 38 s in all |
+| The pre-push scan finds none of the owner's private strings | `git grep --cached -i -c` per string, and the commit's message, author and committer | yes: every count 0 |

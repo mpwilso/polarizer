@@ -15,7 +15,9 @@
 # Each command prints its output and appends it, under a header, to /tmp/hold-check-results.txt.
 # Decisions run polarizer allow and deny in this terminal, so their terminal check applies; this
 # script never passes --allow-no-terminal. A blank answer, end of input or Ctrl+C stops it with a
-# line saying what was done. Nothing is deleted: reset moves an earlier check's ledger aside.
+# line saying what was done. Each answer is one line: whatever else is already waiting on the
+# terminal after it (the rest of a pasted block) is thrown away, with a line saying how many
+# bytes. Nothing is deleted: reset moves an earlier check's ledger aside.
 # Reading the ledger is in scripts/hold_check.py.
 #
 # Testing only: POLARIZER_CHECK_TOML and POLARIZER_CHECK_LEDGER_DIR replace polarizer.toml and the
@@ -116,6 +118,13 @@ on_signal() {
 }
 trap on_signal INT TERM
 
+# discard_input: after each answer, throws away anything else already waiting on the terminal
+# (the rest of a multi-line paste), so it can't answer the next question or reach the shell as
+# commands once the script ends. Never waits for input.
+discard_input() {
+  helper discard-input || true
+}
+
 trimmed() {
   local s="${1//$'\r'/}"
   s="${s#"${s%%[![:space:]]*}"}"
@@ -131,6 +140,7 @@ ask() {
     printf '%s ' "$question"
     ANSWER=""
     IFS= read -r ANSWER || true
+    discard_input
     ANSWER="$(trimmed "$ANSWER")"
     if [ -z "$ANSWER" ]; then
       printf 'answer: none\n'
@@ -151,6 +161,7 @@ confirm() {
   printf '%s ' "$1"
   ANSWER=""
   IFS= read -r ANSWER || true
+  discard_input
   ANSWER="$(trimmed "$ANSWER")"
   printf 'answer: %s\n' "${ANSWER:-none}"
   [ "$ANSWER" = yes ] || stop "the answer was not yes"
@@ -159,8 +170,9 @@ confirm() {
 # describe "<question>": one line of free text, recorded; a blank line records "(skipped)".
 describe() {
   local said=""
-  printf '%s ' "$1"
+  printf '%s Type a short answer; do not paste multi-line text (or press Enter to skip): ' "$1"
   IFS= read -r said || true
+  discard_input
   said="$(trimmed "$said")"
   printf 'answer: %s\n' "${said:-(skipped)}"
 }
@@ -333,7 +345,7 @@ cmd_deny() {
   STATE="hold $HOLD is denied and the question was not answered; to answer it, run: scripts/hold-check.sh deny"
   wait_until 30 ended "$LEDGER" "$HOLD" > /dev/null || true
   sleep 1  # serve answers within a quarter of a second; give Claude Code a moment to show it
-  describe "What did Claude Code show for the call? Type it as one line (or press Enter to skip):"
+  describe "What did Claude Code show for the call?"
   show_trail "$HOLD"
   [ -e "$file" ] && echo "$file exists: the denied call was written anyway (not expected)" \
     || echo "$file does not exist, as expected after a deny"
@@ -358,7 +370,7 @@ cmd_allow() {
   else
     echo "no call.returned for the forwarded call within 60 s"
   fi
-  describe "What did Claude Code show for the call? Type it as one line (or press Enter to skip):"
+  describe "What did Claude Code show for the call?"
   show_trail "$HOLD"
   if [ "$(cat "$file" 2> /dev/null || true)" = "M2a hold check $TOKEN" ]; then
     echo "$file holds: M2a hold check $TOKEN"
@@ -391,7 +403,7 @@ cmd_long_wait() {
     stop "the hold ended before it was allowed"
   fi
   echo "held for $LONG_WAIT s, still open"
-  describe "While it waited, what did Claude Code show for the call? Type it as one line (or press Enter to skip):"
+  describe "While it waited, what did Claude Code show for the call?"
   ask "Could you type in terminal A while the call waited? (y/n/not tried)" y n "not tried"
   confirm "Type yes to allow hold $HOLD now:"
   STATE="the hold may be allowed; run: scripts/hold-check.sh status"
@@ -403,7 +415,7 @@ cmd_long_wait() {
   else
     echo "no call.returned for the forwarded call within 60 s"
   fi
-  describe "What did Claude Code show once the call finished, and how long did it say the call ran? One line (or press Enter to skip):"
+  describe "What did Claude Code show once the call finished, and how long did it say the call ran?"
   show_trail "$HOLD"
   other_holds "$HOLD"
   printf -- '-- long-wait: complete\n'
@@ -433,8 +445,8 @@ cmd_expire() {
   ending="$OUT"
   echo "the hold ended: $ending"
   sleep 1  # give Claude Code a moment to show the answer
-  describe "What did Claude Code show for the call? Type it as one line (or press Enter to skip):"
-  describe "About how long did the call appear to run, in seconds? (or press Enter to skip):"
+  describe "What did Claude Code show for the call?"
+  describe "About how long did the call appear to run, in seconds?"
   show_trail "$HOLD"
   [ -e "$source" ] && echo "$source is still there, as expected" || echo "$source is gone (not expected)"
   [ -e "$destination" ] && echo "$destination exists (not expected)" || echo "$destination does not exist, as expected"

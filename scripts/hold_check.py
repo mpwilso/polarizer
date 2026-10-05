@@ -12,6 +12,7 @@ text for the person goes to stderr, which the script prints and records.
     hold_check.py returned <ledger dir> <hold id>
     hold_check.py loaded <ledger dir> <timeout seconds>
     hold_check.py loaded-more <ledger dir> <timeout seconds> <count before>
+    hold_check.py discard-input                  (the terminal on stdin)
 
 Exit 0 on success, 1 when what it looked for is not there (the reason on stderr), 2 on a usage
 error, and 3 from `group` when nothing is pending at all.
@@ -176,6 +177,29 @@ def loaded_more(ledger_dir: Path, seconds: str, before: str) -> int:
     return 0 if count > int(before) else 1
 
 
+def discard_input() -> int:
+    """Throws away whatever is already waiting on the terminal after an answer, such as the
+    rest of a multi-line paste, so it never becomes the next answer or, once the script ends,
+    a command in the person's shell. Never waits for input; does nothing off a terminal."""
+    if not os.isatty(0):
+        return 0
+    import fcntl
+    import struct
+    import termios
+
+    try:
+        waiting = struct.unpack("i", fcntl.ioctl(0, termios.FIONREAD, b"\0\0\0\0"))[0]
+    except (OSError, AttributeError):
+        waiting = 0
+    try:
+        termios.tcflush(0, termios.TCIFLUSH)
+    except termios.error:
+        return 0
+    if waiting:
+        say(f"ignored {waiting} more bytes typed or pasted after the answer")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     try:
         match argv:
@@ -198,6 +222,8 @@ def main(argv: list[str]) -> int:
                 return loaded(Path(ledger_dir), seconds)
             case ["loaded-more", ledger_dir, seconds, before]:
                 return loaded_more(Path(ledger_dir), seconds, before)
+            case ["discard-input"]:
+                return discard_input()
     except (OSError, ValueError, KeyError, IndexError) as e:
         say(f"hold_check.py: {type(e).__name__}: {e}")
         return 1

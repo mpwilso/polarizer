@@ -35,6 +35,7 @@ START = (
     " Then run: scripts/hold-check.sh deny"
 )
 NOT_ALLOWED = "polarizer: fs__write_file was not allowed"
+IGNORED = "more bytes typed or pasted after the answer"
 
 
 def _take_terminal():
@@ -203,9 +204,13 @@ def test_whole_check(check):
         code, out = drive(env, "deny", [
             ("In terminal A, ask Claude:", lambda: claude.call("fs__write_file", write)),
             ("Is hold", b"y\n"),
-            ("What did Claude Code show", b"It said the call was not allowed.\n"),
+            # A pasted block: only its first line is the answer, and the rest is thrown away
+            # rather than left for the shell to run once the script ends.
+            ("What did Claude Code show", b"It said the call was not allowed.\nnot-a-command\n"),
         ])  # fmt: skip
         assert code == 0, out
+        assert "do not paste multi-line text" in out
+        assert IGNORED in out
         assert f'write the text "M2a hold check {token}" to {target}' in out
         assert "\x07" in out and "held by write-pattern: " in out
         assert "denied hold " in out and "-- deny: complete" in out
@@ -228,7 +233,8 @@ def test_whole_check(check):
         code, out = drive(env, "long-wait", [
             ("In terminal A, ask Claude:", lambda: claude.call("fs__write_file", long)),
             ("Is hold", b"y\n"),
-            ("While it waited", b"a spinner\n"),
+            # Without the discard, "not tried" would answer the next question.
+            ("While it waited", b"a spinner\nnot tried\n"),
             ("Could you type", b"y\n"),
             ("Type yes to allow", b"yes\n"),
             ("once the call finished", b"it said done after a minute\n"),
@@ -272,7 +278,9 @@ def test_whole_check(check):
     text = results.read_text(encoding="utf-8")
     for marker in ("reset", "deny", "allow", "long-wait", "expire", "finish"):
         assert f"-- {marker}: complete" in text
-    assert "answer: It said the call was not allowed." in text
+    assert "answer: It said the call was not allowed.\n" in text
+    assert "not-a-command" not in text
+    assert "answer: a spinner\n" in text and "(y/n/not tried) answer: y\n" in text
 
 
 @POSIX
