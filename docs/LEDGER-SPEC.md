@@ -82,9 +82,9 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | `hold.expired` | `session`, `hold`, `reason`: a hold the holding process ended by timeout, the client's cancel or shutdown; not fsynced (M2a) |
 | `hold.abandoned` | `session`, `hold`, `held_by`: an open hold whose process has ended, recorded by a later `serve` at start; not fsynced (M2a) |
 | `hold.revealed` | `session`, `hold`, `label` (`real` or `planted`), `salt`, `why` (or null), `derived_from` (or null): the reveal that checks against a hold's `plant_commit`, written by the holding `serve` after the hold's ending; not fsynced (stage 10; MEASURE-SPEC.md, sections 8 and 11) |
-| `drill.started` | `session` (16 random hex characters, one per drill), `polarizer_version`, `set`, `set_sha256`, `seed`, `seed_from`, `condition` (`plain` or `prediction-gate`), `condition_from`, `calls`, `excluded`: written only to a drill ledger, never to a serve ledger; not fsynced (stage 8; MEASURE-SPEC.md, section 8) |
+| `drill.started` | `session` (16 random hex characters, one per drill), `polarizer_version`, `set`, `set_sha256`, `seed`, `seed_from`, `condition` (`plain` or `prediction-gate`), `condition_from`, `calls`, `excluded`, `keep_predictions`: written only to a drill ledger, never to a serve ledger; not fsynced (stage 8; MEASURE-SPEC.md, section 8) |
 | `drill.shown` | `session`, `n`, `scenario`, `hold`, `args_commit`, `seen_before`: a practice call shown; no side file is written (stage 8) |
-| `drill.predicted` | `session`, `n`, `prediction` (folded, at most 200 characters), `elapsed_ms`: the prediction-gate condition only (stage 8) |
+| `drill.predicted` | `session`, `n`, `length`, `prediction` (folded, at most 200 characters, only with `--keep-predictions`; otherwise null), `elapsed_ms`: the prediction-gate condition only (stage 8) |
 | `drill.decided` | `session`, `n`, `scenario`, `decision` (`allow` or `deny`), `elapsed_ms` (monotonic, measured in the drill process), `actor` (stage 8) |
 | `drill.revealed` | `session`, `n`, `scenario`, `answer` (`clean` or `planted`), `shape` (or null), `outcome` (`caught`, `missed`, `right` or `false-flag`) (stage 8) |
 | `drill.ended` | `session`, `how` (`finished`, `stopped` or `interrupted`), `answered`, `calls`: best effort (stage 8) |

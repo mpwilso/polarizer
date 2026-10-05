@@ -1,8 +1,8 @@
 # Measure spec (M5 and M6, first slice)
 
-This is the behavior contract for the first slice of measurement: drills, stats over real holds, and live planted calls inside `serve`. The ledger format is in LEDGER-SPEC.md, `serve` and the command line are in PROXY-SPEC.md, pins are in PIN-SPEC.md, holds are in HOLD-SPEC.md, and the facts this relies on are in verified-facts.md. Everything M0, M1a and M2a do stays as those files say, except where this file changes it. Each change is listed under Deviations and guesses at the end (section 17), and the questions left open are in section 16.
+This is the behavior contract for the first slice of measurement: drills, stats over real holds, and live planted calls inside `serve`. The ledger format is in LEDGER-SPEC.md, `serve` and the command line are in PROXY-SPEC.md, pins are in PIN-SPEC.md, holds are in HOLD-SPEC.md, and the facts this relies on are in verified-facts.md. Everything M0, M1a and M2a do stays as those files say, except where this file changes it. Each change is listed under Deviations and guesses at the end (section 17), and the owner's answers to this spec's questions are in section 16.
 
-The goal of the whole project is to measure whether a person's approvals still catch anything. This slice is the first part of that measurement. It is built in three stages, each ending in a stop for the owner's review (section 15): drills (stage 8), stats over real holds (stage 9), and live planted calls (stage 10). The owner's decisions for this round are listed in section 17; "decision <n>" refers to them.
+The goal of the whole project is to measure whether a person's approvals still catch anything. This slice is the first part of that measurement. It is built in three stages, each ending in a stop for the owner's review (section 15): drills (stage 8), stats over real holds (stage 9), and live planted calls (stage 10), which is deferred until after M3 (section 16, question 6). Drills are the primary measurement. The owner's decisions for this round are listed in section 17; "decision <n>" refers to them.
 
 ## 1. What this slice is and is not
 
@@ -10,7 +10,7 @@ The goal of the whole project is to measure whether a person's approvals still c
 - **Drills** (stage 8). `polarizer drill` runs an offline practice session: no agent, no model, no network, no upstream server, and nothing forwarded anywhere. It shows about 20 held calls, one at a time, each under the one-line task the agent was given and rendered exactly as `polarizer holds` renders a real hold. The person answers allow or deny, and each answer is revealed at once as right or wrong, with the reason. `polarizer drill report` summarizes every drill so far, and `--export` writes an anonymized summary a person may choose to share (sections 4 to 9).
 - **The prediction gate** (stage 8), a drill condition in which the person writes what they expect the call to do before they see it (section 4).
 - **Stats over real holds** (stage 9). `polarizer stats` reads a serve ledger and prints holds and their endings per session, the approval rate with its interval, the time to a decision, how often each tool and rule was allowed, and the warning sign the research names: decisions getting faster while the approval rate does not fall (section 10).
-- **Live planted calls** (stage 10, specified here and built later). With an opt-in config key, `serve` occasionally creates a hold that the agent never made and that is never forwarded, to see whether the person catches it during real work. Every hold of such a session carries a commitment, and every ending is followed by a reveal that can be checked against it (section 11).
+- **Live planted calls** (stage 10, specified here and built after M3). With an opt-in config key, `serve` occasionally creates a hold that the agent never made and that is never forwarded, to see whether the person catches it during real work. Every hold of such a session carries a commitment, and every ending is followed by a reveal that can be checked against it (section 11).
 
 **Not in this slice:**
 - the card (M3), argument rules and taint (M2b), scanning (M1b), and the practice range (M4);
@@ -34,6 +34,8 @@ The goal of the whole project is to measure whether a person's approvals still c
 - **Drill calls are not the person's real work.** They are invented, short and self-contained, and they come with the task written above them, which real holds don't have. A person who catches every planted call in a drill may still miss one in their own project, where they know less about what the agent was asked.
 - **Repeats.** The scenario set is finite (section 6). After enough drills, a person may recognize a scenario. Each shown call records how often it was shown before, and the report counts repeats.
 - **The answers are in the package.** A person who reads the scenario file, or computes the plan from the seed in their own ledger, can score 100%. A drill measures only a person who doesn't look.
+- **The planted share is far above any real rate.** A drill plants 4 to 8 calls in 20, chosen for the measurement (section 4). Rare targets are missed more often than common ones, so a drill's catch rate is likely higher than a person's catch rate at a realistic rate. A low-rate condition may come later (section 16, question 2).
+- **Answers past the timeout.** Real holds time out after 300 s and drill calls never do; an answer that took longer is marked, and results are shown with and without such answers (section 4, Time).
 
 ## 2. Sources
 
@@ -111,14 +113,16 @@ The answer line is read with `readline`, stripped and lowercased:
 In the `prediction-gate` condition, step 3 becomes:
 1. The call header and the task line are printed, then the prompt `what do you expect this call to do? `, flushed.
 2. The line is read. `q` or `quit` stops the drill. A line that is empty after stripping prints `type a few words, or q to stop` and asks again.
-3. `drill.predicted` is appended with the prediction folded and cut (section 8) and the time taken, awaited.
+3. `drill.predicted` is appended with the prediction's length and the time taken, and with the prediction itself, folded and cut (section 8), only when the drill was started with `--keep-predictions`; awaited.
 4. A blank line, the hold block and `allow or deny? ` are printed, flushed. From here the call goes on as in the plain condition.
 
-The prediction is never scored, never shown again during the drill, and never exported. It stays in the person's own ledger so they can compare it with the call later (section 16, question 3).
+The prediction is never scored, never shown again during the drill, and never exported in any form other than counts. By default only its length is recorded. With `--keep-predictions` the text stays in the person's own ledger, so they can compare it with the call later (section 16, question 3).
 
 ### Time
 
 `elapsed_ms` is measured in the drill process on the monotonic clock (`time.monotonic_ns()`), from just after the `allow or deny? ` prompt is flushed to just after the answer line is read, as whole milliseconds rounded down. Invalid answers in between are included. In the prediction gate, `drill.predicted`'s `elapsed_ms` runs from just after `what do you expect this call to do? ` is flushed to just after the prediction is read. Both are stored in the entry, never derived from `ts` differences, which step on WSL2 (verified-facts.md, Wall clock and monotonic clock on WSL2). So decision times in the two conditions measure the same thing: from seeing the block to answering.
+
+**Answers over 300 s.** A real hold times out after 300 s, and a drill call never does. A drill answer whose `elapsed_ms` is above 300000 is **over 300 s**: its reveal says so, and the end screen, `drill report` and the export give the rates both with and without such answers (section 5; section 9, `polarizer drill report` and The export). Nothing new is recorded: the mark is computed from `elapsed_ms` (section 16, question 4).
 
 ### Stopping, and the end of a drill
 
@@ -164,7 +168,15 @@ Press Enter to start.
 
 ```
 This drill: prediction first. Before each call, type in a few words what you
-expect it to do; then you see the call. Type q at any prompt to stop.
+expect it to do; then you see the call. Only the length of what you type is
+kept. Type q at any prompt to stop.
+```
+
+With `--keep-predictions`, its second and third lines read:
+
+```
+expect it to do; then you see the call. What you type is kept on this
+computer, and never exported. Type q at any prompt to stop.
 ```
 
 **A call, plain** (`drill_call_plain.txt`). The block is an example; its values come from the scenario:
@@ -234,6 +246,12 @@ Press Enter for the next call.
 
 For the last call, the Enter line is `Press Enter to see the results.`
 
+**An answer over 300 s** (`drill_reveal_over_300.txt`) adds one line after the first line of its reveal, before `why:`:
+
+```
+You took over 300 s; a real hold would have timed out before your answer.
+```
+
 **The end of a drill** (`drill_end.txt`), with 6 planted calls of which 5 were denied, and 14 clean calls of which 1 was denied:
 
 ```
@@ -257,6 +275,7 @@ to see every drill so far.
 - **`missed:`** lists the numbers of planted calls allowed, each with its shape in words, as `call 7 (look-alike)`, separated by `, `; `none` when there are none. **`false flags:`** lists the clean calls denied, as `call 12`, or `none`.
 - **The median line** leaves out the part in brackets for a kind with no answers, and is `median time to decide: no answers` with none at all.
 - **Stopped with no answers** (`drill_end_stopped.txt` covers stopping after 3 answers): `Drill stopped: 0 of 20 calls answered (plain).`, then the closing lines only.
+- **Answers over 300 s** (`drill_end_over_300.txt`): after the `false flags:` line, `over 300 s: call 4. Without it:` (or `call 4, call 9. Without them:`), then the planted and clean lines again, indented two spaces, computed without those answers. With no answer over 300 s the two are the same, and these lines are left out.
 
 The numbers in this example are section 7's test vectors 5 of 6 and 1 of 14.
 
@@ -480,9 +499,9 @@ Drills write only to their own ledger (section 9), never to a serve ledger. Ever
 
 | Kind | `data` |
 |---|---|
-| `drill.started` | `session`, `polarizer_version`, `set` (the set version, an integer), `set_sha256`, `seed` (32 hex), `seed_from` (`"random"` or `"flag"`), `condition` (`"plain"` or `"prediction-gate"`), `condition_from` (`"random"` or `"flag"`), `calls` (the number planned), `excluded` (sorted scenario ids) |
+| `drill.started` | `session`, `polarizer_version` (`polarizer.__version__`, from the package metadata), `set` (the set version, an integer), `set_sha256`, `seed` (32 hex), `seed_from` (`"random"` or `"flag"`), `condition` (`"plain"` or `"prediction-gate"`), `condition_from` (`"random"` or `"flag"`), `calls` (the number planned), `excluded` (sorted scenario ids), `keep_predictions` (a boolean: `--keep-predictions` was given) |
 | `drill.shown` | `session`, `n` (1-based position), `scenario` (its id), `hold` (the fresh hold id shown), `args_commit` (the value shown), `seen_before` (how many earlier `drill.shown` entries in this ledger have this scenario) |
-| `drill.predicted` | `session`, `n`, `prediction` (the typed line through `safe()` with a limit of 200 characters: whitespace folded, non-ASCII escaped, cut), `elapsed_ms` |
+| `drill.predicted` | `session`, `n`, `length` (the number of characters in the typed line after stripping), `prediction` (with `--keep-predictions`, the typed line through `safe()` with a limit of 200 characters: whitespace folded, non-ASCII escaped, cut; otherwise null), `elapsed_ms` |
 | `drill.decided` | `session`, `n`, `scenario`, `decision` (`"allow"` or `"deny"`), `elapsed_ms`, `actor` (`"person"`) |
 | `drill.revealed` | `session`, `n`, `scenario`, `answer` (`"clean"` or `"planted"`), `shape` (or null), `outcome` (`"caught"`, `"missed"`, `"right"` or `"false-flag"`) |
 | `drill.ended` | `session`, `how` (`"finished"`, `"stopped"` or `"interrupted"`), `answered`, `calls` |
@@ -527,13 +546,15 @@ The rule since M1a (HOLD-SPEC.md, section 5): an entry is fsynced, with `ledger.
 ### Syntax
 
 ```
-polarizer drill [--ledger-dir <absolute path>] [--calls <n>] [--condition plain|prediction-gate] [--seed <32 hex>]
+polarizer drill [--ledger-dir <absolute path>] [--calls <n>] [--condition plain|prediction-gate] [--seed <32 hex>] [--keep-predictions]
 polarizer drill report [--ledger-dir <absolute path>] [--export <path>]
 polarizer stats (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
 - **`drill`'s directory** is `--ledger-dir`, or by default `~/.local/share/polarizer-drills` (`~` expanded; on Windows the same path under the user's profile, as for the serve ledger). `drill` takes no `--config`: a drill has nothing to do with a serve config, and reading one would invite pointing a drill at a serve ledger.
 - **`stats`** takes exactly one of `--config` and `--ledger-dir`, as `holds` does (HOLD-SPEC.md, section 8): `--config` is read with `require_env=False`, roots are not checked, and nothing is started.
+- **`--keep-predictions`** keeps the text of each prediction in the drill ledger (section 4, The prediction gate); without it only the length is kept. It has no effect in a plain drill, and is recorded in `drill.started` either way.
+- **The version** that `drill.started`, the export and `session.started` record is `polarizer.__version__`, read from the installed package's metadata (`importlib.metadata`), so pyproject.toml is the one place it is set (section 16, question 8). Stage 8 replaces the hard-coded `0.1.0.dev0`.
 - Results go to stdout, refusals and usage errors to stderr as one line starting `polarizer: `.
 
 ### Usage errors
@@ -546,6 +567,7 @@ polarizer: --condition must be plain or prediction-gate
 polarizer: --seed must be 32 lowercase hex characters
 polarizer: --export goes with drill report
 polarizer: drill report takes only --ledger-dir and --export
+polarizer: --keep-predictions goes with drill
 polarizer: --ledger-dir must be an absolute path, got <path>
 polarizer: stats needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
 polarizer: <argparse's message>
@@ -564,6 +586,8 @@ Its refusals, each one line on stderr:
 - `polarizer: <dir> holds a serve ledger; drills keep their own (the default is ~/.local/share/polarizer-drills)`, exit 2, when the ledger has any `session.started`. This is how drills never write to a serve ledger;
 - `polarizer: <verify's first line>; run polarizer verify`, with that status's code, for a ledger that isn't intact, as serve, `approve` and `allow` refuse;
 - the scenario set line (section 6, Loading), exit 2.
+
+**`serve` refuses a drill ledger** (section 16, question 12). When the ledger at `ledger_dir` holds any `drill.*` entry, `serve` refuses after verifying it and before writing anything (no `session.started`, no `ledger.head_rebuilt`): `polarizer: <dir> holds drill entries; serve keeps its own ledger (drills default to ~/.local/share/polarizer-drills)`, exit 2, the existing usage-error exit. Built in stage 8, with `test_serve_refuses_drill_ledger`.
 
 ### `polarizer drill`
 
@@ -611,6 +635,8 @@ each drill
 - **Several set versions** are named in the first line: `(scenario sets 1 and 2)`.
 - **Each drill** is one line, in `drill.started` order, dated by the UTC date of its `drill.started` `ts`; `, stopped` or `, did not end` follows the counts when it didn't finish. The fixture's per-drill lines are in the golden file; the spec shows the first and last.
 - **Rates follow section 7:** below 5 of a kind, `too few to say a rate (5 or more needed)`.
+- **Answers over 300 s** (section 4, Time). When a condition has any, its block gains, after its median line, `  over 300 s: <n> answers. Without them:` (`1 answer. Without it:`), then its planted and clean lines again, indented four spaces, computed without those answers. A drill's line gains `, <n> over 300 s` after its median. With none, nothing is added. The fixture has one plain answer over 300 s, so `drill_report.txt` shows these lines; their values are in the golden file.
+- **A drill with no answer** (stopped or killed before the first answer) says nothing about anyone, and is left out of every count, line and export field. A ledger whose drills all have no answer reports as one with none.
 
 ### The export
 
@@ -629,11 +655,11 @@ each drill
 | `conditions` | `{"plain": C, "prediction-gate": C}`, each C or null when that condition has no drills |
 | `difference` | `{"catch": D, "false_flag": D}`, each D or null when either side is below 5 or missing |
 | `by_shape` | for each of the five shape ids, `{"planted": int, "caught": int}` |
-| `per_drill` | a list, in order, of `{"date", "condition", "calls", "answered", "ended", "planted", "caught", "clean", "false_flags", "median_ms"}`, with `ended` one of `finished`, `stopped`, `interrupted` or `none` |
+| `per_drill` | a list, in order, of `{"date", "condition", "calls", "answered", "ended", "planted", "caught", "clean", "false_flags", "median_ms", "over_300s"}`, with `ended` one of `finished`, `stopped`, `interrupted` or `none` |
 
-C is `{"drills", "planted", "caught", "clean", "false_flags", "catch", "false_flag", "median_ms"}`, where `catch` and `false_flag` are R or null below 5, and `median_ms` is an integer or null. R is `{"percent", "low_percent", "high_percent"}` and D is `{"points", "low_points", "high_points", "distinguishable"}`, all integers as printed (section 7) except the boolean. No floats appear, so the file is the same on every platform.
+C is `{"drills", "planted", "caught", "clean", "false_flags", "catch", "false_flag", "median_ms", "over_300s", "catch_within_300s", "false_flag_within_300s"}`, where `catch` and `false_flag` are R or null below 5, `median_ms` is an integer or null, `over_300s` counts the answers over 300 s, and the last two are the rates without those answers, R or null below 5 (section 16, question 4). R is `{"percent", "low_percent", "high_percent"}` and D is `{"points", "low_points", "high_points", "distinguishable"}`, all integers as printed (section 7) except the boolean. No floats appear, so the file is the same on every platform.
 
-**What it never holds:** predictions or any other text a person typed, the ledger directory or any path, session ids, hold ids, seeds, scenario ids, `args_commit` values, `ts` values, times of day, user or host names. `test_export_has_no_free_text_paths_or_names` checks the file against an allowlist: every key is in the schema, and every string is one of the literals above, a version matching `^[0-9A-Za-z.+-]{1,32}$`, a set version of digits, or a date matching `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`. It also searches the bytes for the fixture's prediction text, ledger path, session ids, seed and scenario ids, and finds none.
+**What it never holds:** predictions, their lengths or any other text a person typed, the ledger directory or any path, session ids, hold ids, seeds, scenario ids, `args_commit` values, `ts` values, times of day, user or host names. `test_export_has_no_free_text_paths_or_names` checks the file against an allowlist: every key is in the schema, and every string is one of the literals above, a version matching `^[0-9A-Za-z.+-]{1,32}$`, a set version of digits, or a date matching `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`. It also searches the bytes for the fixture's prediction text, ledger path, session ids, seed and scenario ids, and finds none.
 
 ### `polarizer stats`
 
@@ -652,10 +678,12 @@ Every row gets a file under `tests/golden/`, with `<dir>` for the test's directo
 | `drill`: intro, each condition | `drill_intro_plain.txt`, `drill_intro_prediction_gate.txt` | (mid-drill) |
 | `drill`: one call, each condition | `drill_call_plain.txt`, `drill_call_prediction_gate.txt` | (mid-drill) |
 | `drill`: an invalid answer | `drill_reprompt.txt` | (mid-drill) |
-| `drill`: each reveal | `drill_reveal_caught.txt`, `drill_reveal_missed.txt`, `drill_reveal_right.txt`, `drill_reveal_false_flag.txt` | (mid-drill) |
+| `drill`: each reveal, and an answer over 300 s | `drill_reveal_caught.txt`, `drill_reveal_missed.txt`, `drill_reveal_right.txt`, `drill_reveal_false_flag.txt`, `drill_reveal_over_300.txt` | (mid-drill) |
 | `drill`: a whole drill of the test set, to the end screen | `drill_end.txt` | 0 |
 | `drill`: stopped with `q` after 3 answers, one kind below 5 | `drill_end_stopped.txt` | 0 |
-| `drill` refusals: no terminal, serve ledger, forbidden directory, broken ledger, bad `--calls`, bad `--condition`, bad `--seed`, a set that fails its check | `drill_refused_<case>.txt` (stderr) | 2, or the status's code |
+| `drill`: a whole drill with an answer over 300 s | `drill_end_over_300.txt` | 0 |
+| `drill` refusals: no terminal, serve ledger, forbidden directory, broken ledger, bad `--calls`, bad `--condition`, bad `--seed`, `--keep-predictions` with `drill report`, a set that fails its check | `drill_refused_<case>.txt` (stderr) | 2, or the status's code |
+| `serve` on a drill ledger | `serve_refused_drill_ledger.txt` (stderr) | 2 |
 | `drill report`: two conditions, a stopped drill, repeats | `drill_report.txt` | 0 |
 | `drill report`: one condition only | `drill_report_one_condition.txt` | 0 |
 | `drill report`: no drills; no ledger | `drill_report_none.txt`, `drill_report_no_ledger.txt` | 0 |
@@ -689,13 +717,13 @@ What that means, and the screen says it:
 - It is **time to decision, not reading time**: it includes the time before the person noticed the hold.
 - It is the same measure for every hold in every existing ledger, so `stats` works on ledgers written since M2a, including the owner's M2a check ledger.
 
-This is not the monotonic `elapsed_ms` that milestones.md's carry-forward note and PIN-SPEC.md, section 3 asked for; the second commit of this round updates milestones.md's note (section 17, deviation 1). A decider that shows the hold and takes the decision in one process, as M3's card will, can record a monotonic value (section 16, question 5).
+This is not the monotonic `elapsed_ms` that milestones.md's carry-forward note and PIN-SPEC.md, section 3 asked for; the second commit of this round updates milestones.md's note (section 17, deviation 1). **A monotonic value when there is one** (section 16, question 5): M3's card shows the hold and takes the decision in one process, and records a monotonic `elapsed_ms` on `hold.decided`, an optional field. `stats` prefers it when present: that hold's time is `(elapsed_ms + 500) // 1000` seconds, measured from the card showing the hold, and the note under `all sessions` says how many decisions had it. Until M3 no decision has it, and every time is the wall-clock difference above.
 
 ### By tool and rule, and suggestions
 
 For each pair of exposed tool name and rule, over all sessions: allowed of decided, and the other states when not zero. Pairs are listed by number of holds, most first, then by tool, then by rule.
 
-A **suggestion** line is printed for a pair with at least `SUGGEST_MIN = 20` decided holds, every one allowed. At 20 of 20 the Wilson interval's low end is 83%, which is the least evidence at which "this person always allows it" is worth a line. The line names the counts and asks a question; it never says the hold is useless, and it changes nothing:
+A **suggestion** line is printed for a pair with at least `SUGGEST_MIN = 20` decided holds, every one allowed. At 20 of 20 the Wilson interval's low end is 83%, which is the least evidence at which "this person always allows it" is worth a line. 20 is provisional (section 16, question 9), and the output says so: the section's first line is `suggestions, from a provisional threshold of 20 decided holds, all allowed:`, with the lines below it indented two spaces, and with none, `suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)`. The line names the counts and asks a question; it never says the hold is useless, and it changes nothing:
 
 | Rule | Line |
 |---|---|
@@ -712,18 +740,18 @@ No suggestion is printed for a pattern that is built in (HOLD-SPEC.md, section 3
 The warning sign the research names (section 2): decisions getting faster while the approval rate stays flat.
 - **Window:** the last `WINDOW = 40` decided holds, by the seq of their `hold.decided`, over all sessions and excluding planted holds, against the 40 before them. With fewer than 80 decided holds, the section says how many it needs.
 - **It fires when all three hold:** the earlier window's median time is at least 6 s; the recent window's median time is at most half of it; and the approval rate did not fall by a distinguishable amount, that is, Newcombe's interval for the recent rate minus the earlier rate has `high >= 0`.
-- **Why these numbers:** 40 decisions give medians that one slow or fast decision can't move much, and at a few holds a day they cover weeks. Halving is a large change, well past the 1 s that rounding and the clock step can cause, and the 6 s floor keeps it so: from 6 s, a halving needs 3 s of real change. All three are guesses until real ledgers exist (section 16, question 9).
+- **Why these numbers:** 40 decisions give medians that one slow or fast decision can't move much, and at a few holds a day they cover weeks. Halving is a large change, well past the 1 s that rounding and the clock step can cause, and the 6 s floor keeps it so: from 6 s, a halving needs 3 s of real change. All three are guesses until real ledgers exist, and are provisional (section 16, question 9): the section's first line says so, as below.
 - **The sentence,** always with its numbers, never a verdict:
 
 ```
-trend
+trend, with provisional thresholds (40 and 40 decisions, half the time, 6 s)
   last 40 decisions: median about 4 s, allowed 37 of 40
   the 40 before: median about 19 s, allowed 36 of 40
   Decisions got faster while the approval rate did not fall. That can mean less
   reading, or calls that became easier to judge; a drill can tell the two apart.
 ```
 
-Without the warning, the first three lines are printed alone. With too few: `trend: needs 80 decided holds to compare the last 40 with the 40 before; this ledger has <n>`.
+Without the warning, the first three lines are printed alone. With too few: `trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has <n>`.
 
 ### Output
 
@@ -774,9 +802,9 @@ by tool and rule
   fs__edit_file write-pattern: none decided; 1 abandoned
   web__post_comment egress: none decided; 1 expired
 
-suggestions: none (a tool and rule needs 20 decided holds, all allowed)
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
 
-trend: needs 80 decided holds to compare the last 40 with the 40 before; this ledger has 6
+trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has 6
 ```
 
 - **Sessions** are listed in `session.started` order, only those with holds; text from the ledger goes through `printable()`, as in `holds`.
@@ -786,7 +814,7 @@ trend: needs 80 decided holds to compare the last 40 with the 40 before; this le
 
 ## 11. Live planted calls inside serve (stage 10)
 
-Specified now, built in stage 10, after the owner's review of stages 8 and 9. HOLD-SPEC.md, section 12 kept a planted call indistinguishable from a real hold until the person decides; this section uses what it kept.
+Specified now, built in stage 10, which is deferred until after M3 (section 16, question 6). Drills are the primary measurement until then: a drill call has a known answer, and a drill needs no agent. HOLD-SPEC.md, section 12 kept a planted call indistinguishable from a real hold until the person decides; this section uses what it kept.
 
 ### Opt-in and disclosure
 
@@ -845,7 +873,7 @@ A client cancel can't end a planted hold, since no client request exists. HOLD-S
 
 **Nothing.** The agent never made the call, so there is no request to answer, and a planted call's result never reaches it, whatever the person decides. That means the agent's view does not look like a real call's: Claude Code shows a call line for every real held call (HOLD-SPEC.md, section 9) and none for a planted one.
 
-The trade-off: making the agent's view match would mean attaching the planted call to one of the agent's real requests. Then either the agent's real work waits or is refused for the sake of a test, or Polarizer answers the agent with a result that no server produced. Both are rejected: Polarizer never fabricates a result, and never refuses or delays a real call to test the person. The cost is a tell: a person who matches every hold against Claude Code's call lines can find the planted one. So a live planted call measures whether the person reads the held call in `holds` (or later the card), not whether they cross-check it with the agent's transcript. The limit is stated in LIMITS.md when stage 10 ships.
+The trade-off: making the agent's view match would mean attaching the planted call to one of the agent's real requests. Then either the agent's real work waits or is refused for the sake of a test, or Polarizer answers the agent with a result that no server produced. Both are rejected: Polarizer never fabricates a result, and never refuses or delays a real call to test the person. The cost is a tell: a person who matches every hold against Claude Code's call lines can find the planted one. So a live planted call measures whether the person reads the held call in `holds` (or later the card), not whether they cross-check it with the agent's transcript. The owner accepted this as a stated limit (section 16, question 6); it is stated in LIMITS.md when stage 10 ships.
 
 ### What allow and deny print
 
@@ -878,7 +906,7 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 
 ### Limits of live planted calls
 
-- **One shape only:** a changed path argument. The other four shapes need to know what a tool's other arguments mean, which Polarizer doesn't (section 16, question 7).
+- **One shape only:** a changed path argument. The other four shapes need to know what a tool's other arguments mean, which Polarizer doesn't; they wait for M4's practice range, whose servers Polarizer knows (section 16, question 7).
 - **No call line in Claude Code** for a planted call (above).
 - **The rate is low by design:** at most 3 per session, about 1 in 20 eligible calls. A catch rate from planted calls takes many sessions to mean anything, and `stats` prints "too few to say" until it does.
 - **A person who reads serve's memory** (a debugger) can see labels. Out of scope, as anything with the person's own privileges is.
@@ -926,7 +954,10 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | `test_reveal_for_every_scenario` | Parametrized by scenario id and answer: a one-call drill records `drill.revealed` with the scenario's answer and shape, the right outcome of the four, and prints that outcome's reveal with the scenario's `why`. | Default |
 | `test_elapsed_ms_is_monotonic` | With the injected wall clock stepped back 1.1 s between the prompt and the answer, and the injected monotonic clock advanced 4.2 s, `elapsed_ms` is 4200; the same for `drill.predicted`. | Default |
 | `test_drill_kinds_and_fields` | Each drill kind has exactly section 8's fields, inside the subset. | Default |
-| `test_prediction_gate_flow` | The prediction comes before the block; an empty prediction asks again; the prediction is stored folded and cut to 200 characters. | Default |
+| `test_prediction_gate_flow` | The prediction comes before the block; an empty prediction asks again; by default only its length is stored, and with `--keep-predictions` the text too, folded and cut to 200 characters. | Default |
+| `test_over_300_is_marked` | An answer with `elapsed_ms` above 300000 gets the reveal's extra line, and the end screen and report give the rates with and without it; at exactly 300000 it is not marked. | Default |
+| `test_version_from_metadata` | `polarizer.__version__` equals the installed package's metadata version, which equals pyproject.toml's; `drill.started` and the export record it. | Default |
+| `test_serve_refuses_drill_ledger` | `serve` on a ledger with a `drill.*` entry prints the refusal line, exits 2 and appends nothing. | Default |
 | `test_answers_and_reprompt` | `a`, `allow`, `d`, `deny` in any case are accepted; anything else re-prompts with the clock running; `q` stops. | Default |
 | `test_stop_and_interrupt` | `q` at each of the three prompts, end of input, and KeyboardInterrupt each record `drill.ended` with the right `how`, print the end screen and return 0. | Default |
 | `test_end_screen_equals_report_line` | The end screen's counts and median equal `drill report`'s line for that drill. | Default |
@@ -999,7 +1030,7 @@ Stage 8 writes `docs/DRILL-GUIDE.md`: a one-page walkthrough the owner can send 
 - **Length and tone.** At most about 600 words. Plain sentences, second person, no jargon: "a record file on your computer", not "ledger"; "the AI agent", with MCP named once and explained in a clause. Every command is on its own line, ready to paste.
 - **Who it is for, first:** anyone, with no AI agent needed. "This takes about 15 minutes, 10 of them the drill."
 - **What a drill is:** you play the person who approves an AI agent's risky actions. You see 20 actions, each with the task the agent was given, and you allow or deny each. Some were changed to be wrong on purpose. After each answer you see whether you were right, and why.
-- **Install,** for macOS and Linux, and for Windows (PowerShell): install uv from its official instructions (linked), then the one `uv tool install` line. While the repository is private, the owner sends a package file instead, and the guide gives that line too (section 16, question 1). The guide states that installing downloads Polarizer's dependencies, and that the drill itself uses no network.
+- **Install,** for macOS and Linux, and for Windows (PowerShell): install uv from its official instructions (linked), then the one `uv tool install` line. While the repository is private, the owner sends a package file instead, and the guide gives that line too (section 16, question 1). The guide states that installing downloads Polarizer's dependencies, and that the drill itself uses no network. It says that drills on a native Windows console (PowerShell or Command Prompt) have not been tried yet (section 16, question 14).
 - **Run one drill:** `polarizer drill`. What the screen shows, with a short excerpt of a call and a reveal; how to answer (`a` or `d`, `q` to stop); that nothing is real and nothing is sent.
 - **See and export the results:** `polarizer drill report`, then `polarizer drill report --export drill-summary.json`; a short excerpt of what the export holds, and a plain list of what it never holds (section 9, The export). Sending it is the reader's choice.
 - **How to read the numbers:** "too few to say" and the interval, in two sentences; that a drill measures attention when you know you are being tested.
@@ -1054,7 +1085,9 @@ Three stages, each ending in a stop for the owner's review. Together they are mi
 
 **Stop for review.**
 
-### Stage 10: live planted calls (medium)
+### Stage 10: live planted calls (medium; deferred until after M3)
+
+Deferred by the owner's decision (section 16, question 6): M3's card comes first, and drills are the primary measurement until then.
 
 1. **Config and records:** the key, its error, the policy hash rule, `policy.loaded`'s field, the start-up line. Small.
 2. **The commitment and the reveal** for every hold of a planting session, real ones first. Done when `test_every_hold_commits_when_on`, `test_salt_never_written_before_reveal` and `test_plant_commit_changes_no_reader` pass. Small to medium.
@@ -1064,22 +1097,24 @@ Three stages, each ending in a stop for the owner's review. Together they are mi
 
 **Stop for review,** then the owner's manual check of stage 10.
 
-## 16. Open questions
+## 16. Questions, decided
 
-1. **Installing for a friend while the repository is private.** `uv tool install git+https://...` works only once it is public. Should the guide say to install from a wheel the owner builds with `uv build` and sends, and does the owner want that at all before the repo is public?
-2. **The planted share in drills.** 4 to 8 of 20 (about 30%) is chosen for measurement, far above any real rate. Should a later set offer a low-prevalence condition (1 or 2 of 20) to measure the cost of rarity, at the price of many more drills?
-3. **Keeping predictions.** They are stored, folded and cut, in the person's own ledger and never exported. Should they be kept at all, or only their length? Should a later report show them beside the call for the person to judge?
-4. **A drill time limit.** Real holds time out after 300 s; drills never do. Should a drill decision past 300 s be marked, since in real use it would have expired?
-5. **Monotonic time to decision for real holds.** M3's card will show a hold and take the decision in one process, so it can record a monotonic `elapsed_ms` on `hold.decided` (an optional field). Should M3's spec add it, with `stats` preferring it when present?
-6. **The missing call line** for live planted calls (section 11). Acceptable as a stated limit?
-7. **More shapes for live planted calls** need knowledge of what tools' other arguments mean. Should M4's practice range, which has its own servers, be where they are tried first?
-8. **Version string.** `polarizer.__version__` is `0.1.0.dev0` while `pyproject.toml` says `0.1.0`. Drills, exports and `session.started` record `__version__`. Should stage 8 make them agree, and which way?
-9. **The trend thresholds** (40 and 40, halving, 6 s) and `SUGGEST_MIN` (20) are guesses. Revisit after the owner's own ledgers have 80 decisions?
-10. **Evidence from more than one person.** What does the owner want before the README cites drill results: a number of people, of drills each, and how consent to record a summary in docs/EVIDENCE.md is asked?
-11. **Forbidden paths for drills.** `drill` reads no config, so it refuses only Parallax's two directories and relies on the git-tree warning and the development guard. Should it accept `--config` just to read `ledger_forbidden_paths`?
-12. **Should `serve` refuse a drill ledger** (one with `drill.started`) the way `drill` refuses a serve ledger? This spec doesn't, since `drill` would then refuse that ledger anyway.
-13. **CLAUDE.md, rule 6** names `~/.local/share/polarizer/` as the default ledger location. Drills add `~/.local/share/polarizer-drills`. Should rule 6 name it too? The second commit of this round changes only CLAUDE.md's read-first list.
-14. **Windows console input** for drills (`readline` on a Windows console, Ctrl+C there) has not been run; only the in-process tests will run on the Windows CI job.
+The owner answered this section's questions on Oct 5, 2026 (UTC), after stage 8's step 0; questions 1, 10 and 11 were left to this spec's recommendation. Each answer is one line; the sections it changes say so where they apply.
+
+1. **Installing for a friend while the repository is private.** Decided (this spec's recommendation): the guide gives the `uv tool install` line for a package file the owner builds with `uv build` and sends, and the `git+https` line for once the repository is public; whether to send package files before then is the owner's choice.
+2. **The planted share in drills.** Decided: kept at 4 to 8 of 20; the limits say it is far above any real rate, and a low-rate condition may come later (section 1, What the numbers cannot show).
+3. **Keeping predictions.** Decided: by default only each prediction's length is recorded; `--keep-predictions` stores the folded text in the person's own drill ledger; predictions are never exported in any form other than counts (sections 4, 8 and 9).
+4. **A drill time limit.** Decided: an answer that took over 300 s is marked, and results are reported both with and without such answers (sections 4, 5 and 9).
+5. **Monotonic time to decision for real holds.** Decided: yes; M3's card records a monotonic `elapsed_ms` on `hold.decided`, and `stats` prefers it when present (section 10).
+6. **The missing call line** for live planted calls. Decided: accepted as a stated limit, since a person comparing screens can spot a planted call; stage 10 is deferred until after M3, and drills are the primary measurement (sections 11 and 15).
+7. **More shapes for live planted calls.** Decided: yes, they wait for M4's practice range (section 11).
+8. **Version string.** Decided: one version source; `polarizer.__version__` comes from the installed package's metadata (pyproject.toml's `0.1.0`), fixed in stage 8, and drills and exports record it (sections 8 and 9).
+9. **The trend thresholds and `SUGGEST_MIN`.** Decided: provisional, and the output says so on the lines that use them (section 10).
+10. **Evidence from more than one person.** Decided (this spec's recommendation): the README cites drill results only once at least 5 people have each sent an export of at least 2 drills, each asked in writing for consent to record the count and the dates in docs/EVIDENCE.md, never a name.
+11. **Forbidden paths for drills.** Decided (this spec's recommendation): `drill` takes no `--config`; it refuses Parallax's two directories and warns inside a git working tree, with the development guard as the backstop (section 9).
+12. **`serve` and a drill ledger.** Decided: `serve` refuses a ledger directory that holds drill entries, with one line and exit 2, the existing usage-error exit; no new exit code (section 9).
+13. **CLAUDE.md, rule 6.** Decided: rule 6 names `~/.local/share/polarizer-drills` as a Polarizer ledger location that development sessions must not write to; tests use temporary directories.
+14. **Windows console input** for drills. Decided: drills on a native Windows console are unverified, and the guide says so (section 13).
 
 ## 17. Deviations and guesses
 
@@ -1110,10 +1145,21 @@ Read on Oct 5, 2026 (UTC) at commit 03cedbd, with `git status` clean and `script
 3. **milestones.md's M5 + M6 row** says canaries are "scored for catches and false flags". A live planted call can only be caught or missed; real holds have no known answer, so false flags are scored in drills only (deviation 6). The second commit updates the row, and uses "planted calls".
 4. **milestones.md says its rows are in build order,** with M3 and M2b before M5 + M6. The owner chose to build this slice next; the second commit says so in the status list (deviation 7).
 5. **"Canary"** appears in milestones.md, HOLD-SPEC.md, section 12 and the README's "What's next". The second commit changes milestones.md's row; HOLD-SPEC.md's section 12 keeps its wording as the record of M2a's round; the README waits for section 14's plan.
-6. **`polarizer.__version__` is `0.1.0.dev0`,** `pyproject.toml` says `0.1.0`. Not changed in a docs round (section 16, question 8).
+6. **`polarizer.__version__` is `0.1.0.dev0`,** `pyproject.toml` says `0.1.0`. Not changed in a docs round; decided later: one version source, fixed in stage 8 (section 16, question 8).
 7. **README.md and LIMITS.md say nothing measures approvals yet.** True until stage 8 ships; section 14 plans the change.
 8. **The test count** is 798 passed and 13 skipped at 03cedbd, where docs/EVIDENCE.md and the README cite 784 at 9270c97. Not a contradiction: later commits added tests, and the cited numbers name their commit.
 9. **PROXY-SPEC.md says "16 holds per process",** HOLD-SPEC.md "of this session". The same thing, since a serve process has one session. No change.
+
+### What stage 8's step 0 found
+
+Read on Oct 5, 2026 (UTC) at commit f03a29e, with `git status` clean and `scripts/test.sh` passing (798 passed, 13 skipped in 233.5 s). Each was small and is decided here.
+
+1. **The git-tree warning starts a process.** `ledgerdir.check_location` runs `git rev-parse` to find a working tree, and a drill must start no process (section 12, `test_drill_opens_no_connection_and_starts_no_process`). Decided: `drill` finds a working tree by looking for a `.git` directory or file in its directory and each parent, with no process, and prints the same warning line. A tree found only through `GIT_DIR` is missed; `serve`, `repair`, `allow` and the pin commands keep the `git` command.
+2. **The writer's own stop line.** A writer that stops prints `polarizer: stopped writing the ledger: <why>; run polarizer verify` to stderr itself. Decided: that line comes first, then the drill's own line (section 4, Stopping), exit 1.
+3. **Drills with no answer** were not covered by the report's counts. Decided: left out of every count, line and export field (section 9, `polarizer drill report`).
+4. **A second reader for each scenario** (section 6, Adding a scenario) can't be found in a development session. Decided: set 1 is written and pinned in stage 8 and reviewed by the owner at stage 8's stop; until then it has not shipped, so the owner's corrections edit set 1 and update its pin instead of making set 2. The stage notes say which scenarios the owner reviewed.
+5. **Which strings are package and host names** in the invented-names test. Decided: a package name is the value of an argument named `package` (or an element of `packages`); a host is the host part of a URL, the domain of an e-mail address, or the value of an argument named `host`.
+6. **Where `serve` refuses a drill ledger.** Opening the ledger as a writer can append `ledger.head_rebuilt`. Decided: the refusal comes from the fold that runs while the ledger is verified at open, before anything is appended; a listener at open may refuse the open with its own line and code, which the writer passes on unchanged instead of reporting a fold failure.
 
 ### Deviations from the decisions and the existing documents
 
@@ -1138,7 +1184,7 @@ Read on Oct 5, 2026 (UTC) at commit 03cedbd, with `git status` clean and `script
 19. **`policy.loaded` gains `planted_calls_per_session` on every start** from stage 10, and the policy hash's form gains the key only when it is above 0.
 20. **The opt-in is one `[policy]` key,** with `--no-holds` turning planting off; there is no flag that turns it on.
 21. **`drill report` with no ledger exits 0** with a "none yet" line, where `holds` and `stats` print `no ledger at <dir>` and exit 2: a person new to drills has done nothing wrong.
-22. **Predictions are stored** in the drill ledger, through `safe()` at 200 characters, and never exported (section 16, question 3).
+22. **Only a prediction's length is stored by default;** with `--keep-predictions` the text is stored in the drill ledger, through `safe()` at 200 characters; predictions are never exported in any form other than counts (section 16, question 3).
 23. **The approval rate counts decided holds only:** expired, abandoned and open holds are counted beside it.
 24. **No suggestion for built-in patterns or fail-closed path rules,** whatever the count (section 10).
 25. **The trend's window and thresholds** (40, 40, half, 6 s) and `SUGGEST_MIN` (20) are guesses (section 16, question 9).
@@ -1146,6 +1192,6 @@ Read on Oct 5, 2026 (UTC) at commit 03cedbd, with `git status` clean and `script
 27. **The prevalence effect** (rare targets are missed more often) is cited from general knowledge of visual-search research, not from the sources checked on 2026-10-04, and is used only to explain why drill rates may run high.
 28. **`holds.block` is split** so that `holds.render_block` renders from arguments; `holds`' output doesn't change.
 29. **`allow` and `deny` wait up to 2 s for a reveal** when the hold carries `plant_commit`, for real and planted holds alike.
-30. **`drill` refuses a serve ledger;** `serve` does not refuse a drill ledger (section 16, question 12).
+30. **`drill` refuses a serve ledger, and `serve` refuses a drill ledger** (section 16, question 12), each with exit 2.
 31. **The terminal requirement for `drill` has no override,** unlike `allow` and `deny`, since a drill exists to measure a person.
 32. **Test file names, golden file names, the scenario file's name and keys, the shape ids, every exact output line, and the reveal texts** are this spec's choice.
