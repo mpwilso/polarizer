@@ -43,6 +43,7 @@ FAKE_TOOLS = ("echo", "wait", "fail", "refuse", "closed", "ask", "elicit", "chan
               "rich_error", "boom")  # fmt: skip
 # The reference Filesystem server's tools that take paths, as polarizer.example.toml has them.
 FILESYSTEM_TOOLS = {
+    "read_file": ToolRule("local-read", ("path",)),
     "read_text_file": ToolRule("local-read", ("path",)),
     "read_media_file": ToolRule("local-read", ("path",)),
     "read_multiple_files": ToolRule("local-read", ("paths",)),

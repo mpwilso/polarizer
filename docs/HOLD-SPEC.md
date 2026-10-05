@@ -71,6 +71,7 @@ trust_annotations = false
 
 # Optional. One entry per tool, keyed by the upstream's own tool name (no prefix).
 [upstream.fs.tools]
+read_file = { class = "local-read", path_args = ["path"] }
 read_text_file = { class = "local-read", path_args = ["path"] }
 read_media_file = { class = "local-read", path_args = ["path"] }
 read_multiple_files = { class = "local-read", path_args = ["paths"] }
@@ -94,7 +95,7 @@ fetch = { class = "open-world" }
 post_comment = { class = "egress" }
 ```
 
-The Filesystem tool names above are from memory of the server's documented tools and from verified-facts.md (`list_directory`, `read_text_file`, `list_directory_with_sizes`). They were not listed again in this round. Stage 7 checks this example against the pinned server's real listing (section 13, `test_example_config_matches_reference_servers`) and fixes it.
+The Filesystem tool names above are the 14 tools the pinned server lists, checked in stage 7 against its real listing with `test_example_config_matches_reference_servers` (section 13; verified-facts.md, Stage 7), which also checks that each `path_args` name is a property of that tool's input schema. Stage 7 added `read_file`, the server's deprecated name for `read_text_file`, which the spec round's list had left out.
 
 **`[policy]` keys:**
 - `workspace_roots`: list of strings, default empty. `~` is expanded, each result must be absolute, and there are at most 32. `serve` resolves each with `os.path.realpath` at start and refuses to start if one doesn't exist. Polarizer never asks the client for its roots, although Claude Code advertises the capability: the answer would come from the session the holds guard (section 16, decision 10). Commands that only read the config (`verify`, `repair`, `pending`, `holds`, `allow`, `deny`) don't check existence.
@@ -312,7 +313,7 @@ The format, the hash, the statuses and the exit codes don't change. LEDGER-SPEC.
 **Changed kinds,** each gaining optional fields:
 - **`call.sent`** of a held call that was allowed has `hold`, the hold id. A call that was never held has no `hold` key, so every existing `call.sent` is unchanged.
 - **`call.sent`** also has `allowed_by` (decided, section 16, decision 5): the rule that let a call run without a hold (`holds-off`, `inside-roots`, `local-read` or `open-world`), or `"hold"` for a call that was allowed from a hold. A call that never passed through the rule function has no `allowed_by` key; in M2a every forwarded call passes through it, and every `call.sent` written before M2a has neither key.
-- **`call.refused`** that ends a held call has `hold`. Its `reason` is `hold <id> was denied`, `hold <id> expired: <hold.expired's reason>`, `the client cancelled the call before it was forwarded`, `hold <id> was allowed, but its side file <problem>` (section 6, Allow), or, when a decision arrived but routing has changed since (section 6), M1a's reason for the hidden tool. A refusal for `too-many-holds` has no `hold` (no hold was created) and the reason in row 20. LEDGER-SPEC.md's description of `call.refused` widens from "a name that matches no listed tool" to "a call Polarizer never forwarded".
+- **`call.refused`** that ends a held call has `hold`. Its `reason` is `hold <id> was denied`, `hold <id> expired: <hold.expired's reason>`, `the client cancelled the call before it was forwarded`, `polarizer shut down before the call was forwarded`, `hold <id> was allowed, but its side file <problem>` (section 6, Allow), or, when a decision arrived but routing has changed since (section 6), M1a's reason for the hidden tool. A refusal for `too-many-holds` has no `hold` (no hold was created) and the reason in row 20. LEDGER-SPEC.md's description of `call.refused` widens from "a name that matches no listed tool" to "a call Polarizer never forwarded".
 - **`session.started`** is unchanged.
 
 **`verify --args`** counts `hold.created`'s `args_commit` as a reference to its side file, as it counts `call.sent`'s (LEDGER-SPEC.md, Part 3). So the side file of a hold that was denied, expired or abandoned is matching, missing or tampered like any other, never orphaned, and a tampered one exits 8. A file that both a `call.sent` and a `hold.created` refer to (an allowed hold) is counted once, at the `call.sent`'s seq, as before. The output's format, the statuses and the exit codes don't change.
@@ -346,6 +347,7 @@ LEDGER-SPEC.md's fsync policy said "later milestones' holds and decisions" are s
 | the client's cancel while waiting | `hold.expired` (client), `call.refused` | `call.refused` | never forwarded |
 | the client's cancel after an allow, before forwarding | `hold.decided` allow, `call.refused` (`the client cancelled the call before it was forwarded`) | `call.refused` | never forwarded |
 | shutdown while waiting | `hold.expired` (shutdown), `call.refused` | `call.refused` | never forwarded |
+| shutdown after an allow, before forwarding | `hold.decided` allow, `call.refused` (`polarizer shut down before the call was forwarded`) | `call.refused` | never forwarded |
 | killed while waiting | nothing; the next start writes `hold.abandoned` | `hold.abandoned` | never forwarded; the process died |
 
 So for a held call, "never forwarded" is exactly "no `call.sent` with its `hold`", and a `call.sent` without `call.returned` still reads as outcome unknown. The one case without a terminal entry and without a `call.sent` is the allowed hold whose process died before forwarding; the table says how it reads, and section 7 says what the person sees. A call that was never held keeps M0's rules.
@@ -370,7 +372,7 @@ The handler waits for the first of: its hold's ending, the timeout, the client's
 
 - **The watch.** serve's once-a-second ledger catch-up (PIN-SPEC.md, section 8) runs every 0.25 s while any hold of this session is open, and once a second otherwise. It is the same `fstat` comparison, so an idle ledger costs one `fstat` per tick. A catch-up hands each adopted entry to the hold fold as well as to pin state.
 - **What wakes a hold.** An adopted ending whose `hold` is in serve's own table, and which is the first ending for that hold. A `hold.decided` whose `args_commit` differs from the hold's is ignored, with one stderr line (`polarizer: ignored a decision for hold <id> with another args_commit`), and the hold keeps waiting. A decision for a hold id serve didn't create (another session's, or one that doesn't exist) changes nothing in this process. That is how serve honors only decisions for its own holds.
-- **Progress.** Every 10 s while waiting, serve calls `ctx.session.report_progress(<seconds waited>, None, None)`: the progress value is the whole seconds waited on the monotonic clock, with no total and no message. That reports under the client's own progress token and does nothing if the client gave none (the SDK's docstring; verified-facts.md, Spike). A failure to send it is ignored. The interval can be injected for tests.
+- **Progress.** Every 10 s while waiting, serve calls `ctx.session.report_progress(<seconds waited>, None, None)`: the progress value is the whole seconds waited on the monotonic clock, with no total and no message. Each value is above the one before, as MCP asks of progress: with the default interval that is the whole seconds waited, and with an injected interval under a second (tests) a value is the one before plus one (section 17, Stage 7). That reports under the client's own progress token and does nothing if the client gave none (the SDK's docstring; verified-facts.md, Spike). A failure to send it is ignored. The interval can be injected for tests.
 - **What the model sees while waiting:** nothing. The call takes time. No progress message carries text.
 
 ### The endings
@@ -387,7 +389,7 @@ The handler waits for the first of: its hold's ending, the timeout, the client's
 
 **The client's cancel** (`notifications/cancelled`, or Claude Code's own timeout, which sends one: verified-facts.md, Spike): the handler sees `CancelledError`. In a shielded scope, serve appends `hold.expired` (`the client cancelled the call`) conditionally, then `call.refused` (`hold <id> expired: the client cancelled the call`), and re-raises. The client gets nothing; the SDK has already abandoned the request. If an allow was already in the ledger, the hold's ending is that allow, and serve appends only `call.refused` with `the client cancelled the call before it was forwarded`. If a deny was, `call.refused` says `hold <id> was denied`.
 
-**Shutdown.** The shutdown path (PIN-SPEC.md, section 8, step 1) cancels every handler, held ones included. A held handler records `hold.expired` (`polarizer shut down while the call was held`) and `call.refused` the same way, in its shielded scope. This is best effort, like all shutdown work: if the process is killed first, the hold stays open in the ledger, and the next start records `hold.abandoned` for it (section 7). Shutdown ends every hold of the process, not just the one in view.
+**Shutdown.** The shutdown path (PIN-SPEC.md, section 8, step 1) cancels every handler, held ones included. A held handler records `hold.expired` (`polarizer shut down while the call was held`) and `call.refused` the same way, in its shielded scope. If an allow was already in the ledger, its ending is that allow, and serve appends only `call.refused` with `polarizer shut down before the call was forwarded`. This is best effort, like all shutdown work: if the process is killed first, the hold stays open in the ledger, and the next start records `hold.abandoned` for it (section 7). Shutdown ends every hold of the process, not just the one in view.
 
 **The writer stops** while a hold waits (another process wrote something that doesn't chain, a fold failed, or an fsync failed): serve can no longer read decisions or record anything. Every waiting handler wakes at once and answers `polarizer: <name> was not called: the ledger could not record it`, with nothing recorded, as M1a does for calls. The holds stay open in the ledger, and the next start records them as abandoned.
 
@@ -422,11 +424,11 @@ Polarizer must tell whether the process that created a hold is still running, wi
 - If serve can't create or lock its own file, it writes `polarizer: warning: cannot create the session lock <path>: <message>; this session's holds will show as unknown` and goes on. Its holds then show as unknown and are never abandoned automatically.
 - The files are never deleted in M2a: one empty file per session (section 16, decision 6).
 
-`holds` probes with a shared lock on a read-only descriptor, so it creates and writes nothing. Two probes at once can make each other read "running" for a moment; that only delays an abandonment or shows a dead session as running once. On Windows the operating system releases a dead process's locks, but not necessarily at once, so a just-ended session may read as running for a moment. That is from memory of Windows' locking documentation, not checked in this round and not tested.
+`holds` probes with a shared lock on a read-only descriptor, so it creates and writes nothing. Two probes at once can make each other read "running" for a moment; that only delays an abandonment or shows a dead session as running once. On Windows the operating system releases a dead process's locks, but not necessarily at once, so a just-ended session may read as running for a moment. That is from memory of Windows' locking documentation. Stage 7's `test_killed_process_releases_its_session_lock` kills a process that holds its session lock and probes for up to 10 s; it runs on every platform, but has run only on Linux so far.
 
 ### At start
 
-After `policy.loaded` and before connecting upstreams, serve folds the open holds (built during the startup verification pass, with no second read) and, for each hold of another session that is still open, probes that session. For each session that has **ended**, it appends `hold.abandoned` for each of its open holds. A session that is running or unknown is left alone.
+After `policy.loaded` and before connecting upstreams, serve folds the open holds (built during the startup verification pass, with no second read) and, for each hold of another session that is still open, probes that session. For each session that has **ended**, it appends `hold.abandoned` for each of its open holds, through the conditional append (section 6), so a hold that another process ended meanwhile, with an allow or another start's `hold.abandoned`, gets none. A session that is running or unknown is left alone.
 
 This narrows decision 7, which said "every hold of an earlier session". Two Claude Code sessions can share one ledger, so an earlier session can still be running and waiting on its holds. Only a session proven ended is abandoned (section 17, deviation 6).
 
@@ -710,6 +712,8 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_kill_during_a_hold` | SIGKILL while a call is held: the ledger verifies intact with an open hold and no terminal entry; `holds` shows the session ended; a new serve writes `hold.abandoned`, and then there is exactly one terminal entry. | POSIX, for the same reason |
 | `test_holds_wait` | `holds --wait` started before any hold prints the listing and exits 0 within 2 s of a hold appearing; with only a dead session's open hold it keeps waiting. | Default |
 | `test_holds_wait_bell` | `holds --wait --bell` writes one BEL per new open hold of a running session before the listing, byte for byte as `holds_wait_bell.txt`; without `--bell` no BEL is written; `--bell` without `--wait` is the usage line. | Default |
+| `test_stdin_closed_during_a_hold` (stage 7) | End of input while a call is held takes the same shutdown path as the signals: `hold.expired` (shutdown), one `call.refused`, nothing forwarded. | Default, so shutdown during a hold is tested on Windows too |
+| `test_killed_process_releases_its_session_lock` (stage 7) | A process killed outright (SIGKILL, or TerminateProcess on Windows) leaves its session lock free within 10 s. | Default |
 
 ### `tests/test_hold_cli.py` and `tests/test_golden.py`
 
@@ -855,3 +859,11 @@ After stage 6, the owner's review of the rule function and of CI asked for these
 25. **`allowed_by` on `call.sent`** (owner's decision, section 16, decision 5): an optional field naming the rule that let a call run, or `"hold"`.
 26. **Forwarded arguments come from the side file** (owner's decision): after an allow, serve checks the side file against `args_commit` and forwards what it parses from it; a failed check refuses the call with a fixed reason (section 6, Allow). The four `<problem>` texts are this spec's choice.
 27. **`holds --wait --bell`** (owner's decision, section 16, decision 11). The owner's wording was to ring for each new hold "then keep waiting as before"; `--wait` ends at the first open hold of a running session, so the bell is written just before that listing, one per such hold found at that read (section 8).
+
+### Stage 7 (Oct 5, 2026)
+
+Decided while building stage 7, recorded in docs/STAGE7-NOTES.md, and folded into the sections above. None changes the ledger format, a status or an exit code.
+1. **Progress values always increase** (section 6). MCP asks that each progress value be higher than the last; whole seconds waited do that at the 10 s interval, but not at the 0.05 s interval `test_progress_during_a_hold` injects, where it asks for increasing progress. A value is the whole seconds waited, or the one before plus one if that is higher.
+2. **Shutdown after an allow, before forwarding** (sections 5 and 6) has its own `call.refused` reason, `polarizer shut down before the call was forwarded`, as the client's cancel has its own.
+3. **`hold.abandoned` is a conditional append** (section 7), so two starts at once, or an allow racing a start, never give a hold two endings or a held call two terminal entries.
+4. **`read_file` joins the example config** (section 2), found by the reference check.

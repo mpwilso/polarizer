@@ -289,3 +289,72 @@ def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> V
         return _hold(*held, cls, class_from)
     allow = {"local-write": INSIDE_ROOTS, "local-read": LOCAL_READ, "open-world": OPEN_WORLD}
     return Verdict("allow", allow[cls], None, cls, class_from)
+
+
+# Classes in `pending` and `approve` with --config (section 8) -------------------------------
+
+
+def for_display(cfg: Config) -> Policy:
+    """The classes of a parsed config, for `pending` and `approve`: no root is resolved or
+    checked, and nothing is evaluated."""
+    upstreams = {
+        u.prefix: UpstreamPolicy(u.trust_annotations, dict(u.tools)) for u in cfg.upstreams
+    }
+    return Policy(upstreams=upstreams)
+
+
+def _annotations(copy) -> dict | None:
+    value = copy.get("annotations") if isinstance(copy, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def class_line(policy: Policy, prefix: str, tool: str, copy: dict) -> str:
+    """The line after a `new` or `changed` block's header in `pending`, and after the printed
+    definition in `approve`: the tool's class and what the stored copy's annotations suggest.
+    A configured class that holds less than the suggestion says "but"."""
+    suggested = suggested_class(_annotations(copy))
+    rule = policy.rule_for(prefix, tool)
+    if rule is not None:
+        if contradicts(rule.cls, suggested):
+            return f"class {rule.cls}, but annotations suggest {suggested}"
+        return f"class {rule.cls}; annotations suggest {suggested}"
+    if policy.class_from_annotations(prefix, tool):
+        return f"class {suggested} (from annotations); annotations suggest {suggested}"
+    return f"class none: every call is held; annotations suggest {suggested}"
+
+
+def classes_section(policy: Policy, pin_state, ledger_dir: Path, upstream=None) -> list[str]:
+    """`pending`'s classes section: every tool of a configured upstream whose latest decision
+    approves a hash with no drift since, and which has no class or whose class contradicts its
+    annotations, by prefix and tool name. [] when there is none. A tool whose approved copy
+    fails its check is left out: it can't be served, and its annotations can't be read."""
+    from polarizer import defhash
+    from polarizer.text import printable
+
+    lines, unclassified, contradicted = [], 0, 0
+    for prefix, tool in pin_state.keys():
+        if upstream is not None and prefix != upstream or prefix not in policy.upstreams:
+            continue
+        tp = pin_state.get(prefix, tool)
+        if tp.decision != "approved" or tp.drifted:
+            continue
+        try:
+            copy = defhash.read_copy(ledger_dir, tp.decided_hash)
+        except defhash.CopyProblem:
+            continue
+        suggested = suggested_class(_annotations(copy))
+        name = printable(f"{prefix}__{tool} {tp.decided_hash}")
+        rule = policy.rule_for(prefix, tool)
+        if rule is None and not policy.class_from_annotations(prefix, tool):
+            unclassified += 1
+            lines.append(f"no class {name}; annotations suggest {suggested}")
+        elif rule is not None and contradicts(rule.cls, suggested):
+            contradicted += 1
+            lines.append(f"contradicts {name}: class {rule.cls}, annotations suggest {suggested}")
+    if not lines:
+        return []
+    header = (
+        f"classes: {unclassified} approved tools have no class, "
+        f"{contradicted} contradict their annotations"
+    )
+    return [header, *lines]

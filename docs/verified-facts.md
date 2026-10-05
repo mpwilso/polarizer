@@ -662,6 +662,16 @@ Checked while building M2a's policy and holds, on Python 3.12.3, mcp 2.2.0 and a
 - **lstat below a directory with no permissions** (executed, `tests/test_paths.py::test_unreadable_part_is_held`): `os.lstat` of a path under a mode-000 directory raises `PermissionError` with `strerror` `Permission denied` for a non-root user.
 - **The SDK and held calls** (executed, in memory, `tests/test_holds.py`): a `tools/call` handler that awaits for seconds while the SDK client waits needs nothing from the SDK; cancelling the client's call delivers `CancelledError` to the waiting handler, as verified-facts.md's spike found for a forwarding handler. No SDK behavior was found that contradicts this file.
 
+## Stage 7 (Oct 5, 2026, UTC)
+
+Checked while building M2a's lifetime, progress and visibility, on Python 3.12.3, mcp 2.2.0 and anyio 4.15.1, in `.venv`, on Linux (WSL2). No Claude Code, no model.
+
+- **The pinned Filesystem server's tools** (executed): `POLARIZER_REFERENCE=1 uv run --locked pytest -s tests/test_policy_config.py::test_example_config_matches_reference_servers`, with `npx` resolved to a two-line wrapper script in the session scratch directory that runs the real `npx --offline`, put first on `PATH` for that command only. Filesystem 2026.8.31 lists 14 tools, in this order: `read_file`, `read_text_file`, `read_media_file`, `read_multiple_files`, `write_file`, `edit_file`, `create_directory`, `list_directory`, `list_directory_with_sizes`, `directory_tree`, `move_file`, `search_files`, `get_file_info`, `list_allowed_directories`. `read_file` has the title `Read File (Deprecated)`, the description `Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead.`, the same input schema as `read_text_file` (`path`, `tail`, `head`), and the annotations `readOnlyHint` true and `openWorldHint` false. `polarizer.example.toml` named the other 13; it now names all 14, and every `path_args` name it gives is a property of that tool's input schema.
+- **The three reference tests** (`tests/test_reference.py`) passed the same way, with the toml that stage 6's `rig.serve_config` classifies.
+- **Nothing was fetched:** afterwards, of npx's cache directories, only the mtimes of `~/.npm/_npx/68b53d3fd47bf8db` and `~/.npm/_npx/a705c79b42eea4c8` themselves were newer than the session's guard snapshot, and no entry inside either was. Nothing new is pinned.
+- **A killed process's flock** (executed, `tests/test_hold_restart.py::test_killed_process_releases_its_session_lock`): after SIGKILL to a process holding its session lock, the probe read ended within the test's 10 s bound in each of six runs. On Windows the same test uses TerminateProcess; it has not run there.
+- **Progress for a held call** (executed, in memory and over stdio, `tests/test_holds.py::test_progress_during_a_hold` and `tests/test_hold_restart.py::test_progress_during_a_hold_over_stdio`): `ctx.session.report_progress` from the waiting `tools/call` handler reaches a client that asked for progress, under its own token (`tok-7` over stdio), with no `total` and no `message` keys; a client that asked for none receives no `notifications/progress`. This is the SDK behavior the spike found for a forwarding handler.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

@@ -81,6 +81,7 @@ class Block:
     note: str | None = None  # the line saying why a block is not in the group
     problem: str | None = None  # a stored copy that fails its check
     definition: dict | None = None
+    cls: str | None = None  # the class line of pending --config
 
     @property
     def name(self) -> str:
@@ -99,15 +100,20 @@ def parse(text: str) -> tuple[tuple[int, int, int], list[Block]]:
     blocks = []
     for part in parts[1:]:
         header, *rest = part.split("\n")
+        if header.startswith("classes: "):
+            break  # pending --config's classes section comes last, after the group line
         kind = header.split(" ", 1)[0]
         pattern = {"new": NEW, "changed": CHANGED, "group": GROUP}.get(kind)
         block = Block(header, kind, pattern.match(header) if pattern else None)
+        # After the header: a note (not in a group, more than one definition), the class
+        # line that pending --config adds (docs/HOLD-SPEC.md, section 8), then the definition
+        # or a stored-copy problem.
+        if rest and not rest[0].startswith(("{", "stored copy ", "class ")):
+            block.note = rest.pop(0)
+        if rest and rest[0].startswith("class "):
+            block.cls = rest.pop(0)
         if rest and rest[0].startswith("stored copy "):
             block.problem = rest.pop(0)
-        elif rest and not rest[0].startswith("{"):
-            block.note = rest.pop(0)
-            if rest and rest[0].startswith("stored copy "):
-                block.problem = rest.pop(0)
         if rest:
             block.definition = json.loads("\n".join(rest))
         blocks.append(block)

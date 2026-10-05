@@ -101,7 +101,7 @@ def test_example_config_policy(tmp_path, fake_home):
         ["wait", "crash", "env", "fail", "rich", "invalid", "change"]
     )
     assert {rule.cls for rule in probe.tools.values()} == {"local-read"}
-    assert len(fs.tools) == 13 and fs.tools["move_file"].cls == "destructive"
+    assert len(fs.tools) == 14 and fs.tools["move_file"].cls == "destructive"
     root = tmp_path / "manual"
     root.mkdir()
     built = policy.Policy(

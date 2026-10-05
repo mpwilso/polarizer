@@ -1,0 +1,59 @@
+pending: 4 new, 0 changed, 0 unservable
+
+new probe__note be0658abc19a030eae201dbe5823062f3bbd46cb7002c933d3a778d4abdbc767
+class none: every call is held; annotations suggest destructive
+{
+  "description": "Caf\u00e9 note,\u200b with a zero-width space.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "note"
+}
+
+new probe__post f19e5250a543f6a8c38eafd9428075ec72edea938af15c0b08f9538d621bb83e
+class local-read, but annotations suggest egress
+{
+  "annotations": {
+    "destructiveHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+  },
+  "description": "Post a note.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "post"
+}
+
+new probe__read c3d46637a38e1d7f4bda864c8c4634f663b2f6dff5846715eb2d9d775ba71124
+class local-read; annotations suggest local-read
+{
+  "annotations": {
+    "openWorldHint": false,
+    "readOnlyHint": true
+  },
+  "description": "Read a note.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "read"
+}
+
+new web__fetch 3883644bef896d2a73d07f919d6ede1bbb66a2f76e36becf53b53536c03f227a
+class open-world (from annotations); annotations suggest open-world
+{
+  "annotations": {
+    "readOnlyHint": true
+  },
+  "description": "Fetch a page.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "fetch"
+}
+
+group 02e5789c4040f97a564af9e1a5b16b96d6a70e5db4ad6b8da88fcb5e48050a65 covers the 4 new definitions above for tools with no decision yet and one definition waiting
+
+classes: 1 approved tools have no class, 1 contradict their annotations
+no class probe__add a201ef61c2804ff8a47dbd8397e2d03d16b621c995a2aea943f2e96a2ba0c8c1; annotations suggest destructive
+contradicts probe__echo a65b57e9bd59678c4775549c9d1eeff991f2a6f617c0e651fa9d1cf3ca87b3f3: class local-read, annotations suggest destructive

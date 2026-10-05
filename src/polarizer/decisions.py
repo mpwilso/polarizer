@@ -64,8 +64,11 @@ class Decider:
     def _record(self, kind: str, data: dict):
         return self.writer.append(kind, {**data, "actor": ACTOR}).result()
 
-    def approve_one(self, prefix: str, tool: str, def_hash: str, out: Callable[[str], None]):
-        """Steps 4 to 7 of `approve` for one definition. Raises Refusal."""
+    def approve_one(
+        self, prefix: str, tool: str, def_hash: str, out: Callable[[str], None], classes=None
+    ):
+        """Steps 4 to 7 of `approve` for one definition. Raises Refusal. With `classes` (the
+        config's policy, given --config), the class line follows the printed definition."""
         name = f"{prefix}__{tool}"
         tp = self.pins.get(prefix, tool)
         if def_hash not in tp.seen_ever and def_hash not in tp.approved_ever:
@@ -80,6 +83,10 @@ class Decider:
             return
         for line in defhash.render(obj).split("\n"):
             out(line)
+        if classes is not None:
+            from polarizer.policy import class_line
+
+            out(class_line(classes, prefix, tool, obj))
         data = {"upstream": prefix, "tool": tool, "def_hash": def_hash, "group": None}
         done = self._record("tool.approved", data)
         out(f"approved {name} {def_hash} at seq {done.seq}")

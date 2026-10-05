@@ -17,16 +17,22 @@ upstream (one refresh at a time, and notices during one cause exactly one more);
 fails is retried on a timer; and clients are told when the exposed list changes, at most once a
 second, never just because an upstream said something changed.
 
-Holds (docs/HOLD-SPEC.md, sections 4 to 6): a call that routes to an approved tool goes through
+Holds (docs/HOLD-SPEC.md, sections 4 to 7): a call that routes to an approved tool goes through
 the rule function. A held call records hold.created and waits, inside this process, for its
-ending: a decision another process writes, its timeout, or the client's cancel. While any hold
-is open the watch runs every quarter second. After an allow the call is routed again and
-forwarded with the arguments read back from its side file.
+ending: a decision another process writes, its timeout, the client's cancel, or shutdown. While
+it waits, the client gets progress every 10 s, and while any hold is open the watch runs every
+quarter second. After an allow the call is routed again and forwarded with the arguments read
+back from its side file.
+
+Lifetime (section 7): the gateway holds a lock on sessions/<session>.lock for its whole life, so
+other processes can tell whether its holds can still be decided. At start, the open holds of
+every session proven ended are recorded as hold.abandoned.
 """
 
 import asyncio
 import functools
 import json
+import os
 import secrets
 import threading
 import time
@@ -42,10 +48,10 @@ from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
 from mcp.shared.subscriptions import ToolsListChanged
 from mcp_types import CLIENT_INFO_META_KEY, CONNECTION_CLOSED, PROTOCOL_VERSION_META_KEY
 
-from polarizer import __version__, defhash, pins
+from polarizer import __version__, defhash, lock, pins
 from polarizer import policy as policy_mod
 from polarizer.canon import MAX_INT, EntryRefused
-from polarizer.holds import HoldState
+from polarizer.holds import SESSIONS, HoldState, session_state
 from polarizer.pins import PinState
 from polarizer.sidefiles import ArgsProblem, read_args, write_args
 from polarizer.text import safe
@@ -69,6 +75,11 @@ HOLD_WATCH_INTERVAL = 0.25  # the same while any hold of this process is open
 MAX_OPEN_HOLDS = 16  # per process; a further call that would be held is refused at once
 TOO_MANY = f"too many held calls: {MAX_OPEN_HOLDS} already wait in this session"
 CANCELLED_BEFORE_FORWARD = "the client cancelled the call before it was forwarded"
+# hold.expired's reason when shutdown ends a held call, and call.refused's when shutdown comes
+# after an allow but before the call was forwarded (HOLD-SPEC.md, section 6, Shutdown).
+SHUTDOWN_HOLD = "polarizer shut down while the call was held"
+SHUTDOWN_BEFORE_FORWARD = "polarizer shut down before the call was forwarded"
+HOLD_PROGRESS_INTERVAL = 10.0  # seconds between progress notifications while a call is held
 NOTICE_INTERVAL = 1.0  # at most one change notice to clients per this many seconds
 RETRY = (30.0, 300.0)  # the retry timer after a failed refresh: first interval, and the cap
 INPUT_KINDS = {
@@ -116,6 +127,8 @@ class Gateway:
     gateway starts from empty states. `policy` is the policy.Policy serve runs with; without
     one, every tool is unclassified and every call to it is held. `hold_timeout` replaces the
     policy's timeout in seconds, for tests only: the ledger still records the policy's.
+    `hold_progress_interval` replaces the 10 s between progress notifications (tests; None
+    reads HOLD_PROGRESS_INTERVAL when the gateway is made).
     """
 
     def __init__(
@@ -132,12 +145,17 @@ class Gateway:
         notice_interval: float = NOTICE_INTERVAL,
         retry: tuple[float, float] = RETRY,
         hold_timeout: float | None = None,
+        hold_progress_interval: float | None = None,
     ):
         self.writer = writer
         self.policy = policy if policy is not None else policy_mod.Policy()
         self.holds = holds if holds is not None else HoldState()
         self.hold_watch_interval = hold_watch_interval
         self.hold_timeout = hold_timeout
+        if hold_progress_interval is None:
+            hold_progress_interval = HOLD_PROGRESS_INTERVAL
+        self.hold_progress_interval = hold_progress_interval
+        self.session_lock: lock.LedgerLock | None = None  # held for the gateway's whole life
         self._open: dict[str, _Waiter] = {}  # this process's open holds, by id
         self._mismatch_told: set[int] = set()
         self._watch_wake = anyio.Event()
@@ -189,18 +207,23 @@ class Gateway:
     @asynccontextmanager
     async def running(self):
         """start() in a task group of its own, then serve until the block exits."""
-        async with anyio.create_task_group() as tasks:
-            await self.start(tasks)
-            try:
-                yield self
-            finally:
-                tasks.cancel_scope.cancel()
+        try:
+            async with anyio.create_task_group() as tasks:
+                await self.start(tasks)
+                try:
+                    yield self
+                finally:
+                    tasks.cancel_scope.cancel()
+        finally:
+            self.release_session_lock()
 
     async def start(self, tasks) -> None:
-        """Startup (PROXY-SPEC.md, steps 4 and 5): append session.started, connect every
-        upstream in parallel, append one upstream.connected per upstream, and observe each
+        """Startup (PROXY-SPEC.md, steps 4 and 5): take the session lock, append session.started
+        and policy.loaded, record hold.abandoned for the open holds of ended sessions, connect
+        every upstream in parallel, append one upstream.connected per upstream, and observe each
         listing. Then start the background work: the watch, change notices, notice-driven
         refreshes and the retry timer. Upstream tasks and the background run in `tasks`."""
+        self._take_session_lock()
         await self._append(
             "session.started",
             {
@@ -211,6 +234,7 @@ class Gateway:
         )
         # Fsynced, with ledger.head moved, before any upstream is connected (SECURITY_KINDS).
         await self._append("policy.loaded", self.policy.loaded(self.session))
+        await self._abandon_ended()
         for upstream in self.upstreams.values():
             upstream.started = True
             tasks.start_soon(upstream.run)
@@ -232,6 +256,66 @@ class Gateway:
         for prefix in sorted(self._deferred):
             await self._upstream_changed(self.upstreams[prefix])
         self._deferred.clear()
+
+    def _take_session_lock(self) -> None:
+        """Create sessions/<session>.lock (directory 0700, file 0600, created exclusively) and
+        hold its exclusive lock until the process ends (HOLD-SPEC.md, section 7). If that
+        fails, say so and go on: this session's holds then read as unknown and are never
+        abandoned automatically."""
+        directory = self.writer.ledger_dir / SESSIONS
+        path = directory / f"{self.session}.lock"
+        try:
+            try:
+                directory.mkdir(mode=0o700)
+                os.chmod(directory, 0o700)  # mkdir's mode is narrowed by the umask
+            except FileExistsError:
+                pass
+            self.session_lock = lock.take_session(path)
+        except OSError as e:
+            where, why = safe(str(path), 1024), safe(e.strerror or describe(e))
+            log(
+                f"polarizer: warning: cannot create the session lock {where}: {why}; "
+                "this session's holds will show as unknown"
+            )
+
+    def release_session_lock(self) -> None:
+        """Release the session lock (the end of an in-process gateway; tests). serve never
+        calls it: its lock is released when the process ends."""
+        if self.session_lock is not None:
+            held, self.session_lock = self.session_lock, None
+            try:
+                held.close()
+            except OSError:
+                pass
+
+    async def _abandon_ended(self) -> None:
+        """For each open hold of another session that is proven ended (its lock file is free),
+        record hold.abandoned (HOLD-SPEC.md, section 7). A session that is running, or whose
+        state can't be told, is left alone. Each append is conditional, so a hold that another
+        process ended meanwhile (an allow, or another start's abandonment) gets nothing."""
+        states: dict[str, str] = {}
+        for held in self.holds.open_holds():
+            if held.session == self.session:
+                continue
+            if held.session not in states:
+                states[held.session] = session_state(self.writer.ledger_dir, held.session)
+            if states[held.session] != lock.ENDED:
+                continue
+            hold_id = held.hold
+
+            def check(hold_id=hold_id):
+                now = self.holds.get(hold_id)
+                if now is None or now.ending is not None:
+                    raise _HasEnding()
+
+            data = {"session": self.session, "hold": hold_id, "held_by": held.session}
+            try:
+                await self.writer.append_async("hold.abandoned", data, check=check)
+            except _HasEnding:
+                pass
+            except (Stopped, EntryRefused) as e:
+                log(f"polarizer: could not record hold.abandoned: {e}")
+                return
 
     def _log_unclassified(self) -> None:
         """Once per process, after startup has listed the upstreams: how many listed tools, in
@@ -875,17 +959,21 @@ class Gateway:
                 "run polarizer holds")  # fmt: skip
             self._watch_wake.set()  # the watch runs every hold_watch_interval from now on
             try:
-                ending = await self._await_ending(waiter)
+                ending = await self._await_ending(waiter, ctx)
                 if ending is None:
                     return self._unrecordable(name, self.writer.stopped or "the writer stopped")
                 if _allows(ending) and self.before_forward is not None:
                     await self.before_forward(waiter.hold)  # tests hold the forward back here
             except anyio.get_cancelled_exc_class():
-                # Shutdown during a hold is stage 7 (HOLD-SPEC.md, section 15): for now the hold
-                # stays open, as if the process had been killed.
-                if not self.shutting_down:
-                    with anyio.CancelScope(shield=True):
-                        await self._client_cancelled(waiter, name)
+                # The client's cancel, or shutdown, which sets its flag before it cancels
+                # anything. Recorded in a shielded scope, best effort, then re-raised.
+                with anyio.CancelScope(shield=True):
+                    if self.shutting_down:
+                        await self._cancelled(waiter, name, SHUTDOWN_HOLD, SHUTDOWN_BEFORE_FORWARD)
+                    else:
+                        await self._cancelled(
+                            waiter, name, CLIENT_CANCEL_ERROR, CANCELLED_BEFORE_FORWARD
+                        )
                 raise
         finally:
             self._open.pop(waiter.hold, None)
@@ -895,28 +983,47 @@ class Gateway:
             return self._not_allowed(name)
         return await self._allowed(ctx, params, waiter)
 
-    async def _await_ending(self, waiter: "_Waiter"):
+    async def _await_ending(self, waiter: "_Waiter", ctx):
         """The hold's ending (holds.Ending), or None once the writer has stopped. On timeout,
-        hold.expired is a conditional append; if an ending got there first, that is the one."""
+        hold.expired is a conditional append; if an ending got there first, that is the one.
+        Every hold_progress_interval meanwhile, the client gets a progress notification."""
         timeout = self.hold_timeout
         if timeout is None:
             timeout = self.policy.hold_timeout_seconds
         deadline = waiter.started + timeout
+        next_progress = waiter.started + self.hold_progress_interval
         while True:
             if self.writer.stopped:
                 return None
             held = self.holds.get(waiter.hold)
             if held is not None and held.ending is not None:
                 return held.ending
-            with anyio.move_on_at(deadline) as scope:
-                await waiter.event.wait()
-            waiter.event = anyio.Event()
-            if scope.cancelled_caught:
+            now = anyio.current_time()
+            if now >= deadline:
                 reason = f"timeout after {self.policy.hold_timeout_seconds} s"
                 with anyio.CancelScope(shield=True):
                     if not await self._expire(waiter, reason):
                         return None
                 return self.holds.get(waiter.hold).ending
+            if now >= next_progress:
+                await self._report_waiting(ctx, waiter, now)
+                next_progress += self.hold_progress_interval
+                continue
+            with anyio.move_on_at(min(deadline, next_progress)):
+                await waiter.event.wait()
+            waiter.event = anyio.Event()
+
+    async def _report_waiting(self, ctx, waiter: "_Waiter", now: float) -> None:
+        """Progress while held (HOLD-SPEC.md, section 6): the whole seconds waited, on the
+        monotonic clock, under the client's own progress token, with no total and no message.
+        A value is always above the one before, as MCP asks of progress, which matters only
+        when the interval is under a second (tests). Nothing is sent if the client asked for no
+        progress, and a failure to send is ignored."""
+        waiter.progress = max(int(now - waiter.started), waiter.progress + 1)
+        try:
+            await ctx.session.report_progress(waiter.progress, None, None)
+        except Exception:
+            pass
 
     async def _expire(self, waiter: "_Waiter", reason: str) -> bool:
         """Append hold.expired unless the hold already has an ending (the conditional append).
@@ -938,21 +1045,22 @@ class Gateway:
             return False
         return True
 
-    async def _client_cancelled(self, waiter: "_Waiter", name: str) -> None:
-        """The client cancelled a held call (or Claude Code's own timeout did): end the hold
-        with hold.expired unless it has an ending, then one call.refused for whichever ending
-        the ledger has first. The client gets nothing; the SDK has abandoned the request."""
+    async def _cancelled(self, waiter: "_Waiter", name: str, expired: str, after_allow: str):
+        """A held call cancelled by the client (or Claude Code's own timeout), or by shutdown:
+        end the hold with hold.expired (`expired`) unless it has an ending, then one call.refused
+        for whichever ending the ledger has first; `after_allow` is its reason when that ending
+        is an allow. The client gets nothing; the SDK has abandoned the request."""
         if waiter.commit is None or self.writer.stopped:
             return
         held = self.holds.get(waiter.hold)
         if held is not None and held.ending is None:
-            if not await self._expire(waiter, CLIENT_CANCEL_ERROR):
+            if not await self._expire(waiter, expired):
                 return
             held = self.holds.get(waiter.hold)
         if held is None or held.ending is None:
             return
         if _allows(held.ending):
-            reason = CANCELLED_BEFORE_FORWARD
+            reason = after_allow
         else:
             reason = _ended_reason(held.ending, waiter)
         data = {"session": self.session, "tool": clip(name), "hold": waiter.hold}
@@ -1007,6 +1115,7 @@ class _Waiter:
         self.arguments = arguments  # the request's copy: never forwarded (HOLD-SPEC.md, section 6)
         self.commit: str | None = None
         self.started: float = 0.0
+        self.progress = 0  # the last progress value sent
         self.event = anyio.Event()
 
 

@@ -90,6 +90,25 @@ def probe(path: Path) -> str:
         os.close(fd)
 
 
+def take_session(path: Path) -> "LedgerLock":
+    """serve's own session lock (docs/HOLD-SPEC.md, section 7): create the file exclusively
+    (0600) and take its exclusive lock without waiting. The caller holds it for the whole life
+    of the process; the operating system releases it when the process ends, however it ends.
+    Raises OSError if the file can't be created or locked."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
+    lock = LedgerLock(fd)
+    try:
+        taken = _try_lock(fd)
+    except OSError:
+        os.close(fd)
+        raise
+    if not taken:
+        os.close(fd)
+        raise OSError(errno.EAGAIN, "another process holds its lock")
+    lock.held = True
+    return lock
+
+
 class LedgerLock:
     def __init__(self, fd: int):
         self._fd = fd

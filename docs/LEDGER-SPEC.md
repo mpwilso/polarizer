@@ -153,7 +153,7 @@ The exact messages are in PROXY-SPEC.md, Startup.
 | `args/` | argument side files (Part 3) |
 | `ledger.jsonl.torn-*` | bytes removed by repair |
 | `defs/` | approved tool definitions (M1a) |
-| `sessions/` | one empty lock file per `serve` process, held while it runs, so another process can tell whether a session's holds can still be decided (M2a; HOLD-SPEC.md, section 7; read from stage 6, created by `serve` from stage 7) |
+| `sessions/` | one empty lock file per `serve` process, held while it runs, so another process can tell whether a session's holds can still be decided (M2a; HOLD-SPEC.md, section 7; created by `serve` at start, before `session.started`) |
 
 ### The lock
 

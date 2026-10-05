@@ -1,0 +1,4 @@
+pending: nothing waits for a decision
+
+classes: 1 approved tools have no class, 0 contradict their annotations
+no class probe__wait ac0778cf2bd27c6f802ca57ffc736ffddcd97d9773898dcc1c9c68ea9bc54e8b; annotations suggest destructive

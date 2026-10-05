@@ -240,13 +240,15 @@ def block(hold: Hold, folded: HoldState, ledger_dir: Path, now: datetime, state:
     return lines
 
 
-def listing(folded: HoldState, ledger_dir: Path, now: datetime) -> list[str]:
-    """`holds`' stdout for an intact ledger: every open hold, in seq order."""
+def listing(folded: HoldState, ledger_dir: Path, now: datetime, states=None) -> list[str]:
+    """`holds`' stdout for an intact ledger: every open hold, in seq order. `states` maps a
+    session to the state already probed for it (holds --wait); others are probed here."""
     open_ = folded.open_holds()
     if not open_:
         return ["holds: nothing is held"]
     lines = [f"holds: {len(open_)} open"]
     for hold in open_:
+        state = (states or {}).get(hold.session) or session_state(ledger_dir, hold.session)
         lines.append("")
-        lines.extend(block(hold, folded, ledger_dir, now, session_state(ledger_dir, hold.session)))
+        lines.extend(block(hold, folded, ledger_dir, now, state))
     return lines

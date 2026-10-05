@@ -1,0 +1,14 @@
+{
+  "annotations": {
+    "destructiveHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+  },
+  "description": "Post a note.",
+  "inputSchema": {
+    "type": "object"
+  },
+  "name": "post"
+}
+class local-read, but annotations suggest egress
+approved probe__post f19e5250a543f6a8c38eafd9428075ec72edea938af15c0b08f9538d621bb83e at seq 12

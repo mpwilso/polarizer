@@ -254,6 +254,34 @@ def test_pending(case, tmp_path, capsys):
     check(case, out, code, want, tmp_path)
 
 
+# With --config, pending and approve show classes (docs/HOLD-SPEC.md, section 8).
+PENDING_CLASSES = {
+    "pending_classes": (pinledger.classes, pinledger.CLASSES_CONFIG),
+    "pending_classes_only": (pinledger.quiet, pinledger.PLAIN_CONFIG),
+}
+
+
+@pytest.mark.parametrize("case", sorted(PENDING_CLASSES))
+def test_pending_with_classes(case, tmp_path, capsys):
+    setup, config_text = PENDING_CLASSES[case]
+    directory = setup(tmp_path / "ledger")
+    cfg = pinledger.config_for(directory, config_text)
+    code = cli.main(["pending", "--config", str(cfg)])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check(case, out, code, 0, tmp_path)
+
+
+def test_approve_one_with_class(tmp_path, capsys, fake_home):
+    directory = pinledger.classes(tmp_path / "ledger")
+    cfg = pinledger.config_for(directory)
+    h = pinledger.hashed("post")
+    code = pin_main(["approve", "--config", str(cfg), "probe", "post", h])
+    out, err = capsys.readouterr()
+    assert err == ""
+    check("approve_one_with_class", out, code, 0, tmp_path)
+
+
 def test_pending_locked(tmp_path, capsys):
     directory = pinledger.quiet(tmp_path / "ledger")
     lock = LedgerLock.create(directory / LOCK)

@@ -12,6 +12,7 @@ import pytest
 from conftest import build_chain
 from helpers import rig
 from helpers.fakes import FakeUpstream
+from mcp import Client
 
 from polarizer import config, defhash, holds, proxy
 from polarizer.decisions import Decider, HoldDecider, Refusal
@@ -616,6 +617,52 @@ def test_too_many_holds(tmp_path):
     assert text(runs) == "it failed" and [n for n, _, _ in fake.calls] == ["fail"]
 
 
+def test_progress_during_a_hold(tmp_path):
+    """With the interval injected at 0.05 s, a held call whose client asked for progress gets
+    at least three notifications while it waits, each with a higher whole-number progress, no
+    total and no message; a held call whose client asked for none gets none. In memory; the
+    stdio half is test_hold_restart.py::test_progress_during_a_hold_over_stdio."""
+    fake, specs, pol = setup()
+    ld = tmp_path / "ledger"
+    seen: list = []
+    stray: list = []
+
+    async def on_progress(progress, total, message):
+        seen.append((progress, total, message))
+
+    async def on_message(message):
+        stray.append(message)  # anything the client gets outside a request's own callback
+
+    async def main():
+        async with rig.gateway(ld, specs, policy=pol, hold_progress_interval=0.05, **FAST) as gw:
+            async with Client(gw.server, message_handler=on_message) as client:
+                async with anyio.create_task_group() as tasks:
+                    quiet = Calls(client, tasks)
+                    quiet.start("quiet")
+                    [first] = await rig.holds_created(ld, 1)
+                    await anyio.sleep(0.5)  # ten intervals
+                    assert seen == []
+
+                    async def watched():
+                        args = dict(ARGS)
+                        await client.call_tool("f__echo", args, progress_callback=on_progress)
+
+                    tasks.start_soon(watched)
+                    second = (await rig.holds_created(ld, 2))[-1]
+                    await rig.until(lambda: len(seen) >= 3, 10)
+                    for hold in (first, second):
+                        await anyio.to_thread.run_sync(rig.decide_hold, ld, hold, "deny")
+                    await quiet.result("quiet")
+
+    anyio.run(main)
+    values = [p for p, _, _ in seen]
+    assert len(values) >= 3 and values == sorted(set(values))
+    assert all(isinstance(v, int) for v in values)
+    assert {(t, m) for _, t, m in seen} == {(None, None)}
+    assert [m for m in stray if "progress" in type(m).__name__.lower()] == []
+    assert fake.calls == []
+
+
 def test_model_line_has_no_details(tmp_path):
     """For deny, timeout and too-many-holds, the client's text is exactly the one line, with no
     rule, reason, path or deny reason."""
@@ -653,9 +700,10 @@ def test_model_line_has_no_details(tmp_path):
 
 
 def _run_every_ending(ld: Path, fake: FakeUpstream, specs, pol) -> holds.HoldState:
-    """One gateway on `ld` producing every ending a live process can produce in stage 6:
-    allow and forward, deny, timeout, the client's cancel, the client's cancel after an
-    allow, an allow refused by routing, and an allow refused by its side file. Returns the
+    """One gateway on `ld` producing every ending a live process can produce: allow and
+    forward, deny, timeout, the client's cancel, the client's cancel after an allow, an allow
+    refused by its side file, an allow refused by routing, and shutdown while waiting (the
+    shutdown flag set, then the handler cancelled, as serve's shutdown path does). Returns the
     gateway's hold fold."""
 
     async def main():
@@ -724,21 +772,28 @@ def _run_every_ending(ld: Path, fake: FakeUpstream, specs, pol) -> holds.HoldSta
                 await anyio.to_thread.run_sync(reject)
                 await anyio.to_thread.run_sync(rig.decide_hold, ld, h)
                 await calls.result("rerouted")
+                h = await next_hold("shutdown", name="f__fail")  # echo is rejected by now
+                gw.begin_shutdown()
+                calls.scopes["shutdown"].cancel()
+                await rig.until(lambda: len(rig.kinds(ld, "call.refused")) == 7)
+                trail = entries_for(ld, h)
+                assert [k for k, _ in trail] == ["hold.created", "hold.expired", "call.refused"]
+                assert trail[1][1]["reason"] == "polarizer shut down while the call was held"
         return state
 
     return anyio.run(main)
 
 
 def test_one_terminal_entry_per_call(tmp_path):
-    """After every ending a live process can produce (stage 6: all but shutdown), a fold of
-    the ledger alone finds one ending per hold, one terminal entry per held call, and no
+    """After every ending a live process can produce, shutdown included, a fold of the
+    ledger alone finds one ending per hold, one terminal entry per held call, and no
     call.sent for a hold that wasn't allowed."""
-    fake, specs, pol = setup()
+    fake, specs, pol = setup(fail="egress")
     ld = tmp_path / "ledger"
     _run_every_ending(ld, fake, specs, pol)
     entries = rig.entries(ld)
     created = [e["data"]["hold"] for e in entries if e["kind"] == "hold.created"]
-    assert len(created) == 7
+    assert len(created) == 8
     folded = holds.HoldState()
     verify_bytes((ld / "ledger.jsonl").read_bytes(), None, folded.apply)
     allowed = set()
@@ -767,7 +822,7 @@ def test_one_terminal_entry_per_call(tmp_path):
 
 
 def test_hold_state_from_ledger_matches_live(tmp_path):
-    fake, specs, pol = setup()
+    fake, specs, pol = setup(fail="egress")
     ld = tmp_path / "ledger"
     live = _run_every_ending(ld, fake, specs, pol)
     folded = holds.HoldState()

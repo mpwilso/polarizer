@@ -24,7 +24,7 @@ The order puts M2b before the practice range, because the range's exfiltration c
 
 - **M0:** built in stages 1 to 3. The owner ran parts of its manual check interactively: Esc to cancel and the `/mcp` names (docs/verified-facts.md, Interactive and Manual check follow-up). The hung upstream and closing a session during a call are still unverified.
 - **M1a:** built in stages 4 and 5 (docs/STAGE4-NOTES.md, docs/STAGE5-NOTES.md). It pins definitions only: no scanning, no policy, no holds. It is done when the owner's M1a manual check (docs/MANUAL-CHECK.md, M1a section) and CI on all three platforms pass.
-- **M2a:** specified in docs/HOLD-SPEC.md, built in stages 6 and 7. Stage 6 is built (docs/STAGE6-NOTES.md): classes, the rule function, path rules, holds in serve with every ending but shutdown, `holds`, `allow`, `deny` and `--no-holds`. Stage 7 is not.
+- **M2a:** specified in docs/HOLD-SPEC.md, built in stages 6 and 7. Stage 6 (docs/STAGE6-NOTES.md): classes, the rule function, path rules, holds in serve with every ending but shutdown, `holds`, `allow`, `deny` and `--no-holds`. Stage 7 (docs/STAGE7-NOTES.md): session locks and `hold.abandoned` at restart, shutdown during holds, progress while held, `holds --wait` and `--bell`, classes in `pending` and `approve` with `--config`, and the example config checked against the pinned Filesystem server. It is done when the owner's M2a manual check (docs/MANUAL-CHECK.md, M2a section) and CI on all three platforms pass.
 
 ## Carry-forward notes
 

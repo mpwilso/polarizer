@@ -191,3 +191,47 @@ def test_hold_commands_subprocess(tmp_path, fake_home):
     later = _python("holds", "--ledger-dir", str(directory), capture_output=True)
     assert later.stdout.startswith(b"holds: 2 open\n")
     assert hl.WRITE_PATTERN.encode() not in later.stdout
+
+
+def test_pending_shows_classes(tmp_path, capsys):
+    """pending --config prints each new or changed block's class line, after its header and
+    any "not in a group" line, and the classes section; pending --ledger-dir prints exactly
+    what it did before, which is the --config output without those lines."""
+    from helpers import pinledger
+
+    from polarizer.pins import NOT_IN_GROUP
+
+    def both(build, text):
+        directory = build(tmp_path / build.__name__ / "ledger")
+        cfg = pinledger.config_for(directory, text)
+        assert cli.main(["pending", "--ledger-dir", str(directory)]) == 0
+        plain = capsys.readouterr().out
+        assert cli.main(["pending", "--config", str(cfg)]) == 0
+        return plain, capsys.readouterr().out
+
+    def without_classes(text):
+        body = text.partition("\n\nclasses: ")[0].rstrip("\n") + "\n"
+        return "".join(x for x in body.splitlines(keepends=True) if not x.startswith("class "))
+
+    plain, with_classes = both(pinledger.classes, pinledger.CLASSES_CONFIG)
+    assert plain == without_classes(with_classes)
+    assert with_classes == (GOLDEN / "pending_classes.txt").read_text(encoding="utf-8")
+    assert "\n\nclasses: 1 approved tools have no class, 1 contradict" in with_classes
+
+    # The M1a ledger behind pending_mixed.txt: --ledger-dir prints the golden file unchanged.
+    every = pinledger.CLASSES_CONFIG.replace("[upstream.web]", "[upstream.every]")
+    plain, with_classes = both(pinledger.mixed, every)
+    assert plain == (GOLDEN / "pending_mixed.txt").read_text(encoding="utf-8")
+    assert plain == without_classes(with_classes)
+    assert "\n\nclasses: " not in with_classes  # every approved tool there has a class
+    lines = with_classes.split("\n")
+    after = lines[lines.index(NOT_IN_GROUP) + 1]
+    assert after == "class none: every call is held; annotations suggest destructive"
+    changed = [i for i, x in enumerate(lines) if x.startswith("changed every__echo ")]
+    assert lines[changed[0] + 1] == (
+        "class destructive (from annotations); annotations suggest destructive"
+    )
+    rich = [i for i, x in enumerate(lines) if x.startswith("new probe__rich ")]
+    assert lines[rich[0] + 1].startswith("stored copy defs/")  # a copy that fails: no class line
+    unservable = [x for x in lines if x.startswith("unservable ")]
+    assert len(unservable) == 1 and not lines[lines.index(unservable[0]) + 1].startswith("class")

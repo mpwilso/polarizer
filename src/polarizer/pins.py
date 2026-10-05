@@ -233,9 +233,11 @@ def group(found: list[Block]) -> tuple[list[Block], str | None]:
     return members, hashlib.sha256(GROUP_PREFIX + rfc8785.dumps(triples)).hexdigest()
 
 
-def render(found: list[Block]) -> list[str]:
+def render(found: list[Block], class_line=None) -> list[str]:
     """`pending`'s stdout for an intact ledger, line by line. Every name, hash and problem
-    taken from the ledger goes through printable()."""
+    taken from the ledger goes through printable(). `class_line(prefix, tool, copy)`, given
+    with --config, adds each new or changed block's class line after its header lines, when
+    its stored copy passes (docs/HOLD-SPEC.md, section 8)."""
     if not found:
         return ["pending: nothing waits for a decision"]
     new, changed, unservable = (sum(b.kind == k for b in found) for k in BLOCK_KINDS)
@@ -256,6 +258,8 @@ def render(found: list[Block]) -> list[str]:
             lines.append(f"new {name} {def_hash}")
             if b.several:
                 lines.append(SEVERAL)
+        if b.copy is not None and class_line is not None:
+            lines.append(class_line(b.upstream, b.tool, b.copy))
         if b.copy is not None:
             lines.extend(defhash.render(b.copy).split("\n"))
         else:

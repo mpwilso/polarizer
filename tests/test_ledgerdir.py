@@ -48,6 +48,20 @@ def test_dot_dot_and_symlinks_are_resolved(fake_home, tmp_path):
         check_location(link / "ledger", always_forbidden())
 
 
+@pytest.mark.skipif(os.name != "nt", reason="directory junctions are Windows only")
+def test_junction_into_a_forbidden_path_is_refused(fake_home, tmp_path):
+    """The Windows stand-in for the symlink half above, which is skipped there: a junction
+    needs no privilege, and resolution follows it."""
+    import _winapi
+
+    target = fake_home / ".config" / "parallax"
+    target.mkdir(parents=True)
+    link = tmp_path / "innocent"
+    _winapi.CreateJunction(str(target), str(link))
+    with pytest.raises(ForbiddenPath):
+        check_location(link / "ledger", always_forbidden())
+
+
 def test_config_paths_add_to_the_defaults(fake_home, tmp_path):
     repo = tmp_path / "code" / "parallax"
     with pytest.raises(ForbiddenPath):

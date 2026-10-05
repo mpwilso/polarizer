@@ -23,6 +23,31 @@ def symlink(target: Path, link: Path) -> None:
         pytest.skip(f"os.symlink is refused here: {e}")
 
 
+def junction(target: Path, link: Path) -> None:
+    """A directory junction, Windows' link that needs no privilege (unlike os.symlink), made
+    with the helper CPython's own tests use."""
+    import _winapi
+
+    _winapi.CreateJunction(str(target), str(link))
+
+
+def links(table: dict) -> object:
+    """A resolver for Policy(resolver=...) that reads `table` as links: a path at or below a
+    key resolves to the same place below its value, a key whose value is None is a loop, and
+    any other path resolves to itself. It stands in for the file system, so the rule function's
+    use of the resolved path is checked on every platform, symbolic links or not."""
+
+    def resolve(path: str) -> str:
+        for link, target in table.items():
+            if path == link or path.startswith(link + os.sep):
+                if target is None:
+                    raise paths.Unresolvable(paths.TOO_MANY_LINKS)
+                return target + path[len(link) :]
+        return path
+
+    return resolve
+
+
 def write_policy(root: Path | None = None, **options) -> policy.Policy:
     """fs/write (local-write, path_args ["path"]) and fs/read (local-read, ["path"]), with
     `root` as the one workspace root."""
@@ -104,6 +129,73 @@ def test_link_loop_is_held(root):
     symlink(root / "a", root / "b")
     v = verdict(write_policy(root), "write", p(root / "a" / "x"))
     assert (v.rule, v.reason) == ("path-unresolvable", 'argument "path": too many symbolic links')
+
+
+def test_link_targets_decide_with_an_injected_resolver(root, tmp_path):
+    """The verdict follows the resolved path, not the path as given: through stand-in links, a
+    write escapes the root, lands in .git/hooks or in the ledger directory, stays inside, or
+    meets a loop. Runs on every platform, so these path rules are tested where os.symlink is
+    refused too (docs/STAGE7-NOTES.md, the Windows skip audit)."""
+    outside, ledger = os.path.realpath(tmp_path / "outside"), os.path.realpath(tmp_path / "ld")
+    r = p(root)
+    table = {
+        os.path.join(r, "out"): outside,
+        os.path.join(r, "h"): os.path.join(r, ".git", "hooks"),
+        os.path.join(r, "via"): ledger,
+        os.path.join(r, "in"): os.path.join(r, "real"),
+        os.path.join(r, "loop"): None,
+    }
+    pol = write_policy(root, resolver=links(table), ledger_dir=ledger)
+    v = verdict(pol, "write", os.path.join(r, "out", "x"))
+    assert (v.rule, v.reason) == (
+        "outside-roots",
+        f'argument "path": {os.path.join(outside, "x")} is outside every workspace root',
+    )
+    v = verdict(pol, "write", os.path.join(r, "h", "pre-commit"))
+    hook = os.path.join(r, ".git", "hooks", "pre-commit")
+    assert (v.rule, v.reason) == ("write-pattern", f'argument "path": {hook} matches .git/hooks/**')
+    v = verdict(pol, "read", os.path.join(r, "via", "ledger.jsonl"))
+    assert v.rule == "polarizer-files"
+    v = verdict(pol, "write", os.path.join(r, "in", "x"))
+    assert (v.action, v.rule) == ("allow", "inside-roots")
+    v = verdict(pol, "write", os.path.join(r, "loop", "x"))
+    assert (v.rule, v.reason) == ("path-unresolvable", 'argument "path": too many symbolic links')
+    v = verdict(pol, "read", os.path.join(r, "out", "x"))  # a read outside the roots runs
+    assert (v.action, v.rule) == ("allow", "local-read")
+
+
+@WINDOWS_ONLY
+def test_junction_escape_is_held(root, tmp_path):
+    """Windows, with no symlink privilege needed: a junction inside the root that points
+    outside it is followed, and the write is held."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    junction(outside, root / "link")
+    v = verdict(write_policy(root), "write", p(root / "link" / "x"))
+    assert (v.action, v.rule) == ("hold", "outside-roots")
+    assert v.reason == (
+        f'argument "path": {os.path.realpath(outside / "x")} is outside every workspace root'
+    )
+
+
+@WINDOWS_ONLY
+def test_junction_into_a_pattern_is_held(root):
+    (root / ".git" / "hooks").mkdir(parents=True)
+    junction(root / ".git" / "hooks", root / "h")
+    v = verdict(write_policy(root), "write", p(root / "h" / "pre-commit"))
+    assert (v.action, v.rule) == ("hold", "write-pattern")
+    target = os.path.realpath(root / ".git" / "hooks" / "pre-commit")
+    assert v.reason == f'argument "path": {target} matches .git/hooks/**'
+
+
+@WINDOWS_ONLY
+def test_junction_to_polarizer_files_is_held(root, tmp_path):
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    pol = write_policy(root, ledger_dir=os.path.realpath(ledger))
+    junction(ledger, root / "via")
+    assert verdict(pol, "read", p(root / "via" / "ledger.jsonl")).rule == "polarizer-files"
+    assert verdict(pol, "write", p(root / "via" / "x")).rule == "polarizer-files"
 
 
 @POSIX

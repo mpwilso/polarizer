@@ -14,6 +14,7 @@ import re
 import signal
 import sys
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ import anyio
 import anyio.from_thread
 import anyio.lowlevel
 
-from polarizer import config, defhash, holds, ledgerdir, pins, sidefiles, writer
+from polarizer import config, defhash, holds, ledgerdir, lock, pins, sidefiles, writer
 from polarizer.decisions import Decider, HoldDecider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 
@@ -79,6 +80,15 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--reason", metavar="TEXT", help="why (required)")
         if name == "deny":
             sub.add_argument("--reason", metavar="TEXT", help="why (optional)")
+        if name == "holds":
+            sub.add_argument(
+                "--wait",
+                action="store_true",
+                help="wait until a call of a running session is held, then list",
+            )
+            sub.add_argument(
+                "--bell", action="store_true", help="with --wait: ring once per new hold"
+            )
     return parser
 
 
@@ -141,6 +151,8 @@ def main(argv=None) -> int:
             return serve(Path(args.config), no_holds=args.no_holds)
         if args.no_holds:
             raise UsageError("--no-holds goes with serve")
+        if args.command == "holds" and args.bell and not args.wait:
+            raise UsageError("--bell goes with --wait")
         if (args.config is None) == (args.ledger_dir is None):
             raise UsageError(
                 f"{args.command} needs exactly one of --config <absolute path> "
@@ -154,22 +166,26 @@ def main(argv=None) -> int:
             _check_decision_args(args)
     except UsageError as e:
         return _err(f"polarizer: {e}")
+    classes = None  # with --config, pending and approve show each tool's class
     if args.config is not None:
         try:
             cfg = config.load(Path(args.config), require_env=False)
         except config.ConfigError as e:
             return _err(str(e))
         ledger_dir, forbidden = cfg.ledger_dir, list(cfg.ledger_forbidden_paths)
+        from polarizer import policy as policy_mod
+
+        classes = policy_mod.for_display(cfg)
     else:
         ledger_dir, forbidden = Path(args.ledger_dir), ledgerdir.always_forbidden()
     if args.command == "verify":
         return verify(ledger_dir, args.args)
     if args.command == "pending":
-        return pending(ledger_dir, args.upstream)
+        return pending(ledger_dir, args.upstream, classes)
     if args.command in ("approve", "reject"):
-        return decide(args, ledger_dir, forbidden)
+        return decide(args, ledger_dir, forbidden, classes)
     if args.command == "holds":
-        return list_holds(ledger_dir)
+        return list_holds(ledger_dir, args.wait, args.bell)
     if args.command in ("allow", "deny"):
         return decide_hold(args, ledger_dir, forbidden)
     return repair(ledger_dir, forbidden)
@@ -205,8 +221,10 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
     return code
 
 
-def pending(ledger_dir: Path, upstream: str | None) -> int:
-    """Read-only, like verify: the definitions waiting for a decision."""
+def pending(ledger_dir: Path, upstream: str | None, classes=None) -> int:
+    """Read-only, like verify: the definitions waiting for a decision. With `classes` (the
+    config's policy, given --config), each block gains its class line and a classes section
+    follows (docs/HOLD-SPEC.md, section 8); without, the output is exactly M1a's."""
     try:
         data, head = read_files(ledger_dir)
     except Locked:
@@ -223,7 +241,20 @@ def pending(ledger_dir: Path, upstream: str | None) -> int:
         for line in result.output_lines():
             print(line)
         return result.exit_code
-    for line in pins.render(pins.blocks(state, ledger_dir, upstream)):
+    if classes is None:
+        for line in pins.render(pins.blocks(state, ledger_dir, upstream)):
+            print(line)
+        return 0
+    from polarizer import policy as policy_mod
+
+    def class_line(prefix, tool, copy):
+        return policy_mod.class_line(classes, prefix, tool, copy)
+
+    lines = pins.render(pins.blocks(state, ledger_dir, upstream), class_line)
+    section = policy_mod.classes_section(classes, state, ledger_dir, upstream)
+    if section:
+        lines += ["", *section]
+    for line in lines:
         print(line)
     return 0
 
@@ -233,27 +264,63 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def list_holds(ledger_dir: Path) -> int:
-    """Read-only, like verify and pending: every open hold, with its arguments."""
+WAIT_POLL = 0.25  # holds --wait: seconds between size checks of the ledger
+_wait_sleep = time.sleep  # tests replace it to see the polls
+
+
+def list_holds(ledger_dir: Path, wait: bool = False, bell: bool = False) -> int:
+    """Read-only, like verify and pending: every open hold, with its arguments.
+
+    With `wait`, until at least one open hold of a running session exists: every WAIT_POLL
+    seconds the ledger's size is compared with what was read, without the lock, and it is read
+    again (under the lock) only when that differs. A status other than intact, at any read,
+    ends it with that status's output and code. With `bell`, one BEL per open hold of a running
+    session is written, and flushed, just before the listing (docs/HOLD-SPEC.md, section 8)."""
+    previous = None
+    if wait and threading.current_thread() is threading.main_thread():
+        # Ctrl+C ends it by the default action, with no traceback; the handler is put back on
+        # return, which matters only to a caller that goes on (tests).
+        previous = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    watched = None
     try:
-        data, head = read_files(ledger_dir)
-    except Locked:
-        print(LOCKED_LINE)
-        return 7
-    except OSError as e:
-        return _err(f"polarizer: cannot read {e.filename or ledger_dir / LEDGER}: {e.strerror}")
-    if not data:
-        print(f"no ledger at {ledger_dir}")
-        return 2
-    state = holds.HoldState()
-    result = verify_bytes(data, head, state.apply)
-    if result.status != "intact":
-        for line in result.output_lines():
-            print(line)
-        return result.exit_code
-    for line in holds.listing(state, ledger_dir, _now()):
-        print(line)
-    return 0
+        while True:
+            try:
+                data, head = read_files(ledger_dir)
+            except Locked:
+                print(LOCKED_LINE)
+                return 7
+            except OSError as e:
+                where = e.filename or ledger_dir / LEDGER
+                return _err(f"polarizer: cannot read {where}: {e.strerror}")
+            if not data:
+                print(f"no ledger at {ledger_dir}")
+                return 2
+            state = holds.HoldState()
+            result = verify_bytes(data, head, state.apply)
+            if result.status != "intact":
+                for line in result.output_lines():
+                    print(line)
+                return result.exit_code
+            states = {
+                h.session: holds.session_state(ledger_dir, h.session) for h in state.open_holds()
+            }
+            running = [h for h in state.open_holds() if states[h.session] == lock.RUNNING]
+            if not wait or running:
+                if wait and bell:
+                    sys.stdout.write("\a" * len(running))
+                    sys.stdout.flush()
+                for line in holds.listing(state, ledger_dir, _now(), states):
+                    print(line)
+                return 0
+            if watched is None:
+                watched = os.open(ledger_dir / LEDGER, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+            while os.fstat(watched).st_size == len(data):
+                _wait_sleep(WAIT_POLL)
+    finally:
+        if watched is not None:
+            os.close(watched)
+        if previous is not None:
+            signal.signal(signal.SIGINT, previous)
 
 
 _HOLD_ID = re.compile("[0-9a-f]{16}")
@@ -297,8 +364,9 @@ def decide_hold(args, ledger_dir: Path, forbidden: list[Path]) -> int:
         decider.close()
 
 
-def decide(args, ledger_dir: Path, forbidden: list[Path]) -> int:
-    """approve (one or a group) and reject, after their argument checks."""
+def decide(args, ledger_dir: Path, forbidden: list[Path], classes=None) -> int:
+    """approve (one or a group) and reject, after their argument checks. With `classes`,
+    approve of one definition prints its class line after the definition."""
     try:
         warning = ledgerdir.check_location(ledger_dir, forbidden)
     except ledgerdir.ForbiddenPath as e:
@@ -326,7 +394,7 @@ def decide(args, ledger_dir: Path, forbidden: list[Path]) -> int:
                 args.group, args.upstream, print, lambda line: print(line, file=sys.stderr)
             )
         else:
-            decider.approve_one(*args.names, print)
+            decider.approve_one(*args.names, print, classes)
         return 0
     except Refusal as e:
         print(e.line, file=sys.stderr)

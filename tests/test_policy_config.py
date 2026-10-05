@@ -426,3 +426,49 @@ def test_roots_must_exist_for_serve_only(tmp_path, capsys, fake_home):
         assert cli.main([command, "--config", str(path)]) == 2
         out, err = capsys.readouterr()
         assert (out, err) == (f"no ledger at {tmp_path / 'ledger'}\n", "")
+
+
+FILESYSTEM = "@modelcontextprotocol/server-filesystem@2026.8.31"  # as test_reference.py pins it
+
+
+@pytest.mark.reference
+@pytest.mark.skipif(
+    os.environ.get("POLARIZER_REFERENCE") != "1",
+    reason="reference servers run only with POLARIZER_REFERENCE=1 (they fetch from npm)",
+)
+def test_example_config_matches_reference_servers(tmp_path):
+    """Every tool polarizer.example.toml names for fs is listed by the pinned Filesystem
+    server, and every tool it lists is named there (docs/HOLD-SPEC.md, section 13). Each
+    configured path argument is a property of that tool's input schema."""
+    import shutil
+    import tomllib
+
+    from mcp import Client, StdioServerParameters
+
+    example = Path(__file__).resolve().parent.parent / "polarizer.example.toml"
+    fs = tomllib.loads(example.read_text(encoding="utf-8"))["upstream"]["fs"]
+    assert FILESYSTEM in fs["args"]  # the example runs the same pinned version
+    npx = shutil.which("npx")
+    assert npx is not None, "npx is not on PATH"
+    root = tmp_path / "root"
+    root.mkdir()
+
+    async def listed():
+        target = StdioServerParameters(command=npx, args=["-y", FILESYSTEM, str(root)])
+        async with Client(target) as client:
+            tools, cursor = {}, None
+            while True:
+                page = await client.list_tools(cursor=cursor, cache_mode="refresh")
+                tools.update({t.name: t for t in page.tools})
+                cursor = page.next_cursor
+                if cursor is None:
+                    return tools
+
+    tools = anyio.run(listed)
+    print(f"the pinned Filesystem server lists {len(tools)} tools: {', '.join(tools)}")
+    named = set(fs["tools"])
+    assert sorted(named - set(tools)) == [], "named in the example, not listed by the server"
+    assert sorted(set(tools) - named) == [], "listed by the server, not named in the example"
+    for name, entry in fs["tools"].items():  # each path argument is one the tool takes
+        properties = tools[name].input_schema.get("properties", {})
+        assert set(entry.get("path_args", [])) <= set(properties), name

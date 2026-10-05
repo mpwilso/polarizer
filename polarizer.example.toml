@@ -47,9 +47,11 @@ args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/tmp/polariz
 connect_timeout_seconds = 20
 
 # Reads run; writes outside /tmp/polarizer-manual, or into .git/hooks and the other built-in
-# patterns, are held; move_file is held on every call. The tool names are checked against the
-# pinned server in stage 7 (docs/HOLD-SPEC.md, section 13).
+# patterns, are held; move_file is held on every call. These are the 14 tools the pinned server
+# lists, checked against it with POLARIZER_REFERENCE=1 (docs/HOLD-SPEC.md, section 13).
+# read_file is the server's deprecated name for read_text_file.
 [upstream.fs.tools]
+read_file = { class = "local-read", path_args = ["path"] }
 read_text_file = { class = "local-read", path_args = ["path"] }
 read_media_file = { class = "local-read", path_args = ["path"] }
 read_multiple_files = { class = "local-read", path_args = ["paths"] }
