@@ -784,6 +784,14 @@ Observed by the owner on GitHub Actions and given in the brief of Oct 5, 2026. N
 - **The local run at that commit:** `scripts/test.sh` on Linux gave 1270 passed, 13 skipped.
 - **Not recorded:** the per-job test counts and times. The run predates the CI install check, which came in fd8b948 and was changed after it; no CI run of that check is recorded.
 
+## CI run 37388909612 at d50da88 (Oct 5, 2026, UTC, observed by the owner)
+
+Observed by the owner on GitHub Actions (`gh run view`) and given in the brief of Oct 5, 2026. No session can see CI runs, so nothing here was checked in this repo.
+
+- **All five jobs passed** at commit d50da88 in CI run 37388909612: Linux (ubuntu-24.04) with Python 3.11 in 5m46s, 3.12 in 6m15s and 3.13 in 5m46s, Windows with Python 3.12 in 5m43s, and macOS with Python 3.12 in 5m30s. It is now the latest commit recorded as passing on all five, after 0f32e11 (CI run 37380445365, above); README.md's Proof, docs/EVIDENCE.md and docs/milestones.md's CI line still cite 0f32e11.
+- **The first run of the wheel install step:** the two install-check steps of `.github/workflows/ci.yml` (docs/dev/STAGE8-NOTES.md, Release fixes, Fix 3) ran and passed on Linux, Windows and macOS, so the Windows branch (`cygpath`, `polarizer.exe`) has now run.
+- **The local run at that commit:** `scripts/test.sh` on Linux gave 1283 passed, 13 skipped.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. The README's Related projects section is written from this list.
