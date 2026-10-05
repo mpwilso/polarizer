@@ -9,7 +9,7 @@ The first preview. It covers three milestones: M0, M1a and M2a. Taint (M2b), an 
 - `polarizer serve` is a stdio MCP server that starts the upstream servers in `polarizer.toml`, exposes each upstream tool as `<prefix>__<tool>`, and forwards calls with their arguments unchanged. Tools only: resources, prompts and completions are not exposed, and requests from an upstream to the client are not forwarded.
 - Every call is recorded in a hash-chained ledger (docs/LEDGER-SPEC.md): RFC 8785 canonical entries, a chain id bound in the genesis entry, `ledger.head` to catch a lost tail, and arguments kept out of the chain in salted side files that the chain commits to.
 - `polarizer verify [--args]` reports one status with its own exit code (`intact`, `tampered`, `invalid`, `not canonical`, `torn tail`, `truncated`), and never writes. `polarizer repair` removes a torn tail and nothing else.
-- A standalone reference verifier (`conformance/reference_verify.py`) and generated conformance fixtures; a differential test checks that the two verifiers agree.
+- A second verifier, `conformance/reference_verify.py`, written separately from the same spec, and generated conformance fixtures; a differential test checks that the two verifiers agree. Both were written by the same builder, so a misreading of the spec that both share is not ruled out; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently.
 - The ledger directory defaults to `~/.local/share/polarizer` (0700, files 0600) and is refused inside any `ledger_forbidden_paths` entry.
 
 ### M1a: pins

@@ -55,3 +55,22 @@ def test_each_finding(tmp_path, monkeypatch, text, expected):
 
 def test_the_real_docs_pass():
     assert check_docs.main() == 0
+
+
+def test_links_and_images(tmp_path, monkeypatch):
+    """Relative links and images must name a file and heading that exist; images need alt text.
+    Web links, code blocks and code spans are not checked."""
+    (tmp_path / "other.md").write_text("# Other\n\n## A heading: here\n", encoding="utf-8")
+    good = (
+        "# Doc\n\nSee [it](other.md), [there](other.md#a-heading-here), [web](https://x.invalid)"
+        ' and [self](#doc).\n\n<img src="other.md" alt="a picture">\n\n`[not](missing.md)`\n'
+    )
+    assert findings(tmp_path, monkeypatch, good) == []
+    bad = {
+        "See [it](missing.md).\n": "missing file",
+        "See [it](other.md#nowhere).\n": "missing heading",
+        '<img src="other.md">\n': "no alt text",
+        "![](other.md)\n": "no alt text",
+    }
+    for text, expected in bad.items():
+        assert any(expected in f for f in findings(tmp_path, monkeypatch, text)), text

@@ -1,112 +1,119 @@
-# Polarizer
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/lockup-dark.svg">
+    <img src="docs/brand/lockup-light.svg" alt="Polarizer: a round filter of parallel lines, with one line turned out of line" height="72">
+  </picture>
+</p>
 
-[![ci](https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg)](https://github.com/mpwilso/polarizer/actions/workflows/ci.yml)
+<p align="center"><b>Agents call the tools. You decide the risky ones.</b></p>
 
-## What it is
+<p align="center"><a href="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml"><img src="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg" alt="CI status"></a></p>
 
-Polarizer is a local MCP gateway that sits between an AI agent and the MCP servers it uses. It pins each tool's definition so a server can't change it unnoticed, holds risky calls until a person allows them, and records every call in a hash-chained ledger that anyone can verify. It runs on your own machine as a stdio MCP server that your client, such as Claude Code, starts.
+Polarizer is a local gateway between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools). It lets routine calls through, holds the risky ones until a person allows them, and writes every call and decision to a ledger that anyone can check. It runs on your own machine, started by the agent's client, such as Claude Code.
 
-## Status
+Status: a portfolio project, built to show how I design, test and judge an AI tool. Version 0.1, a preview.
 
-Version 0.1, a preview. It is not on PyPI.
+Jump to [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
-Built:
+## Why it exists
 
-- **M0:** the pass-through proxy and the verifiable ledger.
-- **M1a:** pins on tool definitions.
-- **M2a:** tool classes, and holds for risky calls.
+An MCP server can change a tool's description after you trusted it. A permission prompt that names only the tool can't tell a write inside your project from a write to `.git/hooks`, where git runs code. And a person who approves prompt after prompt stops reading. Polarizer pins what you approved, holds calls by what they would touch, and records every decision so it can be checked later.
 
-Planned and not built:
+The next milestones measure whether a person's approvals still catch anything. That measurement does not exist yet.
 
-- **M2b:** taint (holding outgoing calls after the agent has read untrusted content) and rules on argument values and domains.
-- **M3:** an approval card, a local page that shows a held call and what it would change.
-- **M5 and M6:** oversight statistics and canaries.
+## What a hold looks like
 
-The goal of the project is to measure whether a person's approvals still catch anything: how often they allow, how long they look, and whether they notice a planted bad call. **That measurement does not exist yet.** Today Polarizer holds calls and records what the person decided; nothing yet tells you whether those decisions were any good. [docs/milestones.md](docs/milestones.md) has the whole plan.
+In the interactive M2a check, I asked Claude to write a file into `.git/hooks`, and the call was held. In a second terminal, `polarizer holds --wait` printed:
 
-It has been used only with Claude Code (versions 2.1.287 to 2.1.289) as the client, and every live check ran on Linux (WSL2).
+```
+holds: 1 open
 
-## What it does not do
+hold a81e649da6775874 fs__write_file local-write
+held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+waiting about 0m00s; times out after 300 s
+session cbb8b462c2196ca7 started 2026-10-05T00:34:04.198Z, running
+args_commit f5b482532450b8990343ca1f2cd273725f97bf77ee142f0053e9f106cdad3617, 103 bytes of arguments
+{
+  "path": "/tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt",
+  "content": "M2a hold check c2713114"
+}
+```
 
-Polarizer only sees calls routed through it; the agent's own shell, its file tools and MCP servers configured directly in the client are outside it, and an agent whose call is refused can try another route itself. In the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take; nothing in Polarizer would have stopped it.
+I denied it, and the file was never written. The same call, asked for again, was a new hold, and I allowed that one. The check script's summary of the ledger for the two holds:
 
-**Scope**
+```
+seq 52 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+seq 53 hold.decided: deny (M2a hold check: deny)
+seq 54 call.refused: hold a81e649da6775874 was denied
 
-- Tools only. Resources, prompts and completions from upstream servers are not exposed.
-- Requests from an upstream server to the client (elicitation, sampling, roots) are not passed on, and the tool call fails.
-- No scanning of tool descriptions, no rules on argument values or domains, and no taint. A call that no rule holds goes straight through, recorded in the ledger.
-- Results pass through the MCP Python SDK, which drops fields the protocol doesn't define and turns a result it can't parse into an error. Tools are served in the 2026-07-28 form, without `execution` or `_meta`. [docs/PROXY-SPEC.md](docs/PROXY-SPEC.md#results) lists each change.
-- Each upstream starts once per session. One that fails to start stays off until the client restarts Polarizer. An upstream whose tool listing fails has its tools hidden until a listing succeeds again (Polarizer retries after 30 seconds, then less often, up to every 5 minutes); one whose process exits stays hidden until Polarizer restarts.
+seq 55 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+seq 56 hold.decided: allow
+seq 57 call.sent: fs__write_file, allowed_by hold
+seq 58 call.returned: outcome ok, latency_ms 36
+```
 
-**Definitions, not behavior**
+For the denied call, the agent only ever saw `polarizer: fs__write_file was not allowed`. Both blocks are copied from the check's results file, as recorded in [docs/verified-facts.md](docs/verified-facts.md#the-deny-and-allow-steps-as-printed).
 
-- Pins check a tool's definition (name, description, parameters, annotations), not what the tool does. A server can change its behavior without changing its definition, and Polarizer won't notice.
-- If you approve a poisoned definition without reading it, Polarizer keeps serving exactly that definition.
-- A class is your statement about a tool. Polarizer can't check it, and a tool can reach files in ways that never appear in its arguments (its own configuration, its working directory, a path it computes, a process it starts).
-- A decision is not instant. A call already under way when you reject its tool is not stopped.
+## What's different
 
-**Paths**
+- **A changed tool disappears until you approve it again.** If a server changes a tool's definition after you approved it, the agent stops seeing that tool until you approve the new definition.
+- **Holds look at what a call would touch.** The tool's class and the call's resolved paths decide, not the tool's name.
+- **You see the exact call; the agent learns nothing.** A held call shows its exact arguments, every unusual character escaped. A refused call tells the agent only that it was not allowed.
+- **Every call, hold and decision goes into a hash-chained ledger,** and a separately written verifier checks it as well as Polarizer's own.
+- **It fails closed.** A tool with no class is held on every call, and a ledger that doesn't verify stops startup.
 
-- Only the top-level arguments you name in `path_args` are checked. A path nested inside an argument (a list of edits, each with its own path) is not checked, and a path inside free text (a shell command, a URL, a script) never is.
-- Paths are resolved when the call arrives. A symbolic link created or changed after that is not seen, and an upstream that sees a different file system (a container, another machine) resolves paths its own way.
-- A `~` in a hold pattern means the home directory in Polarizer's own `HOME` when it starts, not necessarily your account's home.
-- The built-in patterns protect Claude Code's settings in their default place. If you move them with `CLAUDE_CONFIG_DIR`, the patterns don't follow; add the new place to `write_hold_patterns`.
-- On Windows, the device names `COM1` to `COM3` and `LPT1` to `LPT3` written with a superscript digit are not recognized as device names.
-- `polarizer.example.toml` uses POSIX paths. On native Windows, edit each one to a real absolute path with a drive, such as `C:/Users/<you>/...`; a `workspace_roots` entry without a drive is refused there as not absolute.
+## Compared with Claude Code's permission prompts
 
-**Annotations**
+Claude Code's own prompt for an MCP tool comes before the call reaches Polarizer, without the call's details. Polarizer adds what that prompt doesn't show: whether the tool's definition changed since you approved it, which paths the call would touch, and its exact arguments, with a ledger of what you decided. It has only been used with Claude Code, so nothing here says it works with other clients.
 
-- A tool's own annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) come from the server. Polarizer shows them as a hint and uses them only for a server you mark with `trust_annotations`, which then chooses its own tools' classes.
+## Proof
 
-**Held calls and Claude Code**
+- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS, all passing at 9270c97, the last commit CI has run; locally, 784 tests passed and 13 skipped at that commit. ([milestones](docs/milestones.md#status), [stage 7 notes](docs/dev/STAGE7-NOTES.md#follow-up-macos-output-bash-32-wait))
+- **Two verifiers agree** on every conformance fixture and on 5,000 randomly damaged chains per test run. Both were written separately from the same spec by the same builder, so a misreading they share isn't ruled out; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently. ([claims table](docs/dev/m0-plan.md#tests-and-claims), [RFC 8785 record](docs/verified-facts.md#rfc-8785-text-fetched-oct-2-2026))
+- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time, once inside a Claude Code session and once from a plain terminal. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
+- **Approvals reach a running session:** in the interactive M1a check, `/mcp` listed newly approved tools without a reconnect, for a first approval and for a changed definition; the ledger verified intact with 53 entries. ([M1a check](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner))
+- **Every kind of hold ending, interactively:** in the M2a check, a denied write (seq 52 to 54), an allowed retry (55 to 58), a write held 128 s and then allowed (59 to 62), and a destructive move that expired after 30 s without running (68 to 70); 71 entries, intact. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
+- **Claude Code's own timeout reaches the server:** in the headless live check, Claude Code cancelled a 14 s call after 5.012 s, Polarizer's cancel reached the upstream 1 ms later, and the ledger recorded `cancelled`. ([live check](docs/verified-facts.md#live-check-headless-claude-code-21288))
 
-- A held call waits inside the Polarizer process that Claude Code started. Pressing Esc in Claude Code stops that process and ends every call it was holding: none of them reaches the server, and the ledger says so. Don't press Esc to go and decide a hold.
-- If you allow a call and that process dies before it forwards it, the call does not run.
-- In Claude Code 2.1.289, a call still running after about 123 seconds is moved to the background, and the agent keeps working. It can make other calls, or ask for the same call again, which is a new hold. The first hold is unchanged: nothing runs until you allow it, and it is refused at the timeout. This was observed once and may differ in other versions.
-- Claude Code's own permission prompt for an MCP tool comes before the call reaches Polarizer, so a held call may be approved twice: once in Claude Code, without the details, and once with `polarizer allow`.
-- If `MCP_TOOL_TIMEOUT` is set below the hold timeout, Claude Code cancels the call first.
-- There is no page or notification for holds yet. Run `polarizer holds --wait` in another terminal.
+Not covered: native Windows or macOS with Claude Code, any client but Claude Code, and third-party MCP servers beyond the reference ones. Every claim, in full: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
-**People**
+## How it works
 
-- A hold is only as good as the person reading it. If you allow without reading, Polarizer records that you allowed it, and nothing measures that yet.
-- An agent that can run commands as you can also run `polarizer approve` or `polarizer allow`. They refuse to run without a terminal unless told they are run by a script, which only stops accidents.
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/how-it-works-dark.svg"><img src="docs/img/how-it-works-light.svg" alt="How Polarizer works: the agent, Claude Code, sends every tool call to polarizer serve. There, pins list only the tool definitions you approved, a rule function looks at the tool's class and the call's resolved paths, and a risky call is held until you allow or deny it or it times out. Allowed calls go on to the MCP servers. Every call, hold and decision goes into a hash-chained ledger. You run pending, approve, holds, allow, deny and verify in a terminal; they read the ledger and write your decisions to it. The agent's own shell and file tools are not routed through Polarizer." width="680"></picture>
 
-**The ledger**
+Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent only the definitions you approved, from a stored copy. When a server's definition changes, the tool is hidden, the change is recorded, and Claude Code is told its tool list changed. For each call to an approved tool, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you. A held call ends in one of five ways, each recorded: allow, deny, expiry, the client's cancel, or Polarizer's shutdown.
 
-- Someone who can write to the ledger directory can rewrite the ledger and its head together. There is no anchoring or signature yet.
-- Call arguments are kept in side files in plain text, protected only by file permissions (0600 in a 0700 directory). Deleting one removes it, and the chain still verifies.
-- Each entry's time is the wall clock. The chain proves order, not when anything happened.
+Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the previous entry's hash, so changing, removing or reordering a line breaks the chain, and `ledger.head` catches lines lost from the end. Call arguments stay out of the chain, in salted side files it commits to. `polarizer verify` reports one status with its own exit code and never writes. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md) and [holds](docs/HOLD-SPEC.md).
 
-## Quickstart (Linux, WSL and macOS)
+## Known limits
 
-You need Python 3.11 or later, [uv](https://docs.astral.sh/uv/), Node.js for `npx` servers, and Claude Code.
+Polarizer only sees calls routed through it: the agent's shell, its own file tools and servers configured directly in the client are outside it, and an agent whose call is refused can try another route. In the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take; nothing in Polarizer would have stopped it.
 
-### 1. Install
+- **Definitions, not behavior.** A server can change what a tool does without changing its definition.
+- **Paths only in the arguments you name.** Only top-level arguments listed in `path_args` are checked, not paths nested inside an argument or written in free text.
+- **Esc ends held calls.** Esc in Claude Code stops the Polarizer process, and every call it was holding is refused.
+- **Backgrounded after about 123 s.** In Claude Code 2.1.289 a waiting call moves to the background and the agent keeps working; the hold still waits for you.
+- **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
+- **A person who allows without reading.** Polarizer records that you allowed it, and nothing measures that yet.
+
+Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
+
+## Setup
+
+For Linux, WSL and macOS. You need Python 3.11 or later, [uv](https://docs.astral.sh/uv/), Node.js for `npx` servers, and Claude Code.
 
 ```sh
 uv tool install git+https://github.com/mpwilso/polarizer
 polarizer --help
-```
-
-This works once the repository is public. It installs Polarizer into its own environment and puts `polarizer` on your `PATH` (`uv tool dir --bin` prints where). Polarizer pins its direct dependencies exactly; the full set it was tested with is in `uv.lock`, which `uv tool install` does not read.
-
-### 2. Write polarizer.toml
-
-Make a directory for the config, and a workspace for the agent to write in:
-
-```sh
 mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (`echo $HOME` prints it; on macOS it is `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without most of its comments: the reference Filesystem server, pinned to an exact version:
+`uv tool install` works once the repository is public; it doesn't read `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 
 ```toml
 [policy]
-# local-write calls run without a hold only inside these directories.
 workspace_roots = ["/home/you/projects/demo"]
-# A held call is refused if nobody decides within this many seconds.
 hold_timeout_seconds = 300
 
 [upstream.fs]
@@ -131,27 +138,13 @@ create_directory = { class = "local-write", path_args = ["path"] }
 move_file = { class = "destructive", path_args = ["source", "destination"] }
 ```
 
-The ledger goes in `~/.local/share/polarizer` unless you set `ledger_dir`. [docs/PROXY-SPEC.md](docs/PROXY-SPEC.md#configuration-polarizertoml) lists every key, including `ledger_forbidden_paths` for directories the ledger must never be written to.
-
-**Classifying tools.** Each `[upstream.<prefix>]` table starts one MCP server, and its tools are exposed as `<prefix>__<tool>`. Under `[upstream.<prefix>.tools]`, give each tool a class:
-
-- `local-read` reads local data and changes nothing. It runs, unless a path matches a read hold pattern such as `~/.ssh/**`.
-- `local-write` changes local files. It runs when every path in its `path_args` resolves inside a workspace root and matches no write hold pattern (such as `.git/hooks/**` or your shell start-up files); otherwise it is held.
-- `destructive` deletes, moves or overwrites. It is held on every call.
-- `open-world` reads from outside the machine. It runs, under the same read hold patterns.
-- `egress` sends data out or acts outside the machine. It is held on every call.
-
-A tool with no class is held on every call, and `serve` says at start how many have none. `path_args` names the arguments that hold paths. [docs/HOLD-SPEC.md](docs/HOLD-SPEC.md#2-classes-and-the-policy-in-polarizertoml) has every key, including `write_hold_patterns` and `read_hold_patterns`.
-
-**Pre-warm the server once.** The first `npx` fetch can take longer than Polarizer's connect timeout, so run it by hand once and let it exit:
+Each tool gets a class. `local-read` and `open-world` run unless a path matches a read hold pattern such as `~/.ssh/**`; `local-write` runs only when every path in `path_args` resolves inside a workspace root and matches no write hold pattern, such as `.git/hooks/**`; `destructive` and `egress` are held on every call, and so is a tool with no class. [docs/HOLD-SPEC.md](docs/HOLD-SPEC.md#2-classes-and-the-policy-in-polarizertoml) has every key. Run the server once by hand first, since its first `npx` fetch can miss Polarizer's connect timeout:
 
 ```sh
 npx -y @modelcontextprotocol/server-filesystem@2026.8.31 "$HOME/projects/demo" < /dev/null
 ```
 
-### 3. First run, without Claude Code
-
-No tool is exposed until you approve its definition. With its input closed, `serve` connects to every upstream, records each tool definition it lists, and exits:
+**First run, without Claude Code.** No tool is exposed until you approve its definition. With its input closed, `serve` records what each server lists and exits:
 
 ```sh
 polarizer serve --config "$CONFIG" < /dev/null
@@ -160,16 +153,9 @@ polarizer approve --config "$CONFIG" --group <group id>
 polarizer verify --config "$CONFIG"
 ```
 
-- `serve` ends with `polarizer: <n> tools wait for approval; run polarizer pending`.
-- `pending` prints every waiting definition in full, any character outside printable ASCII shown as an escape, with each tool's class next to what its annotations suggest. Read them. A line near the end names a group: `group <group id> covers the <n> new definitions above ...`.
-- `approve --group` approves exactly the definitions `pending` printed. If anything changed in between, it refuses, and you run `pending` again. One definition is approved by name instead: `polarizer approve --config "$CONFIG" <prefix> <tool> <hash>`.
-- `verify` prints `intact: ...` when the chain checks out.
+`serve` ends with `polarizer: <n> tools wait for approval; run polarizer pending`. `pending` prints every definition in full, unusual characters escaped, and a group line near the end: `group <group id> covers the <n> new definitions above ...`. A group approves exactly what `pending` printed; one definition is approved by name with `polarizer approve --config "$CONFIG" <prefix> <tool> <hash>`. `verify` prints `intact: ...` when the chain checks out. `approve`, `allow` and `deny` refuse to run without a terminal unless given `--allow-no-terminal`.
 
-`approve`, `allow` and `deny` refuse to run without a terminal unless given `--allow-no-terminal`, so that an agent doesn't approve things by accident.
-
-### 4. Add it to Claude Code
-
-Save this as `~/.config/polarizer/mcp.json`, with `command` set to the path that `command -v polarizer` prints and `/home/you` replaced as before. `--config` must be an absolute path.
+**Claude Code.** Save this as `~/.config/polarizer/mcp.json`, with `command` set to what `command -v polarizer` prints, and start Claude Code with it only:
 
 ```json
 {
@@ -182,21 +168,13 @@ Save this as `~/.config/polarizer/mcp.json`, with `command` set to the path that
 }
 ```
 
-Then start Claude Code with that file only:
-
 ```sh
 claude --strict-mcp-config --mcp-config "$HOME/.config/polarizer/mcp.json"
 ```
 
-Approve the `polarizer` server if asked. `/mcp` lists the approved tools with their prefix, such as `fs__read_text_file`.
+Don't put Polarizer in a project `.mcp.json`: every Claude Code session opened in that directory would start it and write to its ledger, which happened while Polarizer was built ([record](docs/verified-facts.md#development-sessions-spawned-the-proxy-from-the-ledger-not-interactive)). Pass the file with `--mcp-config` instead.
 
-Pass the file with `--mcp-config`; don't put Polarizer in a project `.mcp.json`. A project `.mcp.json` starts Polarizer in every Claude Code session opened in that directory, including ones you never meant to route through it, and each of those writes to the ledger. That happened while Polarizer was built: development sessions in its own repository started it three times and added 12 entries to a real ledger ([docs/verified-facts.md](docs/verified-facts.md#development-sessions-spawned-the-proxy-from-the-ledger-not-interactive)). With `--strict-mcp-config`, Claude Code uses only the servers in that file and ignores its other MCP configurations, so servers configured elsewhere are not loaded beside Polarizer. Whether that flag also turns off claude.ai connectors is not verified.
-
-Later, `polarizer pending --config "$CONFIG"` shows anything new or changed. A running Polarizer notices an approval within about a second and tells Claude Code, which lists the tool again without a reconnect.
-
-### 5. Holds, in a second terminal
-
-Ask Claude to move a file in `~/projects/demo` with the Filesystem tools. `move_file` is `destructive`, so the call is held. In a second terminal:
+**Holds, in a second terminal.** Ask Claude to move a file in `~/projects/demo`; `move_file` is `destructive`, so the call is held.
 
 ```sh
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
@@ -205,51 +183,30 @@ polarizer allow --config "$CONFIG" <hold id>
 polarizer deny --config "$CONFIG" <hold id> --reason "not that file"
 ```
 
-- `holds --wait` waits until a call is held, then lists every waiting call with its exact arguments, every unusual character escaped, and exits. `--bell` rings the terminal first. Run it again for the next hold. Without `--wait`, `holds` lists what waits now.
-- `allow` forwards the call. `deny` refuses it; the agent sees only `polarizer: <tool> was not allowed`. Use one or the other for each hold.
-- If you do neither, the call is refused after `hold_timeout_seconds`.
+`holds --wait` waits for a held call, lists every waiting call with its exact arguments, and exits, and `--bell` rings the terminal first; run it again for the next one. Use `allow` or `deny` for each hold: a denied call tells the agent only `polarizer: <tool> was not allowed`, and an undecided one is refused after `hold_timeout_seconds`. `polarizer serve --config <path> --no-holds` turns the hold rules off for one session; it is a flag only, recorded in the ledger at every start, and pins still apply.
 
-`polarizer verify --config "$CONFIG" --args` also checks the argument side files. To run one session with every hold rule off, start `polarizer serve --config <path> --no-holds`; it is a command-line flag only, never a config key, and every start with it is recorded in the ledger. Pins still apply.
+## What's here
 
-## How it works
-
-**The ledger and verify.** Every entry is one line of canonical JSON (RFC 8785) holding its sequence number, time, kind, data, the previous entry's hash and its own hash, so changing, removing or reordering any line breaks the chain. The first entry binds a random chain id. `ledger.head` records the latest security-relevant entry, so losing lines from the end is caught too. Call arguments are kept out of the chain, in salted side files that the chain commits to. `polarizer verify` reports exactly one status (`intact`, `tampered`, `invalid`, `not canonical`, `torn tail` or `truncated`), each with its own exit code, and never writes. A standalone verifier, `conformance/reference_verify.py`, implements the format from the spec alone, and the two verifiers are tested against each other. Detail: [docs/LEDGER-SPEC.md](docs/LEDGER-SPEC.md).
-
-**The proxy.** `serve` starts each upstream, exposes its tools with a prefix, forwards calls with their arguments unchanged, and records `call.sent` and `call.returned` (or `call.refused`) for each. Detail: [docs/PROXY-SPEC.md](docs/PROXY-SPEC.md).
-
-**Pins and drift.** A tool's definition is hashed and a copy is stored. A tool is exposed only while its latest decision is an approval of the hash it has now, and the agent is served the stored copy. When a server's definition changes, the tool is hidden, `tool.drift` is recorded with both hashes, and Claude Code is told the tool list changed. The tool stays hidden until you approve the new definition. A hidden tool called by name is refused and recorded. Startup refuses a ledger that is not intact, so a lost rejection can't bring a tool back. Detail: [docs/PIN-SPEC.md](docs/PIN-SPEC.md).
-
-**The hold flow.** For each call to an approved tool, one rule function decides from its class and its resolved paths whether it runs or is held. A held call's arguments are written to a side file and `hold.created` is recorded with a hold id; the call waits inside `serve`, and nothing reaches the server. It ends in one of five ways, each recorded:
-
-- **allow:** `hold.decided`, fsynced before the call is forwarded, then `call.sent` and `call.returned`;
-- **deny:** `hold.decided`, then `call.refused`;
-- **expiry** after `hold_timeout_seconds`: `hold.expired`, then `call.refused`;
-- **the client's cancel**, such as Claude Code's own timeout: `hold.expired`, then `call.refused`;
-- **Polarizer's shutdown**, such as Esc in Claude Code: `hold.expired`, then `call.refused`.
-
-A new `serve` records `hold.abandoned` for the open holds a dead process left behind. Detail: [docs/HOLD-SPEC.md](docs/HOLD-SPEC.md).
-
-## Evidence
-
-What has been checked, and where each result is recorded. Nothing below has been run on native Windows or macOS with Claude Code, with any other client, or with a third-party MCP server other than the reference servers named.
-
-- **CI.** Five jobs: Linux (ubuntu-24.04) with Python 3.11, 3.12 and 3.13, and Windows and macOS with Python 3.12. All five passed at commit 9270c97 ([docs/milestones.md](docs/milestones.md#status), M2a). On Linux (WSL2, Python 3.12.3), `scripts/test.sh` ran ruff, the docs check and 784 tests passed, 13 skipped, at that commit ([docs/dev/STAGE7-NOTES.md](docs/dev/STAGE7-NOTES.md#follow-up-macos-output-bash-32-wait)). The per-job test counts in CI are not recorded.
-- **Two verifiers.** Polarizer's verifier and the standalone reference verifier agree on every conformance fixture, and on 5,000 randomly damaged chains per test run; locally, also on 20,000 cases each for seeds 1 to 5, with no disagreement ([docs/dev/m0-plan.md](docs/dev/m0-plan.md#tests-and-claims)).
-- **Reference servers.** The pinned Everything and Filesystem servers (2026.8.31) ran through Polarizer locally: all 27 tools hashed, and each reached clients exactly as its stored copy ([docs/verified-facts.md](docs/verified-facts.md#stage-4-oct-3-2026)).
-- **Headless live check, M0.** `scripts/live-check.sh`, run once with Claude Code 2.1.288 and `claude -p`: a 14 s call under `MCP_TOOL_TIMEOUT=5000`. Claude Code cancelled it 5.012 s after the call, Polarizer's own cancel reached the upstream 1 ms later, and the ledger verified intact with 6 entries and the call recorded `cancelled` ([docs/verified-facts.md](docs/verified-facts.md#live-check-headless-claude-code-21288)).
-- **Esc, interactive, M0.** With Claude Code 2.1.288, Esc during a 30 s call: the upstream received a cancel, and the ledger recorded `call.sent` and `call.returned` `cancelled` at seq 21 and 22 ([docs/verified-facts.md](docs/verified-facts.md#esc-during-a-long-call-interactive-claude-code-21288)).
-- **Rug-pull check, headless, M1a.** `scripts/rugpull-check.sh` passed twice with Claude Code 2.1.289, nine of nine checks each time: once from inside a Claude Code session, at commit a46cbc8 ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289)), and once from a plain terminal with no `CLAUDE_*` or `ANTHROPIC_*` variables set ([second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289)). In each, run A called the tool; in run B the server changed the definition, `tool.drift` was recorded at seq 24, the agent was not offered the tool, and nothing reached the server; after the approval at seq 26, run C's call went through (seq 30 and 31). Each ledger verified intact with 32 entries. It does not show the refusal of a hidden tool called by name (the model never tried; tests cover it).
-- **M1a check, interactive.** With Claude Code 2.1.289, approving a first group and then a changed definition while a session was open: `/mcp` listed the tools again without a reconnect both times, and the ledger verified intact with 53 entries. Its seq ranges are not recorded ([docs/verified-facts.md](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner)).
-- **M2a check, interactive.** With Claude Code 2.1.289 at commit c986088, from two terminals: a write to `.git/hooks` was held and denied, and the file was not created (seq 52 to 54); the same call asked again was a new hold, allowed, and written (seq 55 to 58); a write held for 128 s was allowed and returned, after Claude Code reported moving it to the background at 123 s (seq 59 to 62); and a `move_file` held as destructive expired after 30 s without running (seq 68 to 70). The ledger verified intact with 71 entries in 3 sessions ([docs/verified-facts.md](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner)).
-
-docs/verified-facts.md also lists what is not verified, such as how Claude Code ends a backgrounded held call when the session exits.
+- `src/polarizer/`: the proxy, the ledger, pins, holds and the command line.
+- `conformance/`: the ledger fixtures and the separately written reference verifier.
+- `tests/`: every test; `tests/test_readme.py` runs this README's setup commands.
+- `docs/`: the four specs, [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
+- `docs/brand/`: the logo, drawn by `scripts/brand.py`. The parallel lines are calls that line up with what you approved; the one turned out of line is held ([what the mark means](docs/brand/README.md)).
+- `manual/`: the config for the interactive checks.
+- `scripts/`: `test.sh` runs every check, as CI does; the live and manual check scripts; `dev/guard.sh`, a guard for my own machine.
 
 ## How it was built
 
-Polarizer was designed and directed by Matt Wilson. Claude Code wrote most of the code under that direction, in staged rounds: a spec for each milestone, tests written first, and a review at each stop before the next stage began. The specs and the build log are in [docs/](docs/) and [docs/dev/](docs/dev/README.md). It was built independently of any employer system, on personal time and equipment.
+I designed Polarizer and directed its build. Claude Code wrote most of the code, in staged rounds: a spec for each milestone, tests written first, and a review at each stop before the next stage began. I ran the interactive checks and both rug-pull checks on real Claude Code myself. It was built independently of any employer system, on personal time and equipment. The specs, stage notes and reviews are in [docs/dev/](docs/dev/README.md).
 
-**Credits.** From mcpclerk, three ideas, credited by name, with none of its code or text used: a run-end entry that records how many entries the run wrote, which inspired `ledger.head`; tools hidden from the list that are still refused and recorded when called by name (M1a); and an approve-everything switch that exists only as a command-line flag, never in the policy file (M2a, `--no-holds`). Polarizer is built on the MCP Python SDK and the `rfc8785` package, uses RFC 8785 (JSON Canonicalization Scheme) for its ledger entries, and is tested against the reference Everything and Filesystem MCP servers. No code from any of these projects is copied into this repository.
+I also built [Loupe](https://github.com/mpwilso/loupe), [Parallax](https://github.com/mpwilso/parallax) and [ISR](https://github.com/mpwilso/isr).
 
-## License
+Credits: from mcpclerk, three ideas, credited by name, with none of its code or text used: a run-end entry that records how many entries the run wrote, which inspired `ledger.head`; tools hidden from the list that are still refused and recorded when called by name; and an approve-everything switch that exists only as a command-line flag, never in the policy file (`--no-holds`). Polarizer is built on the MCP Python SDK and the `rfc8785` package, uses RFC 8785 (JSON Canonicalization Scheme) for its ledger entries, and is tested against the reference Everything and Filesystem MCP servers. No code from any of these projects is copied here.
 
-MIT. See [LICENSE](LICENSE).
+## What's next
+
+1. **The approval card (M3):** a local page that shows a held call, what it would change, why it was held and its history.
+2. **Taint (M2b):** holding outgoing calls after the agent has read untrusted content, and rules on argument values and domains.
+3. **The measurement (M5 and M6), the point of the project:** oversight statistics and canaries that show whether a person's approvals still catch a planted bad call.
+
+MIT license: [LICENSE](LICENSE).

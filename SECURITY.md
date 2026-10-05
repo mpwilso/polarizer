@@ -1,6 +1,6 @@
 # Security policy
 
-Polarizer is a v0.1 preview. It has not had an outside security review, and it should not be the only thing between an agent and anything you can't afford to lose. README.md, "What it does not do", lists the limits it has by design; those are not vulnerabilities.
+Polarizer is a v0.1 preview. It has not had an outside security review, and it should not be the only thing between an agent and anything you can't afford to lose. docs/LIMITS.md lists the limits it has by design; those are not vulnerabilities.
 
 ## Reporting a vulnerability
 

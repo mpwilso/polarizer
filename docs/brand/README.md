@@ -1,0 +1,34 @@
+# Polarizer brand
+
+Every SVG here, and the diagram in [../img/](../img/), is drawn by `scripts/brand.py` from the palette at its top. To change one, edit the script and run `uv run python scripts/brand.py`. `tests/test_brand.py` fails if a file and the script disagree.
+
+## The mark
+
+A polarizing filter: a round face of parallel lines, and one line turned out of line with the others. Light that lines up with a filter passes; light at an angle to it is stopped. The parallel lines are calls that line up with what you approved, and pass. The turned line is the call that doesn't, and is held for you.
+
+The line turns into place once when the image loads. Viewers who ask for reduced motion, and renderers without CSS animation, see the finished mark.
+
+## The lockup
+
+The mark and the word POLARIZER. Use [lockup-light.svg](lockup-light.svg) on light pages and [lockup-dark.svg](lockup-dark.svg) on dark ones. An image can't see the page's theme, so a web page picks the file:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="lockup-dark.svg">
+  <img src="lockup-light.svg" alt="Polarizer: a round filter of parallel lines, with one line turned out of line" height="72">
+</picture>
+
+## Palette
+
+One hue, a filter blue. The light and dark values are in `PALETTE` in `scripts/brand.py`.
+
+| Name | Light | Dark | Use |
+|---|---|---|---|
+| ring | `#1E3A8A` | `#6EA0F5` | The filter's rim. |
+| band | `#1D4ED8` | `#7FB0FF` | The turned line, and the diagram's box edges. |
+| lines | `#A9C4F5` | `#34548C` | The parallel lines. |
+| tint | `#EAF1FD` | `#0E1A33` | The filter's face. |
+| ink | `#1c1c1a` | `#EDEDEA` | The word and the diagram's text. |
+
+## Type
+
+The word is set in the reader's own sans-serif system font, weight 800, so the files carry no font. Its spacing is fixed with `textLength`, so it fits whatever font draws it.

@@ -2,15 +2,17 @@
 
     uv run python scripts/check_docs.py
 
-Checks CLAUDE.md, the Markdown files at the repo root (README.md and the others), docs/*.md and
-docs/dev/*.md, and prints a report per file: word count, line count and the
+Checks CLAUDE.md, the Markdown files at the repo root (README.md and the others) and every
+Markdown file under docs/, and prints a report per file: word count, line count and the
 heading list. A finding makes it exit 1:
 - a repeated paragraph, or a repeated line of 40 or more characters outside code blocks and
   tables (a copy-paste or merge slip);
 - a prose line that ends mid-sentence just before a blank line or the end of the file;
 - a table whose rows don't all have the same number of columns;
 - any character outside printable ASCII (plus tab and newline), except the micro sign;
-- a missing final newline, or a duplicate heading.
+- a missing final newline, or a duplicate heading;
+- a relative link, image or srcset whose file doesn't exist, or whose #anchor names no heading
+  in that file (GitHub's anchor rules), and an image with no alt text.
 Standard library only. scripts/test.sh runs it, so CI does too.
 """
 
@@ -24,9 +26,46 @@ ALLOWED = {chr(0xB5)}  # the micro sign, used for microseconds
 ENDINGS = tuple(".:;!?)`*>]\"'|")
 
 
+def slug(heading: str) -> str:
+    """GitHub's anchor for a heading."""
+    text = re.sub(r"[^\w\- ]", "", heading.replace("`", "").strip().lower())
+    return text.replace(" ", "-")
+
+
+def anchors(path: Path) -> set[str]:
+    text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
+    return {slug(h) for h in re.findall(r"^#{1,6} (.+)$", text, re.M)}
+
+
+def link_findings(path: Path, text: str) -> list[str]:
+    """Relative links, images and srcsets must name a file that exists and, with #anchor, a
+    heading in it; every image needs alt text. Code blocks and code spans are skipped."""
+    prose = re.sub(r"```.*?```", "", text, flags=re.S)
+    prose = re.sub(r"`[^`\n]*`", "", prose)
+    targets = re.findall(r"\]\(([^)\s]+)\)", prose)
+    targets += re.findall(r'\b(?:src|srcset|href)="([^"]+)"', prose)
+    found = []
+    for target in targets:
+        if re.match(r"[a-z]+:", target):
+            continue  # https:, mailto: and the like
+        name, _, anchor = target.partition("#")
+        where = (path.parent / name) if name else path
+        if not where.exists():
+            found.append(f"link to a missing file: {target}")
+        elif anchor and where.suffix == ".md" and anchor not in anchors(where):
+            found.append(f"link to a missing heading: {target}")
+    for tag in re.findall(r"<img\b[^>]*>", prose):
+        if not re.search(r'\balt="[^"]+"', tag):
+            found.append(f"image with no alt text: {tag[:60]}")
+    for alt in re.findall(r"!\[([^\]]*)\]\(", prose):
+        if not alt.strip():
+            found.append("image with no alt text")
+    return found
+
+
 def files() -> list[Path]:
     root = [p for p in sorted(ROOT.glob("*.md")) if p.name != "CLAUDE.md"]
-    docs = [*sorted((ROOT / "docs").glob("*.md")), *sorted((ROOT / "docs" / "dev").glob("*.md"))]
+    docs = sorted((ROOT / "docs").rglob("*.md"), key=lambda p: p.relative_to(ROOT).parts)
     return [ROOT / "CLAUDE.md", *root, *docs]
 
 
@@ -103,6 +142,7 @@ def check(path: Path) -> tuple[list[str], list[str]]:
             if ch in ALLOWED or ch == "\t" or " " <= ch <= "~":
                 continue
             findings.append(f"line {number}: character U+{ord(ch):04X} is not allowed")
+    findings += link_findings(path, text)
     return report, findings
 
 

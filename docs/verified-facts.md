@@ -701,6 +701,39 @@ Observed by the owner, interactively, with Claude Code 2.1.289, running `scripts
 - **The script's one-line answers:** the owner pasted multi-line text at a free-text question; the first line was recorded and the other lines reached the owner's shell as commands after the script ended (harmless `command not found` lines). The deny step's recorded answer is cut off for that reason. `scripts/hold-check.sh` now throws away input left waiting after each answer.
 - **Bookkeeping:** `~/.claude.json` went from 92,290 bytes (mtime 00:28:38Z) to 92,240 bytes (00:50:17Z) during the check; its MCP config was unchanged in all 6 locations.
 
+### The deny and allow steps, as printed
+
+Copied from the results file of the check above, `/tmp/hold-check-results.txt`, which the owner kept; read in a development session on Oct 5, 2026 (UTC). The deny step's `polarizer holds --wait --bell` printed this block for the first hold, after the bell character that `--bell` writes, left out here:
+
+```
+holds: 1 open
+
+hold a81e649da6775874 fs__write_file local-write
+held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+waiting about 0m00s; times out after 300 s
+session cbb8b462c2196ca7 started 2026-10-05T00:34:04.198Z, running
+args_commit f5b482532450b8990343ca1f2cd273725f97bf77ee142f0053e9f106cdad3617, 103 bytes of arguments
+{
+  "path": "/tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt",
+  "content": "M2a hold check c2713114"
+}
+```
+
+After the deny, and after the allow of the same call asked again, the script printed its summary of the ledger for each hold:
+
+```
+seq 52 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+seq 53 hold.decided: deny (M2a hold check: deny)
+seq 54 call.refused: hold a81e649da6775874 was denied
+
+seq 55 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
+seq 56 hold.decided: allow
+seq 57 call.sent: fs__write_file, allowed_by hold
+seq 58 call.returned: outcome ok, latency_ms 36
+```
+
+After the deny, the script found that `/tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt` did not exist; after the allow, it held `M2a hold check c2713114`.
+
 Not verified by this check:
 
 - whether `TaskStop` on a backgrounded held call sends `notifications/cancelled` to Polarizer;

@@ -1,6 +1,6 @@
-"""README.md's quickstart, run as written, so the README can't drift from the code.
+"""README.md's setup, run as written, so the README can't drift from the code.
 
-Every command in the quickstart's sh blocks is run in README order, except the ones that need
+Every command in the Setup section's sh blocks is run in README order, except the ones that need
 the network or Claude Code (SKIPPED). The polarizer.toml block is written where the README says,
 with /home/you replaced by a temporary home; only its Filesystem server's command and args are
 swapped for the stdlib probe, so nothing is fetched. Its tools are then unclassified, so every
@@ -10,7 +10,9 @@ pseudo-terminal as stdin, as in a person's terminal; Windows has none, so there 
 --allow-no-terminal.
 
 Every `polarizer ...` command shown anywhere in README.md must also parse with the real
-argument parser, and every relative link must name a file and heading that exist.
+argument parser, and every relative link must name a file and heading that exist. The README
+keeps its layout and length; every limit and every evidence claim the v0.1 README listed is in
+docs/LIMITS.md or docs/EVIDENCE.md, where the detail moved.
 """
 
 import json
@@ -49,7 +51,7 @@ def section(title: str) -> str:
     return README[start : end if end != -1 else len(README)]
 
 
-QUICKSTART = section("Quickstart")
+QUICKSTART = section("Setup")
 
 
 def blocks(language: str) -> list[str]:
@@ -336,14 +338,111 @@ def slug(heading: str) -> str:
 
 
 def test_readme_links_resolve():
+    """Every relative link, image and srcset names a file, and every #anchor a heading in it (an
+    anchor alone means this README). scripts/check_docs.py checks every doc the same way."""
     links = re.findall(r"\]\(([^)]+)\)", README)
+    links += re.findall(r'\b(?:src|srcset)="([^"]+)"', README)
     local = [link for link in links if not link.startswith("https://")]
     assert len(local) > 10
     for link in local:
         target, _, anchor = link.partition("#")
-        path = ROOT / target
+        path = ROOT / target if target else ROOT / "README.md"
         assert path.exists(), link
         if anchor:
-            text = path.read_text(encoding="utf-8")
+            text = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
             headings = re.findall(r"^#{1,6} (.+)$", text, re.M)
             assert anchor in {slug(h) for h in headings}, link
+    for tag in re.findall(r"<img\b[^>]*>", README):
+        assert re.search(r'\balt="[^"]+"', tag), tag
+
+
+# The layout, and the detail that moved out of the README -----------------------------------
+
+SECTIONS = [
+    "Why it exists",
+    "What a hold looks like",
+    "What's different",
+    "Compared with Claude Code's permission prompts",
+    "Proof",
+    "How it works",
+    "Known limits",
+    "Setup",
+    "What's here",
+    "How it was built",
+    "What's next",
+]
+
+# One phrase from each limit and each evidence claim of the v0.1 README (commit 9496bef), which
+# moved to docs/LIMITS.md and docs/EVIDENCE.md. The two-verifier claim was reworded on purpose.
+OLD_LIMITS = (
+    "Polarizer only sees calls routed through it",
+    "Tools only. Resources, prompts and completions from upstream",
+    "Requests from an upstream server to the client (elicitation,",
+    "No scanning of tool descriptions, no rules on argument value",
+    "Results pass through the MCP Python SDK, which drops fields",
+    "Each upstream starts once per session. One that fails to sta",
+    "Pins check a tool's definition (name, description, parameter",
+    "If you approve a poisoned definition without reading it, Pol",
+    "A class is your statement about a tool. Polarizer can't chec",
+    "A decision is not instant. A call already under way when you",
+    "Only the top-level arguments you name in `path_args` are che",
+    "Paths are resolved when the call arrives. A symbolic link cr",
+    "A `~` in a hold pattern means the home directory in Polarize",
+    "The built-in patterns protect Claude Code's settings in thei",
+    "On Windows, the device names `COM1` to `COM3` and `LPT1` to",
+    "`polarizer.example.toml` uses POSIX paths. On native Windows",
+    "A tool's own annotations (`readOnlyHint`, `destructiveHint`,",
+    "A held call waits inside the Polarizer process that Claude C",
+    "If you allow a call and that process dies before it forwards",
+    "In Claude Code 2.1.289, a call still running after about 123",
+    "Claude Code's own permission prompt for an MCP tool comes be",
+    "If `MCP_TOOL_TIMEOUT` is set below the hold timeout, Claude",
+    "There is no page or notification for holds yet. Run `polariz",
+    "A hold is only as good as the person reading it. If you allo",
+    "An agent that can run commands as you can also run `polarize",
+    "Someone who can write to the ledger directory can rewrite th",
+    "Call arguments are kept in side files in plain text, protect",
+    "Each entry's time is the wall clock. The chain proves order,",
+)
+
+OLD_EVIDENCE = (
+    "Five jobs: Linux (ubuntu-24.04) with Python 3.11, 3.12 and 3",
+    "agree on every conformance fixture, and on 5,000 randomly damaged chains",
+    "The pinned Everything and Filesystem servers (2026.8.31) ran",
+    "`scripts/live-check.sh`, run once with Claude Code 2.1.288 a",
+    "With Claude Code 2.1.288, Esc during a 30 s call: the upstre",
+    "`scripts/rugpull-check.sh` passed twice with Claude Code 2.1",
+    "With Claude Code 2.1.289, approving a first group and then a",
+    "With Claude Code 2.1.289 at commit c986088, from two termina",
+    "docs/verified-facts.md also lists what is not verified",
+)
+
+
+def test_readme_layout():
+    """The hook, the status line, the sections in order, a short page, and the links to the
+    detail that moved out of it."""
+    assert README.count("\n") <= 220
+    assert "<b>Agents call the tools. You decide the risky ones.</b>" in README
+    assert (
+        "\nStatus: a portfolio project, built to show how I design, test and judge an AI tool."
+        in README
+    )
+    assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
+    assert "(docs/LIMITS.md)" in section("Known limits")
+    assert "(docs/EVIDENCE.md)" in section("Proof")
+
+
+def test_limits_and_evidence_moved():
+    limits = (ROOT / "docs" / "LIMITS.md").read_text(encoding="utf-8")
+    evidence = (ROOT / "docs" / "EVIDENCE.md").read_text(encoding="utf-8")
+    assert [p for p in OLD_LIMITS if p not in limits] == []
+    assert [p for p in OLD_EVIDENCE if p not in evidence] == []
+
+
+def test_verifier_claim_is_qualified():
+    """The two verifiers were written from one spec by one builder: wherever their agreement
+    is claimed for a reader, the shared-misreading caveat and the RFC 8785 vectors go with it."""
+    for name in ("README.md", "docs/EVIDENCE.md", "CHANGELOG.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "standalone reference verifier" not in text, name
+        assert "same builder" in text and "RFC 8785 test vectors" in text, name
