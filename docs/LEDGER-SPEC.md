@@ -76,11 +76,18 @@ The chain id is bound because it sits inside the genesis entry's hashed body, an
 | `tool.seen` | `session`, `upstream`, `tool`, `def_hash`: a live definition no decision covers (M1a) |
 | `tool.unservable` | `session`, `upstream`, `tool`, `def_hash` (or null), `problem`: a tool hidden because it can't be hashed, its definition is larger than 262144 bytes, or its stored copy fails its check (M1a) |
 | `upstream.refresh_failed` | `session`, `prefix`, `trigger` (`client-list`, `upstream-notice` or `connection-lost`), `error` (M1a) |
-| `policy.loaded` | `session`, `holds` (`on` or `off`), `policy_sha256`, `classified`, `workspace_roots`, `hold_timeout_seconds`: the policy a `serve` process runs with, written after `session.started`; fsynced, with `ledger.head` updated (M2a; HOLD-SPEC.md, section 5) |
-| `hold.created` | `session`, `hold` (16 random lowercase hex characters), `tool`, `args_commit`, `class` (or null), `class_from` (`config`, `annotations` or null), `rule`, `reason`, `timeout_seconds`: a call held for a person; not fsynced (M2a) |
+| `policy.loaded` | `session`, `holds` (`on` or `off`), `policy_sha256`, `classified`, `workspace_roots`, `hold_timeout_seconds`: the policy a `serve` process runs with, written after `session.started`; fsynced, with `ledger.head` updated (M2a; HOLD-SPEC.md, section 5). (Stage 10) Also `planted_calls_per_session`, 0 to 3, on every start (MEASURE-SPEC.md, section 8). |
+| `hold.created` | `session`, `hold` (16 random lowercase hex characters), `tool`, `args_commit`, `class` (or null), `class_from` (`config`, `annotations` or null), `rule`, `reason`, `timeout_seconds`: a call held for a person; not fsynced (M2a). (Stage 10) In a session with planted calls on, every hold also has `plant_commit`, a commitment to whether it is real or planted; a hold without it is unchanged (MEASURE-SPEC.md, section 8). |
 | `hold.decided` | `hold`, `args_commit`, `decision` (`allow` or `deny`), `actor`, `reason` (or null): a person's decision on a hold; fsynced, with `ledger.head` updated, before the deciding command reports success (M2a) |
 | `hold.expired` | `session`, `hold`, `reason`: a hold the holding process ended by timeout, the client's cancel or shutdown; not fsynced (M2a) |
 | `hold.abandoned` | `session`, `hold`, `held_by`: an open hold whose process has ended, recorded by a later `serve` at start; not fsynced (M2a) |
+| `hold.revealed` | `session`, `hold`, `label` (`real` or `planted`), `salt`, `why` (or null), `derived_from` (or null): the reveal that checks against a hold's `plant_commit`, written by the holding `serve` after the hold's ending; not fsynced (stage 10; MEASURE-SPEC.md, sections 8 and 11) |
+| `drill.started` | `session` (16 random hex characters, one per drill), `polarizer_version`, `set`, `set_sha256`, `seed`, `seed_from`, `condition` (`plain` or `prediction-gate`), `condition_from`, `calls`, `excluded`: written only to a drill ledger, never to a serve ledger; not fsynced (stage 8; MEASURE-SPEC.md, section 8) |
+| `drill.shown` | `session`, `n`, `scenario`, `hold`, `args_commit`, `seen_before`: a practice call shown; no side file is written (stage 8) |
+| `drill.predicted` | `session`, `n`, `prediction` (folded, at most 200 characters), `elapsed_ms`: the prediction-gate condition only (stage 8) |
+| `drill.decided` | `session`, `n`, `scenario`, `decision` (`allow` or `deny`), `elapsed_ms` (monotonic, measured in the drill process), `actor` (stage 8) |
+| `drill.revealed` | `session`, `n`, `scenario`, `answer` (`clean` or `planted`), `shape` (or null), `outcome` (`caught`, `missed`, `right` or `false-flag`) (stage 8) |
+| `drill.ended` | `session`, `how` (`finished`, `stopped` or `interrupted`), `answered`, `calls`: best effort (stage 8) |
 | `ledger.repaired` | `bytes`, `sha256`, `file` |
 | `ledger.head_rebuilt` | `from_seq`, `from_hash` (the verified chain head it was rebuilt from) |
 
