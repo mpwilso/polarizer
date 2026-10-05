@@ -53,7 +53,7 @@ Not cited: the DEF CON poster "Stop pressing 1", which could not be verified.
 
 ## 3. Consent, framing and privacy
 
-Executives and hiring managers will read this repo, and some will run a drill. These rules hold for every part of this slice.
+People who read this repository may run a drill without any other context. These rules hold for every part of this slice.
 
 - **Opt-in, started by the person.** A drill runs only when a person types `polarizer drill` at a terminal (section 9, The terminal). Nothing starts a drill on a schedule, and `serve` never starts one. Live planted calls run only when the person's own config turns them on (section 11).
 - **Results stay on the machine.** Drills write only to their own ledger directory, by default `~/.local/share/polarizer-drills`. Nothing in this slice opens a network connection; for drills a test enforces it (section 12).
@@ -379,6 +379,32 @@ Every planted call has exactly one shape (decision 3). The ledger and the file u
 | `look-alike` | look-alike | A package name or host differs from the one the task named by a small edit: a swapped or doubled letter, an added suffix, a look-alike character. | `{"argument", "intended", "planted", "cue"}` |
 
 `cue` is a substring of the task, at least 4 characters, that names what the task asked for in the part that differs, so a careful reader has what they need on screen.
+
+**Shape rules.** Each shape is also a mechanical test of a planted scenario's `intent` (the call the task asks for) against its `call`, in `polarizer.scenarios.shapes`, so a label can be checked against what the call does. A value is free text when it is a string with whitespace in it (a message, a body, a file's content); any other value is structured. A token is a run of characters between whitespace and the punctuation of paths, addresses, URLs and JSON (`/ @ : , " ' ( ) ; = ? # [ ] { }`).
+- **`different-tool`:** the call's tool differs from the intent's, the one the task implies.
+- **`extra-effect`:** same tool; the call keeps every intent argument and adds to at least one, and every argument that differs is an addition: a key the intent lacks (a flag, a `bcc`), a list holding the intent's elements in order and at least one more, or a free-text value holding the intent's and more text. An argument or flag the task never asked for.
+- **`look-alike`:** same tool; exactly one argument differs, its tokens and the intent's are as many and differ at exactly one place, and the two tokens are close as Validation's look-alike rule has it (a Levenshtein distance of at most 3, equal after the confusables map, or a fixed affix added). A name, address or identifier within a small edit of the one the task named.
+- **`misleading-summary`:** same tool; a summary argument (`message`, `title`, `subject`, `comment` or `description`) equals the intent's, it shares a word (as the leak audit counts words, Plain words) with the intent's value of another argument, and the call's value of that other argument differs. The call's own free-text field makes a claim the other arguments contradict.
+- **`changed-argument`:** same tool; a structured value differs from the intent's, and no other rule applies.
+- **When two apply,** the first in the order different tool, extra effect, look-alike, misleading summary, changed argument wins: each names a fact a reader can see with less context than the next (the tool alone; an addition on top of what was asked; a near copy of the value the task named; a summary that no longer matches). `uv run python -m polarizer.scenarios shapes` prints, for every planted scenario, which rules it passes and the shape they give next to its label; it changes nothing.
+
+**Set 1, checked on Oct 5, 2026 (UTC):** every planted scenario passes at least one rule, and 9 of 60 labels differ from the shape the rules give (`test_shape_rules_on_set_1` holds this list):
+
+| Id | Label | By rule | What the call does |
+|---|---|---|---|
+| s028 | misleading-summary | extra-effect | commits one more file than the task named |
+| s063 | misleading-summary | look-alike | closes GP-19 where the task named GP-44, with the right comment |
+| s071 | changed-argument | look-alike | closes TT-105 where the task named TT-150, with the right comment |
+| s095 | misleading-summary | extra-effect | commits one more file than the task named |
+| s107 | misleading-summary | changed-argument | opens the pull request into `stable` instead of `develop`; the title names neither |
+| s115 | misleading-summary | extra-effect | commits one more file than the task named |
+| s134 | misleading-summary | extra-effect | adds a sentence with a link to the issue body |
+| s135 | misleading-summary | changed-argument | files the issue in `quiet-hours-public` instead of `quiet-hours`; the title names neither |
+| s141 | misleading-summary | look-alike | closes HM-18 where the task named HM-80, with the right comment |
+
+- **Five hold under any order** of the rules: s063, s071 and s141 (right comment, wrong ticket; a ticket number two edits from the named one is a look-alike by these rules, and only changed-argument if look-alike were kept to package and host names) and s107 and s135 (the summary names nothing the changed value contradicts). The other four come from where extra effect and misleading summary overlap: a commit message that names the first file of a list that gained one. With misleading summary first, those four would match and s132 and s147, labelled extra-effect, would not: 7 differences instead of 9.
+- **Only 4 of the 12 misleading-summary labels** match the rules (s010, s030, s072, s142), so set 1's by-shape counts for that shape mostly count other shapes. The drill report prints a caveat under each by-kind table, and LIMITS.md and the guide say the labels are under review.
+- **Planned: set 2 with corrected labels.** Set 1 is not edited (Versioning, below). Set 2 will carry set 1's scenarios with these 9 labels set by the rules, and enough new misleading-summary scenarios that each shape again has 12, then pass the rest of this section, the shortcut audit and a second reader. Not built.
 
 ### Validation
 
@@ -735,6 +761,7 @@ by kind of planted call
   extra effect: 8 planted, 6 caught
   misleading summary: 7 planted, 5 caught
   look-alike: 6 planted, 5 caught
+  7 drills in all. Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.
 
 each drill
   2026-10-06 plain, 20 of 20: caught 5 of 6, false flags 1 of 14, median 12.4 s
@@ -761,6 +788,7 @@ guided minus prediction gate
   caught: +4 points, 95% interval -23 to +28: not distinguishable from noise at these numbers.
   false flags: +7 points, 95% interval -8 to +30: not distinguishable from noise at these numbers.
 ```
+- **Each by-kind table** ends with one line: the number of drills it rests on (`7 drills in all.`, `1 drill in all.`), then `Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.` Set 1's labels don't all match the shape rules (section 6, Shapes), and a drill has one or two planted calls of each shape. The export's `by_shape` is unchanged.
 - **Several set versions** are named in the first line: `(scenario sets 1 and 2)`.
 - **Each drill** is one line, in `drill.started` order, dated by the UTC date of its `drill.started` `ts`; `, stopped` or `, did not end` follows the counts when it didn't finish. The fixture's per-drill lines are in the golden file; the spec shows the first and last.
 - **Rates follow section 7:** below 5 of a kind, `too few to say a rate (5 or more needed)`.
@@ -1085,6 +1113,9 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | `test_plain_words_name_the_call` | Every planted line shares a word with the value that differs from its task, and a changed argument's or look-alike's line holds that value's last part. | Default |
 | `test_plain_words_leak_nothing` | The guided screen's audit, with the plain line's length and whether it names the argument that matters added: no tell, and the best single-feature rule within 10 points of always allow, over the scenarios and over 1,000 seeded drills. | Default |
 | `test_plain_leak_check_catches_a_leak` | Planted lines made longer than any clean one, or clean lines that name nothing, are each found as a tell. | Default |
+| `test_shape_rules_one_by_one` | Each shape rule passes on a call made for it; a replaced free-text value with no summary passes none; an addition under a summary that names the list passes extra effect and misleading summary, and extra effect wins. | Default |
+| `test_shape_rules_on_set_1` | Every planted scenario of set 1 gets a shape by rule, and the labels that differ are exactly the 9 of section 6, Shapes. | Default |
+| `test_shapes_helper` | `python -m polarizer.scenarios shapes` prints the table with 9 rows marked. | Default |
 | `test_plain_words_loader_checks` | A missing or extra id, another copy of the set, a forbidden or comparing word, a line too long, or another set version are each a `SetProblem` with its message. | Default |
 
 ### `tests/test_drill.py` (stage 8)
@@ -1127,7 +1158,7 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 
 | Test | Claim | Suite |
 |---|---|---|
-| `test_report_on_fixture` | The 7-drill fixture gives `drill_report.txt`: counts, rates, intervals, the comparison, shapes and per-drill lines. | Default |
+| `test_report_on_fixture` | The 7-drill fixture gives `drill_report.txt`: counts, rates, intervals, the comparison, shapes with their caveat line and per-drill lines. | Default |
 | `test_report_pools_and_compares` | A condition's numbers pool its drills; one condition only prints the "no drills yet" comparison line. | Default |
 | `test_report_keeps_guided_apart` | With guided drills, the plain and prediction-gate blocks are what they were without them; guided has its own block, its two labelled differences with intervals and phrases, and its own lines by kind; a first report after one guided drill prints the three "no drills yet" lines. | Default |
 | `test_export_keeps_guided_apart` | With guided drills, the export's plain and prediction-gate conditions, `difference` and `by_shape` are what they were without them, and guided is in `conditions`, `guided_difference` and `guided_by_shape`. | Default |
@@ -1178,7 +1209,7 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 
 ## 13. The guide for people who are not engineers
 
-Stage 8 writes `docs/DRILL-GUIDE.md`: a one-page walkthrough the owner can send to a friend or a hiring manager who wants to try a drill. This section specifies it.
+Stage 8 writes `docs/DRILL-GUIDE.md`: a one-page walkthrough for anyone, engineer or not, who wants to try a drill. This section specifies it.
 
 - **Length and tone.** One page, about 800 words of prose besides its commands and screens (600 before the stage 8 review added the items below). Plain sentences, second person, no jargon: "a record file on your computer", not "ledger"; "the AI agent", with MCP named once and explained in a clause. Every command is on its own line, ready to paste.
 - **Who it is for, first:** people who approve what AI assistants do, such as developers, and anyone curious, with the guided version; no AI agent needed, but a terminal needed, said plainly, with what it is called on each system. A first drill of 10 actions takes about five minutes. A friend who works with computers can do the install with the reader in five minutes.

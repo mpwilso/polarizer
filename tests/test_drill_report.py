@@ -36,6 +36,7 @@ by kind of planted call
   extra effect: 8 planted, 6 caught
   misleading summary: 7 planted, 5 caught
   look-alike: 6 planted, 5 caught
+  7 drills in all. Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.
 
 each drill
   2026-10-06 plain, 20 of 20: caught 5 of 6, false flags 1 of 14, median 12.4 s
@@ -132,12 +133,13 @@ def test_report_keeps_guided_apart(tmp_path, capsys):
                                  "distinguishable from noise at these numbers."))  # fmt: skip
     kinds = plain_only.index("by kind of planted call")
     at = lines.index("by kind of planted call, plain and prediction gate")
-    assert lines[at + 1 : at + 6] == plain_only[kinds + 1 : kinds + 6]
+    assert lines[at + 1 : at + 7] == plain_only[kinds + 1 : kinds + 7]
+    assert lines[at + 6] == f"  7 drills in all. {drill.SHAPE_CAVEAT}"
     at = lines.index("by kind of planted call, guided")
-    assert lines[at + 1 : at + 6] == [
+    assert lines[at + 1 : at + 7] == [
         "  changed argument: 3 planted, 3 caught", "  different tool: 3 planted, 3 caught",
         "  extra effect: 3 planted, 2 caught", "  misleading summary: 2 planted, 2 caught",
-        "  look-alike: 2 planted, 2 caught",
+        "  look-alike: 2 planted, 2 caught", f"  2 drills in all. {drill.SHAPE_CAVEAT}",
     ]  # fmt: skip
     assert "  2026-10-05 guided, 10 of 10: caught 5 of 5, false flags 1 of 5, median 7.0 s" in lines
     assert lines[0] == "drills: 7 finished, 2 stopped early; 146 calls answered (scenario set 1)"
@@ -149,6 +151,7 @@ def test_report_keeps_guided_apart(tmp_path, capsys):
     assert "guided minus plain: no plain drills yet\n" in out
     assert "guided minus prediction gate: no prediction-gate drills yet\n" in out
     assert "\nby kind of planted call, guided\n" in out
+    assert f"\n  1 drill in all. {drill.SHAPE_CAVEAT}\n" in out
     assert "plain and prediction gate" not in out and "\nplain:" not in out
 
 

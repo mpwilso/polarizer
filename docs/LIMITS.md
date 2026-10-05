@@ -58,6 +58,7 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - The plain-words lines were written by hand from each call alone, and checked for forbidden words, length, and two features in the audit (their length, and whether they name the argument that matters). A line can still help with a call in ways those checks don't measure, such as how hard it is to read; the same lines are shown every time a scenario comes back.
 - The people who run drills are the people who care about oversight; their numbers say nothing about anyone else's.
 - Drill calls are invented, short and self-contained, and come with the task written above them, which real holds don't have.
+- The labels for kinds of planted call (shapes) in scenario set 1 are under review. Checked against a mechanical rule for each shape, 9 of the 60 planted calls carry a label the rules don't give, 8 of them labelled misleading summary (docs/MEASURE-SPEC.md, section 6, Shapes). The report's counts by kind therefore partly count other kinds, and each drill has only one or two calls of each kind. A set 2 with corrected labels is planned, not built.
 - The scenario set is finite (150 calls). After many drills a person may recognize one; the report counts repeats.
 - The answers are in the installed package. A person who reads the scenario file, or draws the plan from the seed in their own ledger, can score 100%.
 - Real holds time out after 300 s and drill calls never do; answers that took longer are marked, and results are shown with and without them.

@@ -5,12 +5,15 @@ scenario):
     python -m polarizer.scenarios show <id> --answer  the screen, then the answer and its why
     python -m polarizer.scenarios sheet --out <path>  a review sheet of every scenario, in markdown
     python -m polarizer.scenarios audit               the shortcut audit and the planted count
+    python -m polarizer.scenarios shapes              each planted scenario's shape by rule
 
 `show` is for a reviewer to answer one scenario before reading its answer. `sheet` writes every
 scenario (id, answer, shape, task, the block a drill shows with the line in plain words a
 guided drill adds, and the reveal), then a summary of the set, a list of things for the reviewer
 to look at, the shortcut audits of the call screen and the guided screen, and the planted
 count's distribution (polarizer.scenarios.audit). `audit` prints those last three alone.
+`shapes` prints, for every planted scenario, which shape rules it passes and the label they give
+next to the one the set has (polarizer.scenarios.shapes); it changes nothing.
 """
 
 import difflib
@@ -19,7 +22,7 @@ from collections import Counter
 from pathlib import Path
 
 from polarizer import drill, scenarios
-from polarizer.scenarios import audit
+from polarizer.scenarios import audit, shapes
 
 TS = "2026-10-06T18:02:11.425Z"
 NEAR = 0.85  # task lines at least this similar (difflib's ratio) are listed as near-duplicates
@@ -224,6 +227,9 @@ def main(argv: list[str]) -> int:
         the_set = scenarios.newest()
         report = audit.report(the_set) + audit.report(the_set, guided=True)
         print("\n".join(report + audit.count_lines(the_set)[:-1]))
+        return 0
+    if argv == ["shapes"]:
+        print("\n".join(shapes.report(scenarios.newest())))
         return 0
     print(USAGE, file=sys.stderr)
     return 2

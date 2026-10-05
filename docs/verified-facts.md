@@ -776,6 +776,22 @@ Run in this session on WSL2 (Linux), Python 3.12.3, uv 0.12.19, with the repo's 
 - **`uv tool install` has no dry run:** in uv 0.12.19 its help lists neither `--dry-run` nor `--no-deps`. `uv pip install --dry-run --target <dir> <wheel>` with `UV_OFFLINE=1` resolves the same wheel against the cache and installs nothing (it leaves only a `.lock` file in the target): it failed on the empty cache with the same `mcp was not found in the cache` line and hint, and on the owner's cache resolved 30 packages and exited 0. Given a wheel filename with no version it fails with `The wheel filename "missing.whl" is invalid: Must have a version`, without the hint.
 - **The fixed test:** on the empty caches with `UV_OFFLINE=1`, the install test is skipped with uv's line naming mcp and the rest of the file passes; on the owner's cache it runs the install and uninstall and passes. `test_offline_skips_only_for_a_cache_miss` passes on an empty cache: a hand-written wheel with no dependencies resolves, one requiring a package no cache holds is a cache miss naming it, and an invalid wheel is a failure, not a skip.
 
+## Related projects (from the owner's research, October 2026, not re-checked in this repo)
+
+The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. The README's Related projects section is written from this list.
+
+- **mcpclerk** (https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command. Its three ideas credited in Polarizer are listed above (mcpclerk: ideas credited, nothing else used).
+- **mcpproxy-go** (https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
+- **Trail of Bits' mcp-context-protector** (https://github.com/trailofbits/mcp-context-protector): pins tool definitions on first use and scans responses.
+- **Invariant's mcp-scan** (https://invariantlabs.ai/blog/introducing-mcp-scan): pins tools by hash and detects shadowing at scan time.
+- **Docker's MCP Gateway** (https://docs.docker.com/ai/sandboxes/governance/reference/mcp-policy/): Cedar policies that can read call arguments and annotations, with approval asked through MCP elicitation.
+- **vex-mcp** (https://pypi.org/project/vex-mcp/): a stdio proxy that inspects tool descriptions, pins tool definitions, enforces a default-deny policy and writes a tamper-evident audit log.
+- **warden-mcp** (https://pypi.org/project/warden-mcp/): pins tool definitions on first use and quarantines a changed tool until it is approved again.
+- **MCPDome** (https://docs.rs/mcpdome): schema pinning with canonical SHA-256 hashes and a hash-chained ledger component.
+- **hoop's mcpproxy** (https://pkg.go.dev/github.com/hoophq/mcpproxy): holds flagged tool calls until a human approves them over a REST API.
+- **TrueFoundry's MCP gateway** (https://www.truefoundry.com/blog/mcp-tool-approvals-explained): holds a matched tool call and creates an approval request.
+- **Tools that test AI agents with planted inputs,** found in the owner's search in October 2026: Agent Canary (https://github.com/Auro-rium/canary) and AgentCanary (https://github.com/antgroup/Agent3Sigma-Canary). That search found none that tests the person approving; a search is not proof that none exists.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
@@ -802,6 +818,6 @@ These are assumed or open. Nothing here has been observed.
 - **A 2026-07-28 upstream under Claude Code:** round 3 ran a 2026-07-28 upstream through the proxy with SDK clients only. The Claude Code side doesn't depend on the upstream's version, because the proxy ends one connection and starts another, but the combination wasn't run.
 - **Drills on a native Windows console:** reading answers with `readline` in PowerShell or the Command Prompt, and Ctrl+C there, have not been run; on Windows CI only the in-process drill tests run.
 - **Drills on macOS:** the pseudo-terminal drill tests are written for macOS too but have only run on Linux.
-- **Installing with `uv tool install`** with the network, into the user's own tool directory, or on Windows or macOS: only the offline install into temporary directories on Linux has run (Stage 8 review). The guide's two lines that fetch from GitHub (`uv tool install git+...` and `uvx --from git+...`) have never run; the repository is private.
+- **Installing with `uv tool install`** with the network, into the user's own tool directory, or on Windows or macOS: only the offline install into temporary directories on Linux has run (Stage 8 review). The guide's two lines that fetch from GitHub (`uv tool install git+...` and `uvx --from git+...`) have never run; the repository was private when this was written.
 - **The invented package names** in the scenario set were not checked against any package registry.
 - **Windows and macOS behavior of the stage 1 code:** the lock, `os.replace` retry, binary-mode file access and the read-only verify test are written for both, but have only run on Linux. The Windows test that holds `ledger.head` open runs only on the Windows CI runner.

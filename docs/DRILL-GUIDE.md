@@ -101,6 +101,8 @@ It holds counts, rates, dates (the day only) and version numbers, such as `"answ
 
 Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. A drill of 10 has 5 planted and 5 clean calls, just enough for a rate, so its range is wide: 4 of 5 caught reads "caught 80%, 95% interval 37% to 97%". Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate. Always answering "allow" would be right about half the time or more, so look at the two rates, not at the share of right answers.
 
+The report also counts catches by kind of planted call, such as "extra effect" or "look-alike". Those kinds are under review: a check found some actions labelled with one kind that do what another kind describes. Each drill also has only one or two actions of each kind, so read those counts across many drills, not from one.
+
 A drill measures your attention when you know you are being tested: your best, not an ordinary afternoon. It also has far more planted calls than real work, so drill rates likely run higher than real ones. A guided drill shows how well you do with help, so the report shows it on its own lines. Trends across drills mean more than any one result.
 
 ## What it is not

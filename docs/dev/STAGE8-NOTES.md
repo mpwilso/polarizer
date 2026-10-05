@@ -209,7 +209,7 @@ The only change in 98ade25 to `src/polarizer/writer.py` is two lines in `_check_
 - **Guess:** clean scenarios have no shape, so "planted versus clean per shape" counts, for each shape, the clean scenarios held on the tools that shape's planted scenarios use. The sheet says so above its table.
 - **Thresholds,** written in the sheet: task lines the same or at least 0.85 alike by `difflib.SequenceMatcher.ratio()` on lowercased text; reveals under 8 words; shapes under 8; tools held in fewer than 3 scenarios.
 - **Set 1 found nothing.** Nearest: s026 and s147 at 0.84; seven reveals of exactly 8 words (s036, s060, s083, s110, s119, s122, s144).
-- **The Windows path:** this distro is registered as `parallax` (`$WSL_DISTRO_NAME`), so the sheet is at `\\wsl$\parallax\` followed by the repo's path with backslashes. `wsl.exe` is not on the PATH here, and `/etc/os-release` says Ubuntu 24.04, the release, not the registered name. In PowerShell, `wsl -l -q` lists the registered names.
+- **The Windows path:** this distro's registered name is in `$WSL_DISTRO_NAME`, so the sheet is at `\\wsl$\<distro name>\` followed by the repo's path with backslashes. `wsl.exe` is not on the PATH here, and `/etc/os-release` says Ubuntu 24.04, the release, not the registered name. In PowerShell, `wsl -l -q` lists the registered names.
 
 ### 5. Runs
 
@@ -352,3 +352,92 @@ docs/DRILL-GUIDE.md now says first who drills are for (people who approve what A
 - **`scripts/dev/guard.sh check`** against `snapshot-20261005T195857Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations); its size and mtime changed (92461 to 92297 bytes, 20:33:21Z), which is Claude Code's own bookkeeping and informational; exit 0.
 - **`~/.local/share/polarizer-drills` exists,** created at 19:17:27 UTC and last written at 19:52:36 UTC, before this session's snapshot (19:58:57 UTC): the owner's own first drill. This session did not open it or write to it; every drill here ran in a temporary directory. That ledger has answered calls, so the owner's next `polarizer drill` there is not a first drill and draws plain or prediction gate; `--condition guided` gives a guided one.
 - **Not run:** anything on Windows or macOS; CI; a person's guided drill. The plain lines have been read by their author only; section 6's second-reader rule applies to them as to scenarios, and the review sheet now shows each line under its block for that.
+
+## Release round (Oct 5, 2026, UTC)
+
+Everything needed to make the repository public: a shape audit, a test for `mask_paths`, a CI install check, the README rewritten, the changelog, a public-readiness review, an install check and the runs. Guard snapshot `snapshot-20261005T222311Z.txt` taken first. Written as the work goes. CLAUDE.md rule 11 allows one commit per stage, so the round is one commit, which the brief allowed as an option.
+
+### 1. Shape audit
+
+**The rules.** MEASURE-SPEC.md, section 6, Shapes, now defines each shape by a mechanical test of a planted scenario's `intent` against its `call`, and an order for when two apply (different tool, extra effect, look-alike, misleading summary, changed argument). `src/polarizer/scenarios/shapes.py` holds them, read-only; `uv run python -m polarizer.scenarios shapes` prints the table. Set 1 and its pin are unchanged, and no set 2 was made.
+
+**Set 1:** every planted scenario passes at least one rule; 9 of 60 labels differ from the shape the rules give: s028, s095, s115 and s134 (labelled misleading-summary, extra-effect by rule), s063 and s141 (misleading-summary, look-alike), s071 (changed-argument, look-alike), s107 and s135 (misleading-summary, changed-argument). Five of them differ under any order of the rules (s063, s071, s107, s135, s141); the other four come from the overlap of extra effect and misleading summary, and with misleading summary first they would match while s132 and s147 would not (7 differences). Only 4 of the 12 misleading-summary labels match. `test_shape_rules_on_set_1` holds the list.
+
+**The three named in the brief** (s063, s141, s071: right comment, wrong ticket) all come out look-alike, because each ticket number is two edits from the named one (GP-44 and GP-19, HM-80 and HM-18, TT-150 and TT-105) and the rules use the look-alike validation's distance of 3. Had look-alike been kept to package and host names, all three would be changed-argument. Either way they share one shape, which their labels don't.
+
+**The caveat,** in four places: each by-kind table of `drill report` ends with `  <n> drills in all. Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.` (`drill.SHAPE_CAVEAT`; the export is unchanged); docs/DRILL-GUIDE.md, How to read the numbers; docs/LIMITS.md, Drills; MEASURE-SPEC.md, section 6 (with "Planned: set 2 with corrected labels" and the list) and section 9's report example. Golden files changed by that one line each, regenerated with `POLARIZER_UPDATE_GOLDEN=1` and each diff read: `drill_report.txt`, `drill_report_one_condition.txt` (7 and 3 drills) and `drill_report_guided.txt` (7 and 2).
+
+**The repeat in the owner's report.** A copy of `~/.local/share/polarizer-drills/ledger.jsonl` and `ledger.head` (last written before this session's snapshot) was read in the scratch directory; the original was only read by `cp`, never written. `polarizer verify` on the copy: `intact: 55 entries`. The ledger holds four drills, not two:
+
+| seq | condition | calls | shown | ended | excluded at start |
+|---|---|---|---|---|---|
+| 1 | prediction gate | 20 | s118 | interrupted, no answer | none |
+| 5 | prediction gate | 20 | s089 | interrupted, no answer | s118 |
+| 8 | prediction gate | 20 | s035, s130, s104 answered; s012 shown | stopped | s089, s118 |
+| 23 | guided (flag) | 10 | 10 answered | finished | s012, s035, s089, s104, s130 |
+
+The report leaves out drills with no answer (section 9), so it shows a stopped drill and a finished one. The exclusion counts the last two drills by `drill.started` "whatever their ending" (section 6, Sampling), which for the fourth drill were the second (s089) and the third. s118, shown at call 1 of the first drill, three drills back, was no longer excluded and was drawn again at call 6 (`seen_before` 1). The code does what the spec says; nothing was changed. The two rules disagree about which drills count: a drill stopped at its first screen uses up one of the two excluded drills without being reported. Excluding the calls of the last two drills that have an answer, or of every drill since the last two answered ones, would make the report and the exclusion agree; that is a decision for the owner, not a bug fix.
+
+### 2. A test for `mask_paths`
+
+`tests/conftest.py`'s `mask_paths` takes `sep`, defaulting to `os.sep`; every existing caller leaves it out, so they are unchanged. `tests/test_mask_paths.py` was written first and failed three of its four tests before the change (with no `sep` argument, `sep="/"` was taken as a placeholder named `sep`): Windows-style input with `sep="\\"`, POSIX-style input with `sep="/"`, a backslash escape elsewhere in the line and one after the path left alone, and the longest path replaced first with the default separator. All four pass on Linux; they need no Windows to run the Windows case.
+
+### 3. CI: the install check
+
+Two steps at the end of each of the five jobs in `.github/workflows/ci.yml`, after the existing ones, whose steps and pins are unchanged: `uv build --out-dir dist`, `uv tool install dist/polarizer-*-py3-none-any.whl` (the job's own tool directory; dependencies come from the package index, so this step uses the network), `uv tool dir --bin >> "$GITHUB_PATH"`; then, in the next step so the new path applies on every OS, `command -v polarizer`, `polarizer --help` and `polarizer drill --help`. GitHub's bash runs with `-e`, so any nonzero exit fails the job.
+
+**What it proves that `tests/test_drill_guide.py` does not:** `test_guide_install_lines_run_offline` installs the wheel only when uv's cache already holds every package, and skips on a fresh runner, which is every CI job (CI run 37361705150). So until now no CI job had built the wheel and installed it as a reader would. The new step shows, on Linux, Windows and macOS, that the wheel builds, that its declared dependencies resolve from the index without `uv.lock`, that `uv tool install` puts a working `polarizer` entry point on the path (`polarizer.exe` on Windows), and that the installed package holds what `--help` and `drill --help` load. It does not run a drill or a server from the installed copy.
+
+**Not run:** CI. Nothing in this session can run it; the step has been checked only by reading it and by item 7's local install, which used a virtual environment and uv's cache, not `uv tool install` from the index.
+
+### 4. README
+
+Rewritten in place, in the same family layout: the logo lockup, a centered hook (`Human in the loop only works if the human is still looking.`), the badge, three sentences on what Polarizer is, a status paragraph (v0.1 preview; built and not built; drills are practice with invented scenarios, and no results from people exist yet beyond the author's own tool checks), then the sections. New: "Try a drill" after "Why it exists", and "Related projects" after "How it works". The "How it works" image is replaced by a text diagram 79 columns wide; `docs/img/how-it-works-light.svg` and `-dark.svg` stay, unreferenced. Proof gains a drills bullet; its CI bullet now says to see the badge and cites 9270c97, the last commit recorded as passing on all five jobs (later runs on record failed: CI run 37259695458 at 03cedbd and 37361705150 at b495bf3, in this file and docs/verified-facts.md, and 37370711387 on Windows, named in commit 0f32e11's message). Known limits gains two one-liners; What's next is stats, the card, live planted calls, taint. 257 lines (212 before).
+
+**Related projects** were recorded first, in docs/verified-facts.md, "Related projects (from the owner's research, October 2026, not re-checked in this repo)", from the brief's facts, with each link; nothing was fetched. The README section is written from that record. `test_related_projects_are_recorded` checks every link in the section is in it.
+
+**`tests/test_readme.py`:** the layout test has the new hook, status line, section list, a 260-line limit, the logo, and no `how-it-works` reference with the SVGs still present; every `polarizer` command in any sh block or code span parses (the README's first draft named `polarizer stats`, which is not built, and this test caught it; the line now names the statistics without a command); the "Try a drill" commands run, the drill on a pseudo-terminal (POSIX) and the report without a terminal; every absolute link is a well-formed https URL, checked with `urllib.parse`, never fetched.
+
+### 5. Changelog and the rest
+
+CHANGELOG.md's 0.1.0 entry now names drills as the first slice of M5 and M6 and gains two sections: drills (the command, the three conditions with guided, the drill ledger, the report and export, set 1, the shortcut audit and the shape check) and tests on Windows and macOS (the golden-file paths, pseudo-terminal reads and bash 3.2, the guide's install test, the CI install check). SECURITY.md: read, nothing now untrue, unchanged. docs/dev/README.md already named STAGE8-NOTES.md; its line now also names the shortcut audit, the guided condition and this round. docs/EVIDENCE.md gains a drills entry, since the README's proof points to it for every claim.
+
+### 6. Public-readiness review
+
+**Scans,** case-insensitive for the words, as regular expressions for the token shapes (`ghp_` and 20 more, `github_pat_` and 20 more, `sk-` and 20 more, `AKIA` and 16, `BEGIN ... PRIVATE KEY`):
+- the working tree: 0 for each of the brief's eight words (the owner's home path, the Windows users path, the Windows user name, a mail domain and four other names), and 0 for every token shape;
+- every one of the 56 commits (`git grep` over `git rev-list --all`): 0 for all of those words and token shapes, with two known exceptions. The home-path form of the owner's user name, inside a Claude Code cache path, is on one line of docs/verified-facts.md in 32 commits, added at e642602 and removed at b9a4373; it is not in the working tree. `BEGIN OPENSSH PRIVATE KEY` is one line of tests/test_scenarios.py in 6 commits: a test that the credential check catches that header, not a key. The literal `BEGIN PRIVATE KEY`: 0 in every commit.
+
+**Reading every tracked file** (greps over the tree, and a read-only review agent over docs/, manual/, scripts/ comments and the scenario files). Fixed, wording and placeholders only:
+- this file: the scan's words were written out by name in a first draft of this section and are now described, as earlier rounds did; the WSL distro's registered name is now a placeholder; the owner's drill ledger is described without its size and hash;
+- docs/MEASURE-SPEC.md, section 3's first line and section 13's: they named executives, hiring managers and a friend as readers, now "people who read this repository" and "anyone, engineer or not";
+- docs/PROXY-SPEC.md, Where the ledger lives: the dev guard's list of the author's other projects' directories, a notes folder among them, is now "listed in the script", and the guard is described as a script for the author's own machine;
+- manual/polarizer.manual.toml: a comment says its forbidden paths are the author's other repositories on the machine the checks ran on;
+- docs/verified-facts.md, Unverified: "the repository is private" is now "was private when this was written".
+
+**Kept, and reported:**
+- **By design, as before:** CLAUDE.md and scripts/dev/guard.sh name the Parallax, Loupe and ISR repositories, Parallax's directories and a notes folder; they are the build's own guard rails. The manual check's config, docs/dev/MANUAL-CHECK.md and docs/dev/m0-plan.md list the same four repository paths (`tests/test_config.py` checks the manual config refuses them).
+- **Explained where they appear:** Parallax in LEDGER-SPEC.md (the v0 format), PROXY-SPEC.md, HOLD-SPEC.md, MEASURE-SPEC.md and the code (its two always-forbidden directories); the README's family line links the three projects.
+- **For the owner to decide:** docs/milestones.md's stretch row "Parallax and ISR adoption" is not explained to a stranger; "the owner" and "the brief" run through the specs (about 30 uses in MEASURE-SPEC.md, 17 in HOLD-SPEC.md, 12 in PIN-SPEC.md), defined once in verified-facts.md; docs/DRILL-GUIDE.md and MEASURE-SPEC.md, question 1, speak of sending a package file before the repository is public, which goes stale once it is; docs/dev/m0-plan.md and CLAUDE.md name docs/PLAN.md, which is not in the repository; docs/dev/PUSHING.md is the first-push checklist, with "Visibility: Private"; the build log records Claude Code API costs (cents per headless run), `~/.claude.json` sizes and npx cache ids; this file's step 1 mentions the computer shutting down; the README's and QUICKSTART-DRAFT.md's "independently of any employer system" is kept on purpose.
+- **Nothing found:** other e-mail addresses (pyproject.toml has the noreply address), phone numbers, IP addresses, private hosts, real secrets. `manual/mcp.json` holds a real home path but is gitignored and untracked.
+
+### 7. Install check
+
+In the scratch directory, with `UV_OFFLINE=1`, so everything came from uv's cache and nothing was fetched: `uv build` wrote `polarizer-0.1.0.tar.gz` and `polarizer-0.1.0-py3-none-any.whl`; `uv venv --python 3.12` made a fresh virtual environment there, and `uv pip install` put the wheel in it (no global or tool install). With that environment's `polarizer`:
+- `polarizer --help` and `polarizer drill --help`: exit 0, with the ten commands and the drill's flags as in item 4 of the usability round;
+- `polarizer verify --ledger-dir <dir>` on a copy of `conformance/valid/session.jsonl` and `.head`: `intact: 13 entries, 1 sessions, 3 calls`, exit 0;
+- one guided drill of 10 calls, `--condition guided` into a temporary ledger with a temporary home, driven on a pseudo-terminal by a script with a fixed rule (deny when the call's screen shows `.invalid`, `/.git`, `.ssh` or `.env`, else allow): exit 0, `Drill finished: 10 of 10 calls answered (guided).`, caught 2 of 5 (40%, 95% interval 11% to 77%), false flags 0 of 5 (0% to 44%); the ledger verified `intact: 33 entries`;
+- `polarizer drill report`: exit 0, the guided block, the three "no drills yet" comparison lines, the by-kind table with `1 drill in all.` and the caveat, and one drill line;
+- `polarizer drill report --export <path>`: exit 0, schema version 2, `guided_by_shape` with one planted call of each shape.
+
+**Not removed:** the scratch directories (`install-check`, `drillcopy`) are outside this repository, and CLAUDE.md rule 10 allows deletes only inside it, so they were left for the owner, although the brief asked for their removal.
+
+### 8. Runs
+
+- **`scripts/test.sh`** on the finished tree: ruff check and format clean, `check_docs: 28 files, 0 findings`, `1281 passed, 13 skipped in 281.32s (0:04:41)`, exit 0, 285 s wall (1270 before this round, plus the 4 `mask_paths` tests, the 3 shape tests and 4 README tests). A run before the review's wording fixes gave the same counts in 281.83 s.
+- **The new and changed test files** (`tests/test_mask_paths.py`, `test_readme.py`, `test_scenarios.py`, `test_drill_report.py`, `test_drill.py`, `test_drill_guide.py`, `test_config.py`; 497 tests), five times in a row: 497 passed each time, in 30.64 s to 31.57 s.
+- **Once under load,** with two busy-loop Python processes (`python3 -c 'while True: pass'`, PIDs 209415 and 209416, each at 101% CPU before and after), started before and stopped by their PIDs after: 497 passed in 32.21 s.
+- **Time bounds:** the new tests don't wait, apart from `test_try_a_drill_runs`, which answers each prompt as it appears (well under a second each) within 300 s for the whole drill.
+- **`scripts/dev/guard.sh check`** against `snapshot-20261005T222311Z.txt`, before the commit: exit 1. No changes in any guarded repository (the ISR repository has no commit after 7b1df40), `~/.config/parallax` and `~/.claude/settings.json` unchanged, the MCP config hashes in `~/.claude.json` unchanged (6 locations); its size and mtime changed (94,699 to 92,274 bytes), Claude Code's own bookkeeping. Two tool directories changed: `~/.local/share/parallax` (87,318 files to 86,884, newest mtime 22:28:50 UTC) and `~/isr-notes` (in `real-run-3`, files written 22:31 to 22:43 UTC, among them an `isr-run` output folder). This session ran no Parallax, ISR or Loupe command and wrote nothing there; the changes match the owner's own concurrent work, which the brief said to expect.
+- **`~/.local/share/polarizer-drills`** was only read, by `cp`, for item 1; every drill in this round ran in a temporary directory.
+- **Not run:** CI; anything on Windows or macOS; a drill by a person.

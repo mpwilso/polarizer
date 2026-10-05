@@ -10,9 +10,13 @@ pseudo-terminal as stdin, as in a person's terminal; Windows has none, so there 
 --allow-no-terminal.
 
 Every `polarizer ...` command shown anywhere in README.md must also parse with the real
-argument parser, and every relative link must name a file and heading that exist. The README
-keeps its layout and length; every limit and every evidence claim the v0.1 README listed is in
-docs/LIMITS.md or docs/EVIDENCE.md, where the detail moved.
+argument parser. Outside Setup, the "Try a drill" commands run too: the drill on a
+pseudo-terminal (POSIX only, since it needs a terminal) and the report without one. Every
+relative link must name a file and heading that exist, and every absolute link must be a
+well-formed https URL (checked, never fetched). The README keeps its layout and length; every
+limit and every evidence claim the v0.1 README listed is in docs/LIMITS.md or
+docs/EVIDENCE.md, where the detail moved, and every related project it names is in
+docs/verified-facts.md, with the same link.
 """
 
 import json
@@ -24,13 +28,14 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from conftest import ROOT
 from helpers import rig
 from helpers.raw import RawClient
 
-from polarizer import cli
+from polarizer import cli, drill
 
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 SKIPPED = {
@@ -54,14 +59,14 @@ def section(title: str) -> str:
 QUICKSTART = section("Setup")
 
 
-def blocks(language: str) -> list[str]:
-    return re.findall(rf"```{language}\n(.*?)```", QUICKSTART, re.S)
+def blocks(language: str, text: str = QUICKSTART) -> list[str]:
+    return re.findall(rf"```{language}\n(.*?)```", text, re.S)
 
 
-def commands() -> list[str]:
+def commands(text: str = QUICKSTART) -> list[str]:
     return [
         line.strip()
-        for block in blocks("sh")
+        for block in blocks("sh", text)
         for line in block.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
@@ -316,8 +321,9 @@ def test_every_polarizer_command_parses():
     """Every `polarizer ...` command in README.md, in a code span or a block, names a real
     command with real flags."""
     shown = [s for s in spans(README) if s.startswith("polarizer ")]
-    shown += [c for c in commands() if c.startswith("polarizer ")]
+    shown += [c for c in commands(README) if c.startswith("polarizer ")]
     assert len(shown) > 10
+    assert {c for c in commands(README) if c.startswith("polarizer ")} >= set(DRILL_COMMANDS)
     for text in shown:
         line = text.removesuffix("< /dev/null")
         for placeholder, value in {**PLACEHOLDERS, "<path>": "/p/polarizer.toml"}.items():
@@ -356,15 +362,98 @@ def test_readme_links_resolve():
         assert re.search(r'\balt="[^"]+"', tag), tag
 
 
+def test_absolute_links_are_well_formed():
+    """Every absolute link (Markdown links, src, srcset and href) is an https URL with a host
+    name, no spaces and no trailing punctuation caught from the sentence. Nothing is fetched."""
+    links = re.findall(r"\]\(([a-z]+:[^)]*)\)", README)
+    links += re.findall(r'\b(?:src|srcset|href)="([a-z]+:[^"]*)"', README)
+    assert len(links) > 15
+    for link in links:
+        parts = urlsplit(link)
+        assert parts.scheme == "https", link
+        assert re.fullmatch(r"([a-z0-9-]+\.)+[a-z]{2,}", parts.hostname or ""), link
+        assert not re.search(r"\s", link) and not link.endswith((".", ",", ";", ":")), link
+
+
+# Try a drill ---------------------------------------------------------------------------------
+
+DRILL_COMMANDS = ["polarizer drill --calls 10 --condition guided", "polarizer drill report"]
+
+
+def test_try_a_drill_commands():
+    """The section's sh block is exactly the drill and the report, it links the guide, and it
+    says the drill is offline."""
+    text = section("Try a drill")
+    assert commands(text) == DRILL_COMMANDS
+    assert "(docs/DRILL-GUIDE.md)" in text and "offline" in text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the drill needs a pseudo-terminal")
+def test_try_a_drill_runs(tmp_path):
+    """The drill on a pseudo-terminal in a temporary home, every call allowed, then the report
+    without a terminal, as a person runs them. Each prompt appears within a second here; the
+    whole drill has 300 s."""
+    import pty
+
+    from test_drill_guide import finish, read_some
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
+    controller, terminal = pty.openpty()
+    argv = [sys.executable, "-m", "polarizer", *shlex.split(DRILL_COMMANDS[0])[1:]]
+    proc = subprocess.Popen(argv, stdin=terminal, stdout=terminal, stderr=terminal, env=env,
+                            cwd=tmp_path)  # fmt: skip
+    os.close(terminal)
+    replies = {
+        b"Press Enter to start.": b"\n",
+        b"allow or deny? ": b"a\n",
+        b"Press Enter for the next call.": b"\n",
+        b"Press Enter to see the results.": b"\n",
+    }
+    output, seen = b"", b""
+    deadline = time.monotonic() + 300
+    try:
+        while time.monotonic() < deadline:
+            chunk = read_some(controller, 0.05)
+            if chunk is None:
+                break
+            output += chunk
+            seen += chunk
+            for prompt, reply in replies.items():
+                if seen.endswith(prompt):
+                    os.write(controller, reply)
+                    seen = b""
+                    break
+        else:
+            pytest.fail(f"the drill did not end:\n{output.decode()}")
+        code, rest = finish(controller, proc)
+        output += rest
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        os.close(controller)
+    assert code == 0, output.decode()
+    assert b"Drill finished: 10 of 10 calls answered (guided)." in output
+    assert output.count(drill.PLAIN_PREFIX.encode()) == 10
+    report = python(*shlex.split(DRILL_COMMANDS[1])[1:], env=env)
+    assert report.returncode == 0, report.stderr
+    lines = report.stdout.decode().splitlines()
+    assert lines[0] == "drills: 1 finished, 0 stopped early; 10 calls answered (scenario set 1)"
+    assert "  planted calls: 5. Denied 0: caught 0%, 95% interval 0% to 44%." in lines
+
+
 # The layout, and the detail that moved out of the README -----------------------------------
 
 SECTIONS = [
     "Why it exists",
+    "Try a drill",
     "What a hold looks like",
     "What's different",
     "Compared with Claude Code's permission prompts",
     "Proof",
     "How it works",
+    "Related projects",
     "Known limits",
     "Setup",
     "What's here",
@@ -419,17 +508,33 @@ OLD_EVIDENCE = (
 
 
 def test_readme_layout():
-    """The hook, the status line, the sections in order, a short page, and the links to the
-    detail that moved out of it."""
-    assert README.count("\n") <= 220
-    assert "<b>Agents call the tools. You decide the risky ones.</b>" in README
-    assert (
-        "\nStatus: a portfolio project, built to show how I design, test and judge an AI tool."
-        in README
-    )
+    """The logo, the hook, the status line, the sections in order, a short page, the text
+    diagram in place of the image, and the links to the detail that moved out of it."""
+    assert README.count("\n") <= 260
+    assert 'srcset="docs/brand/lockup-dark.svg"' in README
+    assert "<b>Human in the loop only works if the human is still looking.</b>" in README
+    assert "\nStatus: v0.1, a preview. Built: M0 " in README
     assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
     assert "(docs/LIMITS.md)" in section("Known limits")
     assert "(docs/EVIDENCE.md)" in section("Proof")
+    # The "How it works" image is replaced by a text diagram; the SVG files stay in docs/img/.
+    assert "how-it-works" not in README
+    assert blocks("text", section("How it works"))
+    for name in ("how-it-works-light.svg", "how-it-works-dark.svg"):
+        assert (ROOT / "docs" / "img" / name).exists()
+
+
+def test_related_projects_are_recorded():
+    """Every link in Related projects is in docs/verified-facts.md's record of them, and the
+    section dates what it says."""
+    facts = (ROOT / "docs" / "verified-facts.md").read_text(encoding="utf-8")
+    start = facts.index("\n## Related projects (from the owner's research, October 2026")
+    record = facts[start : facts.index("\n## ", start + 1)]
+    text = section("Related projects")
+    links = re.findall(r"\]\((https://[^)]+)\)", text)
+    assert len(links) == 12
+    assert [link for link in links if f"({link})" not in record] == []
+    assert "as their documentation described them in October 2026" in text
 
 
 def test_limits_and_evidence_moved():

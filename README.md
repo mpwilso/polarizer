@@ -5,21 +5,30 @@
   </picture>
 </p>
 
-<p align="center"><b>Agents call the tools. You decide the risky ones.</b></p>
+<p align="center"><b>Human in the loop only works if the human is still looking.</b></p>
 
 <p align="center"><a href="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml"><img src="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg" alt="CI status"></a></p>
 
-Polarizer is a local gateway between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools). It lets routine calls through, holds the risky ones until a person allows them, and writes every call and decision to a ledger that anyone can check. It runs on your own machine, started by the agent's client, such as Claude Code.
+Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools), pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a ledger anyone can verify. It also includes drills, offline practice sessions in which a person allows or denies invented calls and measures how well they catch the planted mistakes. It runs on your own machine, started by the agent's client, such as Claude Code.
 
-Status: a portfolio project, built to show how I design, test and judge an AI tool. Version 0.1, a preview.
+Status: v0.1, a preview. Built: M0 (the proxy and the ledger), M1a (pins), M2a (classes and holds) and drills (the practice sessions of [docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md), stage 8). Not built: statistics over real holds, live planted calls inside a running gateway, taint (M2b) and an approval card (M3). Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
 
-Jump to [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
+Jump to [a drill](#try-a-drill), [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
 ## Why it exists
 
-An MCP server can change a tool's description after you trusted it. A permission prompt that names only the tool can't tell a write inside your project from a write to `.git/hooks`, where git runs code. And a person who approves prompt after prompt stops reading. Polarizer pins what you approved, holds calls by what they would touch, and records every decision so it can be checked later.
+An MCP server can change a tool's description after you trusted it. A permission prompt that names only the tool can't tell a write inside your project from a write to `.git/hooks`, where git runs code. And a person who approves prompt after prompt stops reading. Polarizer pins what you approved, holds calls by what they would touch, and records every decision so it can be checked later. A hold only helps if the person still reads it. Drills are the first part of measuring that, under practice conditions; measuring it during real work is not built yet.
 
-The next milestones measure whether a person's approvals still catch anything. That measurement does not exist yet.
+## Try a drill
+
+A drill shows you invented agent calls one at a time, under the task the agent was given, and you allow or deny each; some were changed to be wrong on purpose, and after each answer you see whether you were right and why. It runs offline: no agent, no account, no MCP server, nothing sent anywhere. Install Polarizer as in [Setup](#setup)'s first line, then:
+
+```sh
+polarizer drill --calls 10 --condition guided
+polarizer drill report
+```
+
+A guided drill of 10 calls takes about five minutes and adds a line in plain words under each call. The report gives your catch rate and false-flag rate, each with a 95% interval. [docs/DRILL-GUIDE.md](docs/DRILL-GUIDE.md) walks through one, for readers who are not engineers.
 
 ## What a hold looks like
 
@@ -68,22 +77,53 @@ Claude Code's own prompt for an MCP tool comes before the call reaches Polarizer
 
 ## Proof
 
-- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS, all passing at 9270c97, the last commit CI has run; locally, 784 tests passed and 13 skipped at that commit. ([milestones](docs/milestones.md#status), [stage 7 notes](docs/dev/STAGE7-NOTES.md#follow-up-macos-output-bash-32-wait))
+- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS; see the badge for the latest run. The last run recorded as passing on all five is at 9270c97, when 784 tests passed and 13 were skipped locally. ([milestones](docs/milestones.md#status), [stage 7 notes](docs/dev/STAGE7-NOTES.md#follow-up-macos-output-bash-32-wait))
 - **Two verifiers agree** on every conformance fixture and on 5,000 randomly damaged chains per test run. Both were written separately from the same spec by the same builder, so a misreading they share isn't ruled out; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently. ([claims table](docs/dev/m0-plan.md#tests-and-claims), [RFC 8785 record](docs/verified-facts.md#rfc-8785-text-fetched-oct-2-2026))
-- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time, once inside a Claude Code session and once from a plain terminal. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
-- **Approvals reach a running session:** in the interactive M1a check, `/mcp` listed newly approved tools without a reconnect, for a first approval and for a changed definition; the ledger verified intact with 53 entries. ([M1a check](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner))
-- **Every kind of hold ending, interactively:** in the M2a check, a denied write (seq 52 to 54), an allowed retry (55 to 58), a write held 128 s and then allowed (59 to 62), and a destructive move that expired after 30 s without running (68 to 70); 71 entries, intact. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
-- **Claude Code's own timeout reaches the server:** in the headless live check, Claude Code cancelled a 14 s call after 5.012 s, Polarizer's cancel reached the upstream 1 ms later, and the ledger recorded `cancelled`. ([live check](docs/verified-facts.md#live-check-headless-claude-code-21288))
+- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
+- **Approvals reach a running session:** in the interactive M1a check, `/mcp` listed newly approved tools without a reconnect, for a first approval and for a changed definition. ([M1a check](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner))
+- **Every kind of hold ending, interactively:** in the M2a check, a denied write, an allowed retry, a write held 128 s and then allowed, and a destructive move that expired after 30 s without running. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
+- **Claude Code's own timeout reaches the server:** in the headless live check, Claude Code cancelled a 14 s call after 5.012 s, and Polarizer's cancel reached the upstream 1 ms later. ([live check](docs/verified-facts.md#live-check-headless-claude-code-21288))
+- **Drills, built and checked as a tool:** their tests run in all five CI jobs (the pseudo-terminal ones on Linux and macOS only), and a shortcut audit of the scenario set, using only what a call's screen shows before the answer, finds that the best single-feature rule scores 4 points above always answering allow (64.0% against 60.0% over the 150 scenarios, 64.2% against 59.9% over 1,000 seeded drills). No results from people yet. ([measure spec](docs/MEASURE-SPEC.md#validation), [stage 8 notes](docs/dev/STAGE8-NOTES.md#1-the-shortcut-audit))
 
 Not covered: native Windows or macOS with Claude Code, any client but Claude Code, and third-party MCP servers beyond the reference ones. Every claim, in full: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ## How it works
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/how-it-works-dark.svg"><img src="docs/img/how-it-works-light.svg" alt="How Polarizer works: the agent, Claude Code, sends every tool call to polarizer serve. There, pins list only the tool definitions you approved, a rule function looks at the tool's class and the call's resolved paths, and a risky call is held until you allow or deny it or it times out. Allowed calls go on to the MCP servers. Every call, hold and decision goes into a hash-chained ledger. You run pending, approve, holds, allow, deny and verify in a terminal; they read the ledger and write your decisions to it. The agent's own shell and file tools are not routed through Polarizer." width="680"></picture>
+```text
+agent (Claude Code)
+  |  every MCP tool call
+  v
+polarizer serve  . . . . . . . . . . . .>   ledger
+  pins: only the definitions you approved   every call, hold and
+  rule function: the tool's class and the   decision, hash-chained
+        call's resolved paths decide              ^
+  holds: a risky call waits for you               |  read the ledger,
+  |  allowed calls                                |  record decisions
+  v                                               |
+MCP servers                                 you, in a terminal: pending,
+                                            approve, holds, allow, deny, verify
+```
 
-Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent only the definitions you approved, from a stored copy. When a server's definition changes, the tool is hidden, the change is recorded, and Claude Code is told its tool list changed. For each call to an approved tool, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you. A held call ends in one of five ways, each recorded: allow, deny, expiry, the client's cancel, or Polarizer's shutdown.
+The agent's own shell and file tools don't pass through Polarizer. Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent only the definitions you approved, from a stored copy. When a server's definition changes, the tool is hidden, the change is recorded, and Claude Code is told its tool list changed. For each call to an approved tool, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you. A held call ends in one of five ways, each recorded: allow, deny, expiry, the client's cancel, or Polarizer's shutdown.
 
-Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the previous entry's hash, so changing, removing or reordering a line breaks the chain, and `ledger.head` catches lines lost from the end. Call arguments stay out of the chain, in salted side files it commits to. `polarizer verify` reports one status with its own exit code and never writes. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md) and [holds](docs/HOLD-SPEC.md).
+Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the previous entry's hash, so changing, removing or reordering a line breaks the chain, and `ledger.head` catches lines lost from the end. Call arguments stay out of the chain, in salted side files it commits to. `polarizer verify` reports one status with its own exit code and never writes. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md), [holds](docs/HOLD-SPEC.md) and [drills](docs/MEASURE-SPEC.md).
+
+## Related projects
+
+Other MCP gateways and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](docs/verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
+
+- [mcpclerk](https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command.
+- [mcpproxy-go](https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
+- [Trail of Bits' mcp-context-protector](https://github.com/trailofbits/mcp-context-protector): pins tool definitions on first use and scans responses.
+- [Invariant's mcp-scan](https://invariantlabs.ai/blog/introducing-mcp-scan): pins tools by hash and detects shadowing at scan time.
+- [Docker's MCP Gateway](https://docs.docker.com/ai/sandboxes/governance/reference/mcp-policy/): Cedar policies that can read call arguments and annotations, with approval asked through MCP elicitation.
+- [vex-mcp](https://pypi.org/project/vex-mcp/): a stdio proxy that inspects tool descriptions, pins tool definitions, enforces a default-deny policy and writes a tamper-evident audit log.
+- [warden-mcp](https://pypi.org/project/warden-mcp/): pins tool definitions on first use and quarantines a changed tool until it is approved again.
+- [MCPDome](https://docs.rs/mcpdome): schema pinning with canonical SHA-256 hashes and a hash-chained ledger component.
+- [hoop's mcpproxy](https://pkg.go.dev/github.com/hoophq/mcpproxy): holds flagged tool calls until a human approves them over a REST API.
+- [TrueFoundry's MCP gateway](https://www.truefoundry.com/blog/mcp-tool-approvals-explained): holds a matched tool call and creates an approval request.
+
+Pins, holds and tamper-evident logs exist in several of these, and Polarizer credits three of mcpclerk's ideas ([How it was built](#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. In a search in October 2026 I found tools that test AI agents with planted inputs, such as [Agent Canary](https://github.com/Auro-rium/canary) and [AgentCanary](https://github.com/antgroup/Agent3Sigma-Canary), but none that tests the person approving; a search is not proof that none exists.
 
 ## Known limits
 
@@ -94,7 +134,9 @@ Polarizer only sees calls routed through it: the agent's shell, its own file too
 - **Esc ends held calls.** Esc in Claude Code stops the Polarizer process, and every call it was holding is refused.
 - **Backgrounded after about 123 s.** In Claude Code 2.1.289 a waiting call moves to the background and the agent keeps working; the hold still waits for you.
 - **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
-- **A person who allows without reading.** Polarizer records that you allowed it, and nothing measures that yet.
+- **A person who allows without reading.** Polarizer records that you allowed it; only drills measure it, and only in practice.
+- **Drill results come from invented scenarios and a person who knows they are being tested.**
+- **Shape labels in drill reports are under review.** Some planted calls carry a label their mechanical rule doesn't give.
 
 Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
 
@@ -187,10 +229,10 @@ polarizer deny --config "$CONFIG" <hold id> --reason "not that file"
 
 ## What's here
 
-- `src/polarizer/`: the proxy, the ledger, pins, holds and the command line.
+- `src/polarizer/`: the proxy, the ledger, pins, holds, drills and the command line; `src/polarizer/scenarios/` holds the drill scenarios.
 - `conformance/`: the ledger fixtures and the separately written reference verifier.
-- `tests/`: every test; `tests/test_readme.py` runs this README's setup commands.
-- `docs/`: the four specs, [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
+- `tests/`: every test; `tests/test_readme.py` runs this README's commands.
+- `docs/`: the five specs, [the drill guide](docs/DRILL-GUIDE.md), [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
 - `docs/brand/`: the logo, drawn by `scripts/brand.py`. The parallel lines are calls that line up with what you approved; the one turned out of line is held ([what the mark means](docs/brand/README.md)).
 - `manual/`: the config for the interactive checks.
 - `scripts/`: `test.sh` runs every check, as CI does; the live and manual check scripts; `dev/guard.sh`, a guard for my own machine.
@@ -205,8 +247,11 @@ Credits: from mcpclerk, three ideas, credited by name, with none of its code or 
 
 ## What's next
 
-1. **The approval card (M3):** a local page that shows a held call, what it would change, why it was held and its history.
-2. **Taint (M2b):** holding outgoing calls after the agent has read untrusted content, and rules on argument values and domains.
-3. **The measurement (M5 and M6), the point of the project:** oversight statistics and canaries that show whether a person's approvals still catch a planted bad call.
+The point of the project is the measurement: whether a person's approvals still catch anything. Drills measure it in practice; the next steps measure it in real work.
+
+1. **Statistics over real holds (stage 9):** how often you allow, how fast, by tool and rule, with a warning when decisions get faster while the approval rate stays flat.
+2. **The approval card (M3):** a local page that shows a held call, what it would change, why it was held and its history.
+3. **Live planted calls:** planted holds inside a running gateway, opt-in, each revealed once it ends.
+4. **Taint (M2b):** holding outgoing calls after the agent has read untrusted content, and rules on argument values and domains.
 
 MIT license: [LICENSE](LICENSE).

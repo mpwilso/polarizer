@@ -34,3 +34,15 @@ jobs:
         run: bash scripts/test.sh
       - name: Append benchmark (printed, never asserted)
         run: uv run --locked python scripts/bench_append.py
+      # The install a reader does: the built wheel, installed as a uv tool with its dependencies
+      # resolved from the package index (not uv.lock), into this job's tool directory.
+      - name: Install check (build the wheel, uv tool install it)
+        run: |
+          uv build --out-dir dist
+          uv tool install dist/polarizer-*-py3-none-any.whl
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Install check (run the installed polarizer)
+        run: |
+          command -v polarizer
+          polarizer --help
+          polarizer drill --help

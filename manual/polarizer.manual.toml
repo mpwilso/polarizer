@@ -7,8 +7,9 @@
 # Not the default ~/.local/share/polarizer: manual-check runs keep their own ledger.
 ledger_dir = "~/.local/share/polarizer-manual"
 
-# The ledger must never be inside these. Parallax's ~/.local/share/parallax and
-# ~/.config/parallax are always forbidden as well.
+# The ledger must never be inside these: the author's other repositories, on the machine the
+# manual checks ran on. Parallax's ~/.local/share/parallax and ~/.config/parallax are always
+# forbidden as well.
 ledger_forbidden_paths = [
     "~/code/parallax",
     "~/code/parallax-backup-before-rewrite",

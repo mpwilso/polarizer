@@ -34,16 +34,17 @@ def install_fixture(name, ledger_dir):
     return ledger_dir
 
 
-def mask_paths(text, **places):
+def mask_paths(text, sep=os.sep, **places):
     """text with each real path replaced by its placeholder (dir=path gives <dir>), and the
-    separators in what follows a placeholder written as "/", so a golden file compares the same
-    on every OS. The program prints native paths; only the copy the test compares is changed."""
+    separators (sep) in what follows a placeholder written as "/", so a golden file compares the
+    same on every OS. The program prints native paths; only the copy the test compares is
+    changed. tests/test_mask_paths.py passes sep to check both kinds on any OS."""
     if not places:
         return text
     for name, path in sorted(places.items(), key=lambda item: -len(str(item[1]))):
         text = text.replace(str(path), f"<{name}>")
     names = "|".join(places)
-    return re.sub(rf"<(?:{names})>\S*", lambda m: m.group(0).replace(os.sep, "/"), text)
+    return re.sub(rf"<(?:{names})>\S*", lambda m: m.group(0).replace(sep, "/"), text)
 
 
 @pytest.fixture

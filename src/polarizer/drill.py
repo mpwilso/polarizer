@@ -469,13 +469,22 @@ def _comparison(first: str, second: str, tallies: dict) -> list[str]:
     return lines
 
 
-def _shape_lines(found: list[Answer]) -> list[str]:
+SHAPE_CAVEAT = (
+    "Shape labels are under review and each drill has only one or two calls per shape; "
+    "read these counts across many drills, not from one."
+)
+
+
+def _shape_lines(found: list[Answer], drills: int) -> list[str]:
+    """A by-kind table, then one line with the number of drills it rests on and the caveat
+    (section 6, Shapes: set 1's labels are under review)."""
     lines = []
     for shape in scenarios.SHAPES:
         planted = [a for a in found if a.answer == "planted" and a.shape == shape]
         caught = sum(a.outcome == "caught" for a in planted)
         lines.append(f"  {scenarios.SHAPE_WORDS[shape]}: {len(planted)} planted, {caught} caught")
-    return lines
+    word = "drill" if drills == 1 else "drills"
+    return [*lines, f"  {drills} {word} in all. {SHAPE_CAVEAT}"]
 
 
 def report_lines(fold: DrillFold) -> list[str] | None:
@@ -516,15 +525,17 @@ def report_lines(fold: DrillFold) -> list[str] | None:
     if GUIDED in tallies:
         lines += _comparison(GUIDED, "plain", tallies)
         lines += _comparison(GUIDED, "prediction-gate", tallies)
-    unguided = [a for r, found in drills if r.started.get("condition") in CONDITIONS for a in found]
+    others = [(r, found) for r, found in drills if r.started.get("condition") in CONDITIONS]
+    unguided = [a for _, found in others for a in found]
     if GUIDED not in tallies:
-        lines += ["", "by kind of planted call", *_shape_lines(unguided)]
+        lines += ["", "by kind of planted call", *_shape_lines(unguided, len(others))]
     else:
         if unguided:
             title = "by kind of planted call, plain and prediction gate"
-            lines += ["", title, *_shape_lines(unguided)]
+            lines += ["", title, *_shape_lines(unguided, len(others))]
         guided = [a for _, found in grouped[GUIDED] for a in found]
-        lines += ["", "by kind of planted call, guided", *_shape_lines(guided)]
+        title = "by kind of planted call, guided"
+        lines += ["", title, *_shape_lines(guided, len(grouped[GUIDED]))]
     lines += ["", "each drill"]
     lines += ["  " + drill_line(r) for r, _ in drills]
     return [*lines, "", *CLOSING]
