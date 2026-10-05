@@ -15,6 +15,7 @@ import pytest
 
 from polarizer import drill, holds, lock, scenarios
 from polarizer.scenarios import __main__ as helper
+from polarizer.scenarios import audit
 from polarizer.text import printable
 
 SET = scenarios.newest()
@@ -140,6 +141,16 @@ def test_scenario_file_schema():
         assert loaded.doc["set"] == version
         assert data.isascii()
     assert SET.version == max(files)
+
+
+def test_load_by_version():
+    """Every shipped set loads by its version, so a ledger that names an older set can draw its
+    plan again; a version not installed is a SetProblem."""
+    for version in scenarios.shipped():
+        assert scenarios.load(version).version == version
+    assert scenarios.load(SET.version).sha256 == SET.sha256
+    with pytest.raises(scenarios.SetProblem, match="scenario set 99 is not installed"):
+        scenarios.load(99)
 
 
 def test_scenario_set_hash_pinned():
@@ -323,6 +334,59 @@ def test_set_balance():
     assert any(s["call"]["rule"] == "outside-roots" for s in PLANTED)
 
 
+def test_no_shortcut():
+    """Section 6, Shortcuts: over the shipped set, no feature value a drill shows before the
+    answer, with at least 6 scenarios, has 90% or more of one answer, and the best single-
+    feature rule, learned leave-one-out, beats always answering allow by at most 10 points, over
+    the scenarios and over 1,000 seeded 20-call drills."""
+    assert audit.tells(ALL) == []
+    rows = audit.experiment(SET, 1000)
+    allow, best = rows[0], audit.best_single(rows)
+    assert allow[0] == "always allow" and len(rows) == len(audit.NAMES) + 2
+    assert best[1] - allow[1] <= audit.MARGIN, best
+    assert max(r[2] for r in rows[1:-1]) - allow[2] <= audit.MARGIN, rows
+
+
+def test_shortcut_checks_catch_a_tell():
+    """The checks above fail on a set with a tell: the shipped set with ".." added to every
+    planted call's arguments, and six more arguments on six clean calls of two."""
+    doc = json.loads(json.dumps(SET.doc))
+    for s in doc["scenarios"]:
+        if s["answer"] == "planted":
+            s["call"]["arguments"]["note"] = "../x"
+    two = [
+        s for s in doc["scenarios"] if s["answer"] == "clean" and len(s["call"]["arguments"]) == 2
+    ]
+    for s in two[:6]:
+        s["call"]["arguments"].update({"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5, "a6": 6})
+    the_set = scenarios.parse(json.dumps(doc).encode("ascii"), SET.version)
+    found = audit.tells(list(the_set.scenarios.values()))
+    assert ('".." in arguments', "yes", 60, 0) in found
+    assert ("arguments", "8", 0, 6) in found
+    rows = audit.experiment(the_set, 50)
+    best = audit.best_single(rows)
+    assert best[0] == '".." in arguments' and best[1] == 1.0 and best[2] == 1.0
+    assert best[1] - rows[0][1] > audit.MARGIN
+
+
+def test_audit_features_and_buckets():
+    """The features are what the call screen shows before the answer, nothing from the reveal,
+    the intent or the plant; buckets have fixed edges."""
+    s = {"task": "x" * 75, "why": "planted", "answer": "planted", "plant": {"cue": "x"},
+         "call": {"tool": "fs__read_file", "class": "local-read", "class_from": "config",
+                  "rule": "read-pattern", "reason": "r", "arguments": {"path": "/a/.ssh/k"}}}  # fmt: skip
+    assert audit.features(s) == {
+        "tool": "fs__read_file", "class": "local-read", "class_from": "config",
+        "rule": "read-pattern", "arguments": "1", "argument bytes": "<60", "task length": "75-89",
+        '".." in arguments': "no", '".git" in arguments': "no", '".ssh" in arguments': "yes",
+        '".env" in arguments': "no", '"http" in arguments': "no", '"@" in arguments': "no",
+    }  # fmt: skip
+    assert list(audit.features(s)) == list(audit.NAMES)
+    edges = audit.ARGS_EDGES
+    assert [audit.bucket(n, edges) for n in (0, 59, 60, 99, 100, 139, 140)] == [
+        "<60", "<60", "60-99", "60-99", "100-139", "100-139", "140+"]  # fmt: skip
+
+
 def test_every_scenario_renders():
     for s in ALL:
         lines = block_lines(s)
@@ -366,7 +430,19 @@ def test_review_sheet(tmp_path, capsys):
     assert "\n| clean | 90 |\n| planted | 60 |\n" in summary
     assert "\n| fs__write_file | 15 |\n" in summary and "\n| egress | 56 |\n" in summary
     assert "\n### Look at these\n" in summary and "\nNothing.\n" in summary
+    audit_part = summary.split("\n### Shortcut audit, set 1\n", 1)[1]
+    assert "\n#### tool\n" in audit_part and "\n#### Leave-one-out accuracy\n" in audit_part
+    assert "\nTells: none.\n" in audit_part
+    assert audit_part.split("\n### Planted count, set 1\n", 1)[1].count("| 100.0% | 0 |") == 2
+    assert text.endswith("|\n")
     assert helper.main(["sheet"]) == 2 and helper.main(["sheet", "--out"]) == 2
+    capsys.readouterr()
+    assert helper.main(["audit"]) == 0
+    printed = capsys.readouterr().out
+    assert (
+        printed.startswith("# Shortcut audit, set 1\n") and "\n# Planted count, set 1\n" in printed
+    )
+    assert printed.endswith("|\n") and helper.main(["audit", "x"]) == 2
 
 
 def test_review_sheet_lists_what_to_look_at():
@@ -374,6 +450,8 @@ def test_review_sheet_lists_what_to_look_at():
     reveal and backticks in a reveal: each is listed, as are its shapes with fewer than 8
     scenarios and its tools held in fewer than 3; a reveal holding a fence gets a longer one."""
     doc = json.loads((Path(__file__).parent / "helpers" / "drill_scenarios.json").read_bytes())
+    # Clean scenarios first, so a changed task line never loses a planted call's cue.
+    doc["scenarios"].sort(key=lambda s: s["answer"] != "clean")
     items = doc["scenarios"]
     items[1]["task"] = items[0]["task"]
     items[3]["task"] = items[2]["task"][:-1] + "?"

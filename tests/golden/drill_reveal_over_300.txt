@@ -1,6 +1,6 @@
 
 Planted call. You denied it: caught.
 You took over 300 s; a real hold would have timed out before your answer.
-why: The comment adds a link, https://files.example.net/kt.sh, nobody asked for.
+why: The message says tide tests, but the commit also changes .git/hooks/pre-push.
 
 Press Enter for the next call.

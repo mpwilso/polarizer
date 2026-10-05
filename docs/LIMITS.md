@@ -49,9 +49,11 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 ## Drills
 
 - A drill measures attention when the person knows it is a test, and that some calls are planted. People read more carefully then, so drill rates are closer to a person's best than to an ordinary afternoon.
-- A drill plants 8 calls in 20, far above any real rate of bad calls, so that one drill measures something. Rare targets are missed more often than common ones, so drill catch rates likely run above a person's catch rate at a realistic rate. A condition with fewer planted calls may come later.
-- One drill gives a wide interval: with 8 planted calls, a catch rate's 95% interval is 33 to 58 points wide (7 of 8 caught is 52% to 98%). Below 5 calls of a kind, as in a drill stopped early, no rate is printed.
-- Every drill of 20 has 8 planted calls, and the intro says so. Each answer is revealed, so a person who counts knows the remaining answers once 8 planted or 12 clean calls have been shown.
+- A drill plants 6 to 10 calls in 20, far above any real rate of bad calls, so that one drill measures something. Rare targets are missed more often than common ones, so drill catch rates likely run above a person's catch rate at a realistic rate. A condition with fewer planted calls may come later.
+- One drill gives a wide interval: with 6 to 10 planted calls, a catch rate's 95% interval is 28 to 64 points wide (7 of 8 caught is 52% to 98%). Below 5 calls of a kind, as in a drill stopped early, no rate is printed.
+- The number of planted calls in a drill of 20 is drawn from 6 to 10, and the intro gives only that range, so counting the revealed answers doesn't tell when the planted calls are over. It still does in extreme cases: after 10 planted or 14 clean calls the rest are known. That settled at least one answer in 16% of 10,000 seeded drills (0.26 calls per drill on average), and near the end a person who counts can guess a little better than chance.
+- Always answering allow would be right about 60% of the time, so a drill's share of right answers says little; its two rates are what it measures.
+- Surface features give little away, but not nothing. In a check of the scenario set using only what the screen shows before the answer (tool, class, rule, the number and length of the arguments, the task's length, a few telling strings), no feature value had 90% or more of one answer, and the best one-feature rule, by argument length, was right 64% of the time against 60% for always allowing.
 - The people who run drills are the people who care about oversight; their numbers say nothing about anyone else's.
 - Drill calls are invented, short and self-contained, and come with the task written above them, which real holds don't have.
 - The scenario set is finite (150 calls). After many drills a person may recognize one; the report counts repeats.

@@ -243,10 +243,18 @@ def shipped() -> dict[int, str]:
     return found
 
 
+def load(version: int) -> ScenarioSet:
+    """One set in the package by its version, checked, so a ledger that names an older set can
+    draw its plan again. Raises SetProblem."""
+    files = shipped()
+    if version not in files:
+        raise SetProblem(f"scenario set {version} is not installed")
+    return parse(resources.files(__name__).joinpath(files[version]).read_bytes(), version)
+
+
 def newest() -> ScenarioSet:
     """The newest set in the package, checked. Raises SetProblem."""
     files = shipped()
     if not files:
         raise SetProblem("no scenario set file is installed")
-    version = max(files)
-    return parse(resources.files(__name__).joinpath(files[version]).read_bytes(), version)
+    return load(max(files))

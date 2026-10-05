@@ -760,6 +760,13 @@ Run in this session on WSL2 (Linux), Python 3.12.3, uv 0.12.19, with the repo's 
 - **`uv tool install` from a package file, offline:** with `UV_OFFLINE=1`, `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR` set to temporary directories, `uv tool install ./polarizer-0.1.0-py3-none-any.whl` (the wheel from `uv build --wheel --offline`) installed Polarizer and its dependencies from the uv cache, the installed `polarizer drill report` printed its "none yet" line, and `uv tool uninstall polarizer` removed it. Nothing was written to the user's own uv tool directory (`tests/test_drill_guide.py::test_guide_install_lines_run_offline`).
 - **The WSL distro's name** for a `\\wsl$` path is in `$WSL_DISTRO_NAME`; `wsl.exe` is not on the PATH inside this distro (no Windows drive is mounted), and `/etc/os-release` names the Linux release, not the registered distro name.
 
+## Stage 8 follow-up (Oct 5, 2026, UTC)
+
+Run in this session on WSL2 (Linux), Python 3.12.3, with the repo's `.venv`. Nothing was fetched and no model was run. docs/dev/STAGE8-NOTES.md, Stage 8 follow-up, has the details.
+
+- **The sampler with a drawn count:** a stdlib-only script written from docs/MEASURE-SPEC.md section 6's revised pseudocode, without Polarizer's code, and the code gave the same stream values, four plans, planted ranges and count distribution. Over 10,000 seeded drills of 20 in each drawn condition (seeds 0 to 20,200), the count was uniform on 6 to 10, and every drill had at least 5 planted and at least 10 clean calls and every shape.
+- **The shortcut audit of set 1:** no feature value a drill shows before the answer, with 6 or more scenarios, has 90% or more of one answer; the best leave-one-out single-feature rule (argument bytes) is right on 64.0% of the scenarios against 60.0% for always allow.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.

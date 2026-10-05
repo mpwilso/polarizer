@@ -220,3 +220,67 @@ The only change in 98ade25 to `src/polarizer/writer.py` is two lines in `_check_
 - **`scripts/dev/guard.sh check`** against `snapshot-20261005T181739Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too; exit 0.
 - **The pre-push scan** (the owner's home path, the Windows users path, the Windows user name and five other words, case-insensitive), over all 370 files in the commit: 0 of each.
 - **Not run:** `uv tool install` with the network or into the user's own tool directory; the guide's two GitHub lines; anything on Windows or macOS; a person's drill under the new sampler. CI has not run this change.
+
+## Stage 8 follow-up: shortcut audit and a variable planted count (Oct 5, 2026, UTC)
+
+The owner's follow-up brief, four items. Guard snapshot `snapshot-20261005T184537Z.txt` taken first. Written as the work goes.
+
+### 1. The shortcut audit
+
+**Question:** can a person, or a trivial rule, tell planted from clean without reading the task and the arguments? Only what a drill shows before the answer is used: the call screen without the reveal.
+
+**Features** (`src/polarizer/scenarios/audit.py`): tool, class, class_from, the rule of the `held by` line, the number of arguments, argument bytes (the length the block's `args_commit` line gives, in buckets under 60, 60 to 99, 100 to 139, 140 and over, about the set's quartiles), task length in characters (under 60, 60 to 74, 75 to 89, 90 and over), and whether the compact arguments contain each of `..`, `.git`, `.ssh`, `.env`, `http` and `@`. A tell is a value with at least 6 scenarios of which at least 90% share one answer.
+
+**Leave-one-out:** each scenario is answered by a rule learned from the other 149: the majority answer for its value of one feature (deny only on a strict planted majority; a tie or an unseen value is allow), or a naive Bayes over every feature (add-one smoothing). Each is scored over the 150 scenarios and as the mean share right over 1,000 seeded 20-call drills drawn by the drill's own sampler (seeds 0 to 999, nothing excluded), next to always answering allow. Standard library only.
+
+**Set 1 has no tell.** The value nearest one is `fs__edit_file`, 1 planted and 7 clean (87.5%). The best single-feature rule is argument bytes, 64.0% over the scenarios against always allow's 60.0%, because 9 of the 12 calls of 140 bytes or more are planted. The tool rule scores 39.3%: with most tools close to half and half, leaving one scenario out flips its tool's majority against it, a known effect of leave-one-out on balanced values. Naive Bayes scores 42.0% for the same reason. The full tables are in the review sheet and printed by `python -m polarizer.scenarios audit`.
+
+**No set 2.** The brief's set 2 was for removing tells; with none, the owner chose to keep set 1 as the shipped set (asked during this session). Set 1 is unchanged (regenerated from `tools/make_drill_set.py` and compared byte for byte), its pin is unchanged, and `scenarios.load(version)` now loads any shipped set by its version, so a ledger that names an older set can draw its plan again once a set 2 exists.
+
+**Tests** (`tests/test_scenarios.py`): `test_no_shortcut` (no tell over the shipped set, and the best single-feature rule within 10 points of always allow, over the scenarios and over 1,000 drills); `test_shortcut_checks_catch_a_tell` (on set 1 with `..` added to every planted call and six more arguments on six clean calls, both tells are found and the `..` rule scores 100%), which is how the check is shown to fail, since the shipped set never makes it fail; `test_audit_features_and_buckets`; `test_load_by_version`. The audit was first a script in `tools/`; it moved into the package beside `show` and `sheet` so the review sheet can print it.
+
+### 2. The planted count
+
+**The new sampler** (`drill.planted_range`, `drill.plan`): the count is `lo + below(s, hi - lo + 1)`, drawn right after the condition, with `hi = min(floor(calls / 2), planted ids)` and `lo = min(max(ceil(3 * calls / 10), 5, shapes in the set), hi)`: 6 to 10 of 20, 5 of 10, 12 to 20 of 40. The dealing over the shapes is unchanged, so with 5 or more planted calls every shape is present and shape counts differ by at most one.
+
+**The vectors were computed twice:** first by `indep_sampler2.py` in the scratch directory, stdlib only, written from the new pseudo-code without importing Polarizer; then by the code. Both printed:
+
+- the stream's first values: 8468598625902157147, 15816047190215027138;
+- a: `prediction-gate`, 9, `c05, c08, c06, p04, c02, c09, p06, c01, c12, p09, p08, p07, p10, c10, p05, p01, p03, c03, c07, c04`;
+- b: `prediction-gate`, 9, `c03, c09, c05, c11, c10, c06, c12, c04, p04, p10, p07, p05, p02, p08, p03, c07, c02, p09, c08, p06`;
+- c (seed `ff` times 16, 10 calls): `prediction-gate`, 5, `p06, p08, c10, p03, c06, c07, p04, c09, p10, c01`;
+- d (seed `ff` times 16, 20 calls): `prediction-gate`, 6, `c04, c12, p05, c09, c06, p06, c05, c10, p04, c07, p08, c03, c01, c02, c08, c11, p03, p10`;
+- the range for 10, 11, 12, 13, 14, 15, 16, 17, 20, 25, 30 and 40 calls: 5..5, 5..5, 5..6, 5..6, 5..7, 5..7, 5..8, 6..8, 6..10, 8..12, 9..15, 12..20;
+- over the shipped set, seeds 0 to 20,200, until each condition had 10,000 drills: plain 1,961, 1,965, 2,083, 1,982 and 2,009 drills with 6, 7, 8, 9 and 10 planted calls; prediction gate 1,889, 2,020, 1,975, 2,072 and 2,044. In both, 100.00% had at least 5 planted and at least 10 clean calls, and none missed a shape.
+
+The tests changed only after that comparison: `test_sampler_vector` (the four plans), `test_planted_range` (new), `test_planted_count_and_shapes` (2,000 drills in a row, each 6 to 10 planted with every shape and counts at most one apart, every count from 6 to 10 drawn).
+
+**The intro** states the range, never the drawn count: `Between 6 and 10 of the 20 calls are planted ... The number changes from drill to drill, and real work has far fewer.` When the range is one number (10 calls: 5) it says `5 of the 10 calls are planted`.
+
+**The test set** (`tests/helpers/drill_scenarios.json`) had 8 planted scenarios, so its range for 20 calls was 6 to 8, not the shipped set's 6 to 10. Two planted test scenarios were added (a draft sent instead of saved, a commit with an extra hook file), so it has two of each shape and the golden intro shows the shipped range. Set 1 is unchanged by this.
+
+**The golden seed** is now `000...03ea`, the first counter seed whose plan on the test set draws plain, 8 planted calls, the README scenario at call 3, a look-alike at call 7 and a clean call at call 12, so the example end screen of section 5 (7 of 8, 1 of 12) is unchanged. Golden files changed (regenerated with `POLARIZER_UPDATE_GOLDEN=1`, each diff read): `drill_intro_plain.txt` and `drill_intro_prediction_gate.txt` (the range sentence), `drill_reveal_caught.txt` and `drill_reveal_over_300.txt` (the first caught call is now the new commit scenario). `test_review_sheet_lists_what_to_look_at` changed its task lines by position in the test set; it now sorts clean scenarios first, so a changed task never drops a planted call's cue.
+
+**Docs changed for item 2:** MEASURE-SPEC.md sections 1 (Small n, the planted share, Counting down), 4 (Defaults, and why), 5 (the intro, and its one-number form), 6 (Why 150, Sampling's pseudo-code, bullets, vectors and distribution, Validation's new Shortcuts rules, Versioning), 9 (the report fixture's note), 12 (the test tables), 13 (the guide's items), 16 (questions 2 and 15) and 17 (Stage 8 follow-up, deviation 13); LIMITS.md's Drills section; DRILL-GUIDE.md; verified-facts.md (Stage 8 follow-up).
+
+**Counting down, measured** (`drillnumbers.py` in the scratch directory, the shipped set, 10,000 seeded drills of 20): with the range 6 to 10, the count settles at least one answer (after 10 planted or 14 clean calls the rest are known) in 16.1% of drills, 0.26 calls per drill on average, at most 9. With a fixed 8 (the 2,002 of those plans that drew 8), every drill had such calls, 2.0 per drill on average, at most 11.
+
+**Interval widths** for a catch rate from 6 to 10 planted calls, from `measure.rate_parts` over every k: 40 to 64 points (6), 36 to 60 (7), 33 to 58 (8), 30 to 56 (9), 28 to 54 (10); so 28 to 64 in all.
+
+**Repeats** with the drawn count (2,000 drills in a row on one ledger, the last two excluded): a planted or a clean scenario comes back after 3 drills at the least, 6 at the median, 7.49 on average, as with a fixed 8.
+
+### 3. The guide
+
+docs/DRILL-GUIDE.md's "How to read the numbers" gains one sentence: `Always answering "allow" would be right about 60% of the time, so look at the two rates, not at the share of right answers.` The count is now `Between 6 and 10 of the 20 were changed to be wrong on purpose` and `One drill has only 6 to 10 planted calls`. 965 words in all (935 before). `tests/test_drill_guide.py` passes.
+
+### 4. Runs
+
+- **`scripts/test.sh`:** `1256 passed, 13 skipped in 264.55s (0:04:24)`, exit 0, 265 s wall (1251 before, plus `test_planted_range`, `test_load_by_version`, `test_no_shortcut`, `test_shortcut_checks_catch_a_tell` and `test_audit_features_and_buckets`).
+- **The changed test files** (`tests/test_drill.py`, `test_scenarios.py`, `test_drill_guide.py`, `test_drill_report.py`; 425 tests), five times in a row: 425 passed each time, in 15.54 s to 16.63 s. A first try printed no summary line, because `-q` on the command line doubles the `-q` in pyproject.toml; it was run again without it.
+- **Once under load,** with two busy-loop Python processes (`python3 -c 'while True: pass'`, PIDs 68633 and 68634, each at 99.9% CPU), started before and stopped by their PIDs after: 425 passed in 15.48 s.
+- **Time bounds:** the new tests don't wait. `test_no_shortcut` draws 1,000 plans and `test_shortcut_checks_catch_a_tell` 50; the test file runs in about 5 s.
+- **The review sheet** for the newest set, set 1: `uv run python -m polarizer.scenarios sheet --out drill-review/scenarios.md`, 3,997 lines, 109,493 bytes, ending with the shortcut audit and the planted count's distribution. Look at these: nothing.
+- **The pre-push scan** (the owner's home path, the Windows users path, the Windows user name and five other words, case-insensitive), over all 371 files in the commit: 0 of each.
+- **`scripts/dev/guard.sh check`** against `snapshot-20261005T184537Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too; exit 0.
+- **`~/.local/share/polarizer-drills`** was not created; every drill in this round ran in a temporary directory or drew plans only.
+- **Not run:** anything on Windows or macOS; a person's drill under the drawn count; CI. Set 2 was not made (item 1).

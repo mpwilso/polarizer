@@ -134,20 +134,24 @@ def shuffle(s, xs: list) -> list:
     return xs
 
 
-def planted_count(calls: int) -> int:
-    """Two fifths of the calls, rounded down: 8 of 20."""
-    return (2 * calls) // 5
+def planted_range(calls: int, planted: int, shapes: int) -> tuple[int, int]:
+    """(fewest, most) planted calls in a drill of `calls`: 30 to 50 percent, at least 5 and at
+    least one per shape when the length allows, and no more than the set has; 6 to 10 of 20."""
+    hi = min(calls // 2, planted)
+    lo = min(max(-(-3 * calls // 10), 5, shapes), hi)
+    return lo, hi
 
 
 def plan(seed: bytes, planted: dict, clean: list, calls: int, excluded) -> tuple[str, int, list]:
     """(condition drawn, number of planted calls, order of scenario ids). `planted` maps each
-    planted id to its shape. The planted calls are dealt to the shapes in a drawn order, one
-    each per round, so the shapes the set has differ by at most one call, except where a shape
-    has too few scenarios."""
+    planted id to its shape. The number of planted calls is drawn from planted_range. They are
+    dealt to the shapes in a drawn order, one each per round, so the shapes the set has differ
+    by at most one call, except where a shape has too few scenarios."""
     s = stream(seed)
     condition = CONDITIONS[below(s, 2)]
-    k = min(planted_count(calls), len(planted))
     present = [x for x in scenarios.SHAPES if x in planted.values()]
+    lo, hi = planted_range(calls, len(planted), len(present))
+    k = lo + below(s, hi - lo + 1)
     turn = shuffle(s, present)
     size = Counter(planted.values())
     quota = dict.fromkeys(present, 0)
@@ -640,15 +644,31 @@ def enter_line(last: bool) -> str:
     return "Press Enter to see the results." if last else "Press Enter for the next call."
 
 
-def intro_lines(calls: int, planted: int, directory: Path, condition: str, keep: bool) -> list[str]:
+def intro_lines(
+    calls: int, planted: tuple[int, int], directory: Path, condition: str, keep: bool
+) -> list[str]:
+    """The intro screen. `planted` is the range the count is drawn from, never the count, so
+    the screen gives nothing to count down from."""
+    lo, hi = planted
+    if lo == hi:
+        count = [
+            f"deny. {lo} of the {calls} calls are planted: they differ from the task in a way",
+            "that should be denied. Real work has far fewer. After each answer you see",
+            "whether the call was clean or planted, and why.",
+        ]
+    else:
+        count = [
+            f"deny. Between {lo} and {hi} of the {calls} calls are planted: they differ from the",
+            "task in a way that should be denied. The number changes from drill to drill,",
+            "and real work has far fewer. After each answer you see whether the call was",
+            "clean or planted, and why.",
+        ]
     lines = [
         "Polarizer drill: practice with held calls",
         "",
         f"You will see {calls} held calls, one at a time. Each shows the task the agent was",
         "given, then the call exactly as polarizer holds would show it. Answer allow or",
-        f"deny. {planted} of the {calls} calls are planted: they differ from the task in a way",
-        "that should be denied. Real work has far fewer. After each answer you see",
-        "whether the call was clean or planted, and why.",
+        *count,
         "",
         "Nothing here is real. There is no agent and no server, nothing is sent",
         "anywhere, and nothing times out. Your answers and times stay on this computer,",
@@ -727,7 +747,7 @@ class _Drill:
         self.session = random.token_hex(8)
         seed = opts.seed if opts.seed is not None else random.token_bytes(16)
         excluded = [] if opts.seed is not None else self.fold.recent_scenarios(2)
-        drawn, planted, order = plan(
+        drawn, _, order = plan(
             seed, self.set.shapes(), self.set.ids("clean"), opts.calls, set(excluded)
         )
         self.condition = opts.condition or drawn
@@ -751,8 +771,10 @@ class _Drill:
             )
             self.started_ts = self.fold.records[self.session].ts
             try:
+                shapes = self.set.shapes()
+                span = planted_range(opts.calls, len(shapes), len(set(shapes.values())))
                 lines = intro_lines(
-                    opts.calls, planted, opts.ledger_dir, self.condition, opts.keep_predictions
+                    opts.calls, span, opts.ledger_dir, self.condition, opts.keep_predictions
                 )
                 self.show("\n".join(lines) + "\nPress Enter to start.")
                 self.wait_enter()

@@ -6,7 +6,7 @@ This is for anyone. You don't need an AI agent or an account. You do need a term
 
 Polarizer sits between an AI agent and its tools (MCP servers, the plug-ins an agent uses to act) and holds risky actions until a person allows or denies them. A drill lets you practice that job, offline.
 
-You see 20 actions, one at a time, each under the task the agent was given, and you allow or deny each. 8 of the 20 were changed to be wrong on purpose: a file written somewhere else, an extra recipient, a package name with one letter changed. Real work has far fewer wrong actions than that; a drill has many so that one drill measures something. After each answer you see whether you were right, and why. Nothing is real and nothing is sent anywhere.
+You see 20 actions, one at a time, each under the task the agent was given, and you allow or deny each. Between 6 and 10 of the 20 were changed to be wrong on purpose: a file written somewhere else, an extra recipient, a package name with one letter changed. Real work has far fewer wrong actions than that; a drill has many so that one drill measures something. After each answer you see whether you were right, and why. Nothing is real and nothing is sent anywhere.
 
 ## Words you will see
 
@@ -96,7 +96,7 @@ It holds counts, rates, dates (the day only) and version numbers, such as `"answ
 
 ## How to read the numbers
 
-Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. One drill has only 8 planted calls, so its range is wide; it narrows over several drills. Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate.
+Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. One drill has only 6 to 10 planted calls, so its range is wide; it narrows over several drills. Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate. Always answering "allow" would be right about 60% of the time, so look at the two rates, not at the share of right answers.
 
 A drill measures your attention when you know you are being tested: your best, not an ordinary afternoon. It also has far more planted calls than real work, so drill rates likely run higher than real ones. Trends across drills mean more than any one result.
 

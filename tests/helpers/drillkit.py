@@ -17,9 +17,9 @@ HERE = Path(__file__).resolve().parent
 TEST_SET = scenarios.parse((HERE / "drill_scenarios.json").read_bytes(), 1)
 TS = "2026-10-06T18:02:11.425Z"
 # The first seed whose plan matches section 5's example end screen: the plain condition, 8
-# planted calls of 20, the README scenario at call 3, a look-alike at call 7, a clean call at
-# call 12.
-GOLDEN_SEED = "000000000000000000000000000005fd"
+# planted calls of 20 (drawn from 6 to 10), the README scenario at call 3, a look-alike at call
+# 7, a clean call at call 12.
+GOLDEN_SEED = "000000000000000000000000000003ea"
 SESSION = "8e41c6b2d09a7f35"
 # Planted and clean decision times (ms) of the example: medians 18.0 s and 10.9 s, overall
 # 12.4 s (median_low of 8, 12 and 20 values).

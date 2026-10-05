@@ -4,10 +4,12 @@ scenario):
     python -m polarizer.scenarios show <id>           the screen of one scenario
     python -m polarizer.scenarios show <id> --answer  the screen, then the answer and its why
     python -m polarizer.scenarios sheet --out <path>  a review sheet of every scenario, in markdown
+    python -m polarizer.scenarios audit               the shortcut audit and the planted count
 
 `show` is for a reviewer to answer one scenario before reading its answer. `sheet` writes every
 scenario (id, answer, shape, task, the block a drill shows and the reveal), then a summary of the
-set and a list of things for the reviewer to look at.
+set, a list of things for the reviewer to look at, the shortcut audit and the planted count's
+distribution (polarizer.scenarios.audit). `audit` prints those last two alone.
 """
 
 import difflib
@@ -16,6 +18,7 @@ from collections import Counter
 from pathlib import Path
 
 from polarizer import drill, scenarios
+from polarizer.scenarios import audit
 
 TS = "2026-10-06T18:02:11.425Z"
 NEAR = 0.85  # task lines at least this similar (difflib's ratio) are listed as near-duplicates
@@ -166,8 +169,9 @@ def sheet(the_set: scenarios.ScenarioSet) -> str:
     ]
     found = look_at(the_set)
     lines += [f"- {line}" for line in found] if found else ["Nothing."]
-    lines += ["", *nearest(the_set)]
-    return "\n".join(lines) + "\n"
+    lines += ["", *nearest(the_set), ""]
+    lines += audit.report(the_set, level=3) + audit.count_lines(the_set, level=3)
+    return "\n".join(lines[:-1]) + "\n"
 
 
 def nearest(the_set: scenarios.ScenarioSet) -> list[str]:
@@ -202,6 +206,10 @@ def main(argv: list[str]) -> int:
         with open(path, "w", encoding="ascii", newline="\n") as handle:
             handle.write(sheet(the_set))
         print(f"wrote {path}: {len(the_set.scenarios)} scenarios of set {the_set.version}")
+        return 0
+    if argv == ["audit"]:
+        the_set = scenarios.newest()
+        print("\n".join(audit.report(the_set) + audit.count_lines(the_set)[:-1]))
         return 0
     print(USAGE, file=sys.stderr)
     return 2

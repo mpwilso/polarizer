@@ -59,10 +59,11 @@ def golden_drill(monkeypatch, directory, *args, prediction=None):
 
 
 def test_sampler_vector():
-    """Section 6, Sampling: the stream's first values and three plans, computed first by an
+    """Section 6, Sampling: the stream's first values and four plans, computed first by an
     independent script from the spec's text. The vector set has 3, 2, 2, 2 and 1 planted
     scenarios of the five shapes; plan b falls back to a shape's whole pool and to every clean
-    id, and plan c, with 4 planted calls, can't have all five shapes."""
+    id; plan c, of 10 calls, has 5 planted, one of each shape; plan d draws the fewest, 6 of
+    20."""
     s = drill.stream(bytes(range(16)))
     assert (next(s), next(s)) == (8468598625902157147, 15816047190215027138)
     shapes = ["changed-argument"] * 3 + ["different-tool"] * 2 + ["extra-effect"] * 2
@@ -74,33 +75,50 @@ def test_sampler_vector():
         return text.split(", ")
 
     seed = bytes(range(16))
-    assert drill.plan(seed, planted, clean, 20, set()) == ("prediction-gate", 8, order(
-        "c02, c09, p07, p06, p10, c04, c11, p09, c05, c06, c08, c10, p05, p03, c03, c01, c12, "
-        "p01, c07, p04"))  # fmt: skip
+    assert drill.plan(seed, planted, clean, 20, set()) == ("prediction-gate", 9, order(
+        "c05, c08, c06, p04, c02, c09, p06, c01, c12, p09, p08, p07, p10, c10, p05, p01, p03, "
+        "c03, c07, c04"))  # fmt: skip
     assert drill.plan(seed, planted, clean, 20, {"p01", "p04", "p10", "c01"}) == (
-        "prediction-gate", 8, order(
-        "c07, c11, c09, c05, c10, c01, c04, c02, p04, c08, p07, p05, p03, p10, p02, c03, c12, "
-        "p09, c06, p06"))  # fmt: skip
+        "prediction-gate", 9, order(
+        "c03, c09, c05, c11, c10, c06, c12, c04, p04, p10, p07, p05, p02, p08, p03, c07, c02, "
+        "p09, c08, p06"))  # fmt: skip
     assert drill.plan(b"\xff" * 16, planted, clean, 10, set()) == (
-        "prediction-gate", 4, order("c02, c05, c06, p08, c09, p04, p06, c01, c07, p10"))  # fmt: skip
+        "prediction-gate", 5, order("p06, p08, c10, p03, c06, c07, p04, c09, p10, c01"))  # fmt: skip
+    assert drill.plan(b"\xff" * 16, planted, clean, 20, set()) == ("prediction-gate", 6, order(
+        "c04, c12, p05, c09, c06, p06, c05, c10, p04, c07, p08, c03, c01, c02, c08, c11, p03, "
+        "p10"))  # fmt: skip
+
+
+def test_planted_range():
+    """30 to 50 percent of the calls, at least 5 and at least one per shape when the length
+    allows, never more than the set has (section 4, Defaults; computed first by the same
+    independent script)."""
+    ranges = {n: drill.planted_range(n, 60, 5) for n in (10, 11, 12, 16, 17, 20, 25, 30, 40)}
+    assert ranges == {10: (5, 5), 11: (5, 5), 12: (5, 6), 16: (5, 8), 17: (6, 8), 20: (6, 10),
+                      25: (8, 12), 30: (9, 15), 40: (12, 20)}  # fmt: skip
+    assert drill.planted_range(20, 7, 5) == (6, 7) and drill.planted_range(20, 3, 3) == (3, 3)
+    assert drill.planted_range(10, 60, 2) == (5, 5)
 
 
 def test_planted_count_and_shapes():
-    """With the shipped set, every 20-call plan has exactly 8 planted and 12 clean calls, with
-    all five shapes, two each of three and one each of two: 2,000 drills in a row, each leaving
-    out what the two before it showed, as drills on one ledger do."""
+    """With the shipped set, every 20-call plan has 6 to 10 planted calls and the rest clean,
+    with all five shapes and shape counts at most one apart, and each count from 6 to 10 is
+    drawn: 2,000 drills in a row, each leaving out what the two before it showed, as drills on
+    one ledger do."""
     the_set = scenarios.newest()
     planted, clean = the_set.shapes(), the_set.ids("clean")
     last = [set(), set()]
+    counts = Counter()
     for i in range(2000):
         seed = hashlib.sha256(i.to_bytes(4, "big")).digest()[:16]
         _, k, order = drill.plan(seed, planted, clean, 20, last[0] | last[1])
-        shapes = [planted[x] for x in order if x in planted]
-        assert k == len(shapes) == 8 and len(order) == 20
-        assert sorted(Counter(shapes).values()) == [1, 1, 2, 2, 2]
+        shapes = Counter(planted[x] for x in order if x in planted)
+        assert 6 <= k <= 10 and sum(shapes.values()) == k and len(order) == 20
+        assert len(shapes) == 5 and max(shapes.values()) - min(shapes.values()) <= 1
         assert not (last[0] | last[1]) & set(order)
         last = [last[1], set(order)]
-    assert [drill.planted_count(n) for n in (10, 13, 20, 40)] == [4, 5, 8, 16]
+        counts[k] += 1
+    assert set(counts) == {6, 7, 8, 9, 10}
 
 
 def test_plan_is_reproducible_from_the_ledger(monkeypatch, tmp_path):
@@ -663,9 +681,10 @@ SPEC_INTRO = """Polarizer drill: practice with held calls
 
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
-deny. 8 of the 20 calls are planted: they differ from the task in a way
-that should be denied. Real work has far fewer. After each answer you see
-whether the call was clean or planted, and why.
+deny. Between 6 and 10 of the 20 calls are planted: they differ from the
+task in a way that should be denied. The number changes from drill to drill,
+and real work has far fewer. After each answer you see whether the call was
+clean or planted, and why.
 
 Nothing here is real. There is no agent and no server, nothing is sent
 anywhere, and nothing times out. Your answers and times stay on this computer,
