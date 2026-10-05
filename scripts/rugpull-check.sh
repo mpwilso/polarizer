@@ -59,9 +59,17 @@ is_our_dir() {
 }
 is_our_dir || { echo "rugpull-check: mktemp gave $DIR, not $TMPBASE/$NAME.XXXXXX" >&2; exit 2; }
 
-# Everything from here on goes to the terminal and to the results file.
-exec > >(trap '' INT TERM; exec tee "$RESULTS") 2>&1
+# Everything from here on goes to the terminal and to the results file. tee is a job of this
+# shell reading a named pipe in the temp directory, not a process substitution: bash 3.2 (macOS)
+# can't wait for a process substitution, so the script could exit before tee had written. The
+# pipe is removed once both ends are open. A Ctrl+C before then stops the script once they are.
+SIGNALLED=0
+trap 'SIGNALLED=1' INT TERM
+mkfifo "$DIR/tee"
+(trap '' INT TERM; exec tee "$RESULTS") < "$DIR/tee" &
 TEE_PID=$!
+exec > "$DIR/tee" 2>&1
+rm -- "$DIR/tee"
 end_output() {
   exec >&- 2>&-
   wait "$TEE_PID" 2> /dev/null || true
@@ -72,6 +80,7 @@ on_signal() {
   exit 130
 }
 trap on_signal INT TERM
+[ "$SIGNALLED" = 0 ] || on_signal
 
 # The documented conditions are a plain terminal. Inside a Claude Code session its CLAUDE_CODE_*
 # variables reach each claude run, so the output says so first. Names only, never values.

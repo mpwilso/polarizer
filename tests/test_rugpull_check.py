@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from helpers.raw import RawClient
+from helpers.slowtee import AtExit, slow_env
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "rugpull-check.sh"
@@ -136,7 +137,9 @@ def check(tmp_path):
     stub.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{STUB}" "$@"\n', encoding="utf-8")
     stub.chmod(0o755)
 
-    def run(mode="", testing=True, extra=None):
+    def run(mode="", testing=True, extra=None, slow=False):
+        """slow: as bash 3.2 would, with a slow tee (tests/helpers/slowtee.py); the results
+        file's text when the script exited is then in dirs["at_exit"]."""
         base = tmp_path / (mode or "normal")
         dirs = {name: base / name for name in ("tmp", "home", "stub")}
         for d in dirs.values():
@@ -157,15 +160,21 @@ def check(tmp_path):
         if testing:
             env["POLARIZER_CHECK_TESTING"] = "1"
         env.update(extra or {})
-        done = subprocess.run(
+        if slow:
+            env = slow_env(env, base)
+        at_exit = AtExit(dirs["results"])
+        proc = subprocess.Popen(
             ["bash", str(SCRIPT)],
             env=env,
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=300,
         )
-        return done.returncode, done.stdout + done.stderr, dirs
+        at_exit.watch(proc)
+        stdout, stderr = proc.communicate(timeout=300)
+        dirs["at_exit"] = at_exit.result()
+        return proc.returncode, stdout + stderr, dirs
 
     return run
 
@@ -303,6 +312,16 @@ def test_notice_inside_a_claude_code_session(check):
     assert "session-value" not in out and "other-value" not in out
     assert dirs["results"].read_text(encoding="utf-8") == out  # the notice is in the file too
     assert len(lines(out, "PASS  ")) == 9 and not lines(out, "FAIL  "), out
+
+
+@POSIX
+def test_output_is_written_before_exit_on_bash_3_2(check):
+    """With bash 3.2's wait and a tee that is slow to start (tests/helpers/slowtee.py), the
+    whole output is in the results file by the time the script exits."""
+    code, out, dirs = check(slow=True)
+    assert code == 0, out
+    assert out.rstrip().endswith(f"Paste the output of: cat {dirs['results']}"), out
+    assert dirs["at_exit"] == out
 
 
 @POSIX

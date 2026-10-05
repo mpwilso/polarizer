@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from helpers.ptyread import finish, read_some
 from helpers.raw import RawClient
+from helpers.slowtee import AtExit, slow_env
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "hold-check.sh"
@@ -45,11 +46,12 @@ def _take_terminal():
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-def drive(env, command, steps=(), timeout=60):
+def drive(env, command, steps=(), timeout=60, on_start=None):
     """Run `scripts/hold-check.sh <command>` on a pseudo-terminal of its own. steps: (text,
     action) pairs, taken in order once each text has appeared: bytes are typed, a callable is
-    called (the stand-in for Claude Code doing something). Returns the exit code and the
-    output, with the terminal's echo of what was typed."""
+    called (the stand-in for Claude Code doing something). on_start is called with the
+    process once it has started. Returns the exit code and the output, with the terminal's
+    echo of what was typed."""
     import pty
 
     controller, terminal = pty.openpty()
@@ -58,6 +60,8 @@ def drive(env, command, steps=(), timeout=60):
         stdin=terminal, stdout=terminal, stderr=terminal, cwd=ROOT, env=env,
         start_new_session=True, preexec_fn=_take_terminal,
     )  # fmt: skip
+    if on_start is not None:
+        on_start(proc)
     os.close(terminal)
     output, cursor, todo = b"", 0, list(steps)
     deadline = time.monotonic() + timeout
@@ -309,6 +313,33 @@ def test_wrong_hold_and_overrides(check):
     assert "polarizer-m2a-check" in aside and any(
         n.startswith("polarizer-m2a-check.before-") for n in aside
     )
+
+
+@POSIX
+def test_output_is_written_before_exit_on_bash_3_2(check):
+    """With bash 3.2's wait and a tee that is slow to start (tests/helpers/slowtee.py), the
+    output of status and of a command that asks a question is all in the results file, and on
+    the terminal, by the time the script exits."""
+    base, env = check
+    tmp = base / "tmp"  # where the named pipe to tee is made
+    tmp.mkdir()
+    slow = slow_env({**env, "TMPDIR": str(tmp)}, base)
+    results = base / "hold-check-results.txt"
+
+    at_exit = AtExit(results)
+    code, out = drive(slow, "status", on_start=at_exit.watch)
+    assert code == 0, out
+    assert at_exit.result().endswith("Next: scripts/hold-check.sh reset\n"), at_exit.result()
+    assert out.rstrip().endswith("Next: scripts/hold-check.sh reset"), out
+
+    at_exit = AtExit(results)
+    code, out = drive(
+        slow, "reset", [("Type yes to approve them as group", b"yes\n")], on_start=at_exit.watch
+    )
+    assert code == 0, out
+    assert at_exit.result().endswith("-- reset: complete\n\n" + START + "\n"), at_exit.result()
+    assert out.rstrip().endswith("-- reset: complete\n\n" + START), out
+    assert list(tmp.iterdir()) == []  # the pipe and its directory were removed
 
 
 # --- scripts/hold_check.py, on every platform

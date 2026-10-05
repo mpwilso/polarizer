@@ -80,14 +80,27 @@ fi
 
 STATE="nothing was changed"
 TEE_PID=""
+SIGNALLED=0
 
 # Everything from here on goes to the terminal and to the results file. tee ignores Ctrl+C, so
-# the line saying where the script stopped is still recorded.
+# the line saying where the script stopped is still recorded. tee is a job of this shell reading
+# a named pipe, not a process substitution: bash 3.2 (macOS) can't wait for a process
+# substitution, so the script could exit before tee had written. The pipe and its directory are
+# removed once both ends are open. A Ctrl+C before then stops the script once they are.
 start_output() {
-  exec > >(trap '' INT TERM; exec tee -a "$RESULTS") 2>&1
+  local dir
+  trap 'SIGNALLED=1' INT TERM
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/m1a-check-output.XXXXXX")"
+  mkfifo "$dir/tee"
+  (trap '' INT TERM; exec tee -a "$RESULTS") < "$dir/tee" &
   TEE_PID=$!
+  exec > "$dir/tee" 2>&1
+  rm -- "$dir/tee"
+  rmdir -- "$dir"
+  trap on_signal INT TERM
   # reset prints its header once it has emptied the file.
   [ "$1" = reset ] || printf '\n== %s, %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ "$SIGNALLED" = 0 ] || on_signal
 }
 
 end_output() {

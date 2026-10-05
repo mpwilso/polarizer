@@ -21,6 +21,7 @@ import mcp_types as types
 import pytest
 from conftest import build_chain
 from helpers.ptyread import finish, read_some
+from helpers.slowtee import AtExit, slow_env
 
 from polarizer import cli, defhash
 
@@ -221,11 +222,12 @@ def _reading_terminal(pid):
     return True if found.stdout.strip() == "ttyin" else None
 
 
-def drive(env, command, replies=(), timeout=60):
+def drive(env, command, replies=(), timeout=60, on_start=None):
     """Run `scripts/m1a-check.sh <command>` on a pseudo-terminal of its own, as its controlling
     terminal, so Ctrl+C (b"\\x03") reaches it as it would from a keyboard. replies: (text, what
-    to type) pairs; each is typed once its text has appeared, in order. Returns the exit code
-    and the output, with the terminal's echo of what was typed.
+    to type) pairs; each is typed once its text has appeared, in order. on_start is called with
+    the process once it has started. Returns the exit code and the output, with the terminal's
+    echo of what was typed.
 
     A Ctrl+C waits, as well, until the script is asleep in its read. bash runs its INT trap
     between commands and when the signal interrupts read(2), but a SIGINT that lands inside the
@@ -240,6 +242,8 @@ def drive(env, command, replies=(), timeout=60):
         stdin=terminal, stdout=terminal, stderr=terminal, cwd=ROOT, env=env,
         start_new_session=True, preexec_fn=_take_terminal,
     )  # fmt: skip
+    if on_start is not None:
+        on_start(proc)
     os.close(terminal)
     output, cursor, todo, asked = b"", 0, list(replies), None
     deadline = time.monotonic() + timeout
@@ -456,6 +460,34 @@ def test_ctrl_c_and_blank_answers_stop_cleanly(check):
     assert len([e for e in kinds(base) if e["kind"] == "tool.approved"]) == 7
     code, out = drive(env, "approve")
     assert code == 0 and "approve is done." in out
+
+
+@POSIX
+def test_output_is_written_before_exit_on_bash_3_2(check):
+    """With bash 3.2's wait and a tee that is slow to start (tests/helpers/slowtee.py), the
+    output of status, and of a question stopped by Ctrl+C, is all in the results file, and on
+    the terminal, by the time the script exits."""
+    base, env = check
+    tmp = base / "tmp"  # where the named pipe to tee is made
+    tmp.mkdir()
+    slow = slow_env({**env, "TMPDIR": str(tmp)}, base)
+    results = base / "m1a-check-results.txt"
+
+    at_exit = AtExit(results)
+    code, out = drive(slow, "status", on_start=at_exit.watch)
+    assert code == 0, out
+    assert at_exit.result().endswith("Next: scripts/m1a-check.sh reset\n"), at_exit.result()
+    assert out.rstrip().endswith("Next: scripts/m1a-check.sh reset"), out
+
+    assert drive(env, "reset")[0] == 0
+    serve(base)
+    at_exit = AtExit(results)
+    code, out = drive(slow, "approve", [("Type yes", b"\x03")], on_start=at_exit.watch)
+    assert code == 130, out
+    stopped = "stopped by Ctrl+C: nothing was approved"
+    assert at_exit.result().rstrip().endswith(stopped), at_exit.result()
+    assert out.rstrip().endswith(stopped), out
+    assert list(tmp.iterdir()) == []  # the pipe and its directory were removed
 
 
 @POSIX

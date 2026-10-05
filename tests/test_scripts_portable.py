@@ -67,6 +67,42 @@ def code_lines(path):
             yield number, line
 
 
+# A `wait` for a process substitution: bash 3.2 can wait only for its own jobs, so there it
+# returns at once, and a script that waited that way for its tee could exit before tee wrote
+# (docs/STAGE7-NOTES.md, Follow-up: macOS output). Read as text: a PID variable set from $!
+# after a process substitution, with no job started with & in between, and any `wait` that
+# names it, wherever it is (a function that waits may come earlier in the file); or `wait $!`
+# straight after a process substitution.
+PROCESS_SUBSTITUTION = re.compile(r"(?<![$<>])[<>]\(")
+BACKGROUND = re.compile(r"(?<![&<>|])&(?![&>])")
+PID_FROM_BANG = re.compile(r"\b(\w+)=\"?\$(?:!|\{!\})")
+WAIT = re.compile(r"\bwait\b(.*)")
+
+
+def procsub_waits(lines):
+    """The (number, line) pairs of each `wait` on a process substitution's PID."""
+    last, tainted, waits = None, set(), []
+    for number, line in lines:
+        events = sorted(
+            [(m.start(), "procsub", None) for m in PROCESS_SUBSTITUTION.finditer(line)]
+            + [(m.start(), "job", None) for m in BACKGROUND.finditer(line)]
+            + [(m.start(), "pid", m.group(1)) for m in PID_FROM_BANG.finditer(line)]
+            + [(m.start(), "wait", m.group(1)) for m in WAIT.finditer(line)]
+        )
+        for _, kind, text in events:
+            if kind in ("procsub", "job"):
+                last = kind
+            elif kind == "pid" and last == "procsub":
+                tainted.add(text)
+            elif kind == "wait":
+                waits.append((number, line, text, last == "procsub" and "$!" in text))
+    return [
+        (number, line)
+        for number, line, args, bang in waits
+        if bang or any(re.search(r"\$\{?" + name + r"\b", args) for name in tainted)
+    ]
+
+
 @pytest.mark.parametrize("path", SCRIPTS, ids=lambda p: p.name)
 def test_no_bash_4_features_or_gnu_only_tools(path):
     found = [
@@ -77,6 +113,37 @@ def test_no_bash_4_features_or_gnu_only_tools(path):
         if re.search(pattern, line)
     ]
     assert found == []
+
+
+@pytest.mark.parametrize("path", SCRIPTS, ids=lambda p: p.name)
+def test_no_wait_on_a_process_substitution(path):
+    found = [f"{path.name}:{n}: {line.strip()}" for n, line in procsub_waits(code_lines(path))]
+    assert found == []
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        ["exec > >(tee -a log) 2>&1", "TEE_PID=$!", 'wait "$TEE_PID" 2> /dev/null || true'],
+        ['end_output() { wait "${TEE_PID}"; }', "exec > >(tee log) 2>&1", "TEE_PID=$!"],
+        ["exec 3> >(cat)", "wait $!"],
+        ["diff <(ls a) <(ls b)", 'wait "$!"'],
+    ],
+)
+def test_the_wait_rule_catches_a_process_substitution(script):
+    assert len(procsub_waits(enumerate(script, 1))) == 1, script
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        ['(trap "" INT; exec tee -a log) < "$dir/tee" &', "TEE_PID=$!", 'wait "$TEE_PID"'],
+        ["exec > >(tee log) 2>&1", "sleep 1 &", "wait $!"],
+        ["exec > >(tee log) 2>&1", 'echo "$x" 2>&1 >&2', "wait"],
+    ],
+)
+def test_the_wait_rule_passes_a_job(script):
+    assert procsub_waits(enumerate(script, 1)) == [], script
 
 
 @pytest.mark.parametrize(

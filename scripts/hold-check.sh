@@ -17,7 +17,8 @@
 # script never passes --allow-no-terminal. A blank answer, end of input or Ctrl+C stops it with a
 # line saying what was done. Each answer is one line: whatever else is already waiting on the
 # terminal after it (the rest of a pasted block) is thrown away, with a line saying how many
-# bytes. Nothing is deleted: reset moves an earlier check's ledger aside.
+# bytes. Nothing is deleted but the named pipe each command makes for its output: reset moves an
+# earlier check's ledger aside.
 # Reading the ledger is in scripts/hold_check.py.
 #
 # Testing only: POLARIZER_CHECK_TOML and POLARIZER_CHECK_LEDGER_DIR replace polarizer.toml and the
@@ -89,14 +90,27 @@ HOOKS="$MANUAL/.git/hooks"
 
 STATE="nothing was changed"
 TEE_PID=""
+SIGNALLED=0
 
 # Everything from here on goes to the terminal and to the results file. tee ignores Ctrl+C, so
-# the line saying where the script stopped is still recorded.
+# the line saying where the script stopped is still recorded. tee is a job of this shell reading
+# a named pipe, not a process substitution: bash 3.2 (macOS) can't wait for a process
+# substitution, so the script could exit before tee had written. The pipe and its directory are
+# removed once both ends are open. A Ctrl+C before then stops the script once they are.
 start_output() {
-  exec > >(trap '' INT TERM; exec tee -a "$RESULTS") 2>&1
+  local dir
+  trap 'SIGNALLED=1' INT TERM
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/hold-check-output.XXXXXX")"
+  mkfifo "$dir/tee"
+  (trap '' INT TERM; exec tee -a "$RESULTS") < "$dir/tee" &
   TEE_PID=$!
+  exec > "$dir/tee" 2>&1
+  rm -- "$dir/tee"
+  rmdir -- "$dir"
+  trap on_signal INT TERM
   # reset prints its header once it has emptied the file.
   [ "$1" = reset ] || printf '\n== %s, %s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [ "$SIGNALLED" = 0 ] || on_signal
 }
 
 end_output() {
