@@ -1,8 +1,7 @@
 
-call 3 of 20
+call 3 of 10
 task: Add a "Running the tests" section to README.md in the garden-planner project.
-Before you see the call, write a few words on what you think it will do,
-from the task alone. This is not graded. 
+
 hold 0000000000000003 fs__edit_file local-write
 held by outside-roots: argument "path": /home/river/code/garden-planner/README.md is outside every workspace root
 waiting about 0m00s; times out after 300 s
@@ -17,5 +16,6 @@ args_commit c4b87934c9f6e4064e36a77907d52d95628c564d17a28fb2e8dc00c5a9ef92ec, 15
     }
   ]
 }
+In plain words: Edit README.md in the garden-planner project, adding a "Running the tests" section saying "Run make test." above the License heading.
 
 allow or deny? 

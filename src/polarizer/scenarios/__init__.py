@@ -6,12 +6,16 @@ lengths, the consistency of answer and shape, and each reason against its rule's
 (docs/HOLD-SPEC.md, section 4). tests/test_scenarios.py runs the full validation: that each
 planted call differs from its task as its shape says, that every name is invented, and the
 balance of the set.
+
+Each set file has a companion, drill-set-<n>-plain.json, holding one line in plain words per
+scenario for the guided condition (section 6, Plain words). It is loaded and checked with its
+set, so a set and its lines always come together; the set file itself is unchanged by it.
 """
 
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 
 FORMAT = "polarizer-drill-scenarios"
@@ -30,6 +34,16 @@ ID = re.compile(r"s[0-9]{3}")
 TASK_LENGTH = (20, 160)
 WHY_LENGTH = 300
 ARGUMENTS_LIMIT = 4096  # bytes of compact JSON
+PLAIN_FORMAT = "polarizer-drill-plain-words"
+PLAIN_WORDS = (4, 24)  # under 25 words
+PLAIN_LENGTH = 200  # characters
+# A plain line describes the call; it never judges it, hints at its answer or compares it with
+# the task (section 6, Plain words). The first list is matched anywhere in a word, the second as
+# whole words.
+PLAIN_FORBIDDEN = ("planted", "clean", "wrong", "suspicious", "unexpected", "safe", "risky")
+PLAIN_COMPARING = ("task", "asked", "instead", "also", "extra", "another", "different",
+                   "however", "actually", "but", "rather", "only")  # fmt: skip
+_PLAIN_COMPARING = re.compile(r"\b(" + "|".join(PLAIN_COMPARING) + r")\b", re.I)
 
 PLAN_KEYS = {
     "changed-argument": {"argument", "intended", "planted", "cue"},
@@ -99,6 +113,7 @@ class ScenarioSet:
     timeout_seconds: int
     scenarios: dict  # id -> scenario, in file order
     doc: dict
+    plain: dict = field(default_factory=dict)  # id -> the line in plain words, guided drills
 
     def ids(self, answer: str) -> list[str]:
         return sorted(i for i, s in self.scenarios.items() if s["answer"] == answer)
@@ -217,20 +232,82 @@ def check(doc, version: int) -> None:
             raise SetProblem(f"the set has no {answer} scenario")
 
 
-def parse(data: bytes, version: int) -> ScenarioSet:
-    """A set from its file's bytes, checked. Raises SetProblem."""
+def plain_problem(line) -> str | None:
+    """What is wrong with one plain line, or None."""
+    if not printable_line(line):
+        return "must be one line of printable ASCII"
+    words = len(line.split())
+    if not PLAIN_WORDS[0] <= words <= PLAIN_WORDS[1] or len(line) > PLAIN_LENGTH:
+        low, high = PLAIN_WORDS
+        return f"must be {low} to {high} words, at most {PLAIN_LENGTH} characters"
+    if not line.rstrip('"').endswith((".", "?")):
+        return "must end a sentence"
+    lowered = line.lower()
+    for word in PLAIN_FORBIDDEN:
+        if word in lowered:
+            return f"uses the word {word!r}"
+    found = _PLAIN_COMPARING.search(line)
+    if found:
+        return f"uses the word {found.group(0).lower()!r}"
+    return None
+
+
+def check_plain(doc, version: int, set_sha256: str, ids) -> dict:
+    """The plain lines of a set from its companion file's parsed JSON: exactly one per scenario
+    of the set, each passing plain_problem. Raises SetProblem."""
+    keys = {"format", "set", "set_sha256", "lines"}
+    if not isinstance(doc, dict) or set(doc) != keys:
+        raise SetProblem(f"the plain words file must have exactly the keys {sorted(keys)}")
+    if doc["format"] != PLAIN_FORMAT:
+        raise SetProblem(f"the plain words file's format is not {PLAIN_FORMAT}")
+    if type(doc["set"]) is not int or doc["set"] != version:
+        raise SetProblem(f"the plain words file is not for set {version}")
+    if doc["set_sha256"] != set_sha256:
+        raise SetProblem(f"the plain words file is for another copy of set {version}")
+    lines = doc["lines"]
+    if not isinstance(lines, dict):
+        raise SetProblem("the plain words file's lines are not a JSON object")
+    for i in ids:
+        if i not in lines:
+            raise SetProblem(f"scenario {i} has no line in plain words")
+    for i, line in lines.items():
+        if i not in ids:
+            raise SetProblem(f"the plain words file has a line for {i}, which is not in the set")
+        problem = plain_problem(line)
+        if problem:
+            raise SetProblem(f"scenario {i}: the line in plain words {problem}")
+    return dict(lines)
+
+
+def parse(data: bytes, version: int, plain: bytes | None = None) -> ScenarioSet:
+    """A set from its file's bytes, checked, with its plain words from the companion file's
+    bytes when given. Raises SetProblem."""
     try:
         doc = json.loads(data.decode("ascii"))
     except (UnicodeDecodeError, ValueError) as e:
         raise SetProblem(f"not ASCII JSON: {e}") from None
     check(doc, version)
+    sha256 = hashlib.sha256(data).hexdigest()
+    ids = [s["id"] for s in doc["scenarios"]]
+    lines = {}
+    if plain is not None:
+        try:
+            plain_doc = json.loads(plain.decode("ascii"))
+        except (UnicodeDecodeError, ValueError) as e:
+            raise SetProblem(f"the plain words file is not ASCII JSON: {e}") from None
+        lines = check_plain(plain_doc, version, sha256, ids)
     return ScenarioSet(
         version=version,
-        sha256=hashlib.sha256(data).hexdigest(),
+        sha256=sha256,
         timeout_seconds=doc["timeout_seconds"],
         scenarios={s["id"]: s for s in doc["scenarios"]},
         doc=doc,
+        plain=lines,
     )
+
+
+def plain_name(version: int) -> str:
+    return f"drill-set-{version}-plain.json"
 
 
 def shipped() -> dict[int, str]:
@@ -244,12 +321,17 @@ def shipped() -> dict[int, str]:
 
 
 def load(version: int) -> ScenarioSet:
-    """One set in the package by its version, checked, so a ledger that names an older set can
-    draw its plan again. Raises SetProblem."""
+    """One set in the package by its version, checked with its plain words, so a ledger that
+    names an older set can draw its plan again. Raises SetProblem."""
     files = shipped()
     if version not in files:
         raise SetProblem(f"scenario set {version} is not installed")
-    return parse(resources.files(__name__).joinpath(files[version]).read_bytes(), version)
+    here = resources.files(__name__)
+    try:
+        plain = here.joinpath(plain_name(version)).read_bytes()
+    except OSError:
+        raise SetProblem(f"scenario set {version} has no plain words file") from None
+    return parse(here.joinpath(files[version]).read_bytes(), version, plain)
 
 
 def newest() -> ScenarioSet:

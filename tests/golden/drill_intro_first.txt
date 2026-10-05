@@ -18,5 +18,9 @@ in <dir>.
 Drills measure attention when you know you are being tested. Use them to see
 trends in your own oversight, not to grade or rank anyone.
 
-This drill: plain. Type q at any prompt to stop.
+A first try can be shorter: type q now and run polarizer drill --calls 10,
+which takes about five minutes.
+
+This drill: guided, because it is your first. Under each call, one more line
+says in plain words what the call would do. Type q at any prompt to stop.
 Press Enter to start.

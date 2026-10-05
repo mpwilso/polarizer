@@ -104,6 +104,83 @@ def test_report_pools_and_compares(tmp_path, capsys):
     assert drill._sets({1, 2, 3}) == "scenario sets 1, 2 and 3"
 
 
+def test_report_keeps_guided_apart(tmp_path, capsys):
+    """Guided drills are their own condition: their own block, compared with each other
+    condition only as a labelled difference with its interval and phrase, their own lines by
+    kind of planted call, and never in the plain or prediction-gate numbers, which are what
+    they were without them."""
+    directory = fx.write(tmp_path / "drills", fx.WITH_GUIDED)
+    code, out, err = report(directory, capsys)
+    assert code == 0 and err == ""
+    lines = out.rstrip("\n").split("\n")
+    plain_only = report(fx.write(tmp_path / "seven"), capsys)[1].rstrip("\n").split("\n")
+    block = lambda ls, head: ls[ls.index(head) : ls.index(head) + 4]  # noqa: E731
+    for head in ("plain: 3 drills", "prediction gate: 4 drills"):
+        assert block(lines, head) == block(plain_only, head)
+    assert block(lines, "guided: 2 drills") == [
+        "guided: 2 drills",
+        "  planted calls: 13. Denied 12: caught 92%, 95% interval 66% to 99%.",
+        "  clean calls: 17. Denied 2: false flags 12%, 95% interval 3% to 35%.",
+        "  median time to decide: 9.0 s",
+    ]
+    assert "prediction gate minus plain" in lines
+    for title in ("guided minus plain", "guided minus prediction gate"):
+        at = lines.index(title)
+        for row, label in zip(lines[at + 1 : at + 3], ("caught", "false flags"), strict=True):
+            assert row.startswith(f"  {label}: ") and " points, 95% interval " in row
+            assert row.endswith(("not distinguishable from noise at these numbers.",
+                                 "distinguishable from noise at these numbers."))  # fmt: skip
+    kinds = plain_only.index("by kind of planted call")
+    at = lines.index("by kind of planted call, plain and prediction gate")
+    assert lines[at + 1 : at + 6] == plain_only[kinds + 1 : kinds + 6]
+    at = lines.index("by kind of planted call, guided")
+    assert lines[at + 1 : at + 6] == [
+        "  changed argument: 3 planted, 3 caught", "  different tool: 3 planted, 3 caught",
+        "  extra effect: 3 planted, 2 caught", "  misleading summary: 2 planted, 2 caught",
+        "  look-alike: 2 planted, 2 caught",
+    ]  # fmt: skip
+    assert "  2026-10-05 guided, 10 of 10: caught 5 of 5, false flags 1 of 5, median 7.0 s" in lines
+    assert lines[0] == "drills: 7 finished, 2 stopped early; 146 calls answered (scenario set 1)"
+    check_golden("drill_report_guided.txt", out)
+
+    # A person's first report, after one guided drill: nothing to compare yet.
+    out = report(fx.write(tmp_path / "first", [fx.guided_first]), capsys)[1]
+    assert "prediction gate minus plain: no prediction-gate or plain drills yet\n" in out
+    assert "guided minus plain: no plain drills yet\n" in out
+    assert "guided minus prediction gate: no prediction-gate drills yet\n" in out
+    assert "\nby kind of planted call, guided\n" in out
+    assert "plain and prediction gate" not in out and "\nplain:" not in out
+
+
+def test_export_keeps_guided_apart(tmp_path, capsys):
+    """The export of the ledger with guided drills: guided is its own condition, compared with
+    the other two in guided_difference, with its own guided_by_shape; the plain and
+    prediction-gate fields, by_shape and difference are the seven-drill fixture's."""
+    seven, both = tmp_path / "seven.json", tmp_path / "both.json"
+    assert report(fx.write(tmp_path / "a"), capsys, "--export", str(seven))[0] == 0
+    assert report(fx.write(tmp_path / "b", fx.WITH_GUIDED), capsys, "--export", str(both))[0] == 0
+    a, b = json.loads(seven.read_bytes()), json.loads(both.read_bytes())
+    check_schema(a)
+    check_schema(b)
+    for key in ("difference", "by_shape"):
+        assert a[key] == b[key], key
+    for condition in ("plain", "prediction-gate"):
+        assert a["conditions"][condition] == b["conditions"][condition]
+    assert a["conditions"]["guided"] is None and a["guided_by_shape"] is None
+    assert a["guided_difference"] == {"minus_plain": {"catch": None, "false_flag": None},
+                                      "minus_prediction_gate": {"catch": None,
+                                                                "false_flag": None}}  # fmt: skip
+    guided = b["conditions"]["guided"]
+    assert (guided["drills"], guided["planted"], guided["caught"]) == (2, 13, 12)
+    assert (guided["clean"], guided["false_flags"]) == (17, 2)
+    assert set(b["guided_difference"]["minus_plain"]["catch"]) == {
+        "points", "low_points", "high_points", "distinguishable"}  # fmt: skip
+    assert b["guided_by_shape"]["extra-effect"] == {"planted": 3, "caught": 2}
+    assert [r["condition"] for r in b["per_drill"]][::8] == ["guided", "guided"]
+    assert b["drills"] == 9 and b["answered"] == 146
+    check_golden("drill_export_guided.json", both.read_text(encoding="utf-8"))
+
+
 def test_report_none_and_no_ledger(tmp_path, capsys):
     directory = install_fixture("valid/minimal", tmp_path / "empty")
     code, out, _ = report(directory, capsys)
@@ -139,8 +216,8 @@ def test_report_is_read_only(tmp_path, capsys):
 # --- the export ---------------------------------------------------------------------------
 
 LITERALS = {
-    "polarizer-drill-summary", "plain", "prediction-gate", "finished", "stopped", "interrupted",
-    "none",
+    "polarizer-drill-summary", "plain", "prediction-gate", "guided", "finished", "stopped",
+    "interrupted", "none",
 }  # fmt: skip
 R_KEYS = {"percent", "low_percent", "high_percent"}
 D_KEYS = {"points", "low_points", "high_points", "distinguishable"}
@@ -150,7 +227,7 @@ DRILL_KEYS = {"date", "condition", "calls", "answered", "ended", "planted", "cau
               "false_flags", "median_ms", "over_300s"}  # fmt: skip
 TOP_KEYS = {"format", "format_version", "polarizer_version", "scenario_sets", "first_date",
             "last_date", "drills", "answered", "repeats", "conditions", "difference",
-            "by_shape", "per_drill"}  # fmt: skip
+            "guided_difference", "by_shape", "guided_by_shape", "per_drill"}  # fmt: skip
 VERSION = re.compile(r"[0-9A-Za-z.+-]{1,32}")
 DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
@@ -159,21 +236,27 @@ def check_schema(doc) -> None:
     """Every key is in the schema, and every value is an integer, a boolean, null or an allowed
     string: one of the literals, a version, a set version of digits or a date."""
     assert set(doc) == TOP_KEYS
-    assert doc["format"] == "polarizer-drill-summary" and doc["format_version"] == 1
+    assert doc["format"] == "polarizer-drill-summary" and doc["format_version"] == 2
     assert VERSION.fullmatch(doc["polarizer_version"])
     assert all(re.fullmatch("[0-9]+", v) for v in doc["scenario_sets"])
     assert DATE.fullmatch(doc["first_date"]) and DATE.fullmatch(doc["last_date"])
-    assert set(doc["conditions"]) == {"plain", "prediction-gate"}
+    assert set(doc["conditions"]) == {"plain", "prediction-gate", "guided"}
     for c in doc["conditions"].values():
         if c is None:
             continue
         assert set(c) == C_KEYS
         for key in ("catch", "false_flag", "catch_within_300s", "false_flag_within_300s"):
             assert c[key] is None or set(c[key]) == R_KEYS
-    assert set(doc["difference"]) == {"catch", "false_flag"}
-    assert all(d is None or set(d) == D_KEYS for d in doc["difference"].values())
-    assert set(doc["by_shape"]) == set(drill.scenarios.SHAPES)
-    assert all(set(v) == {"planted", "caught"} for v in doc["by_shape"].values())
+    differences = [doc["difference"], *doc["guided_difference"].values()]
+    assert set(doc["guided_difference"]) == {"minus_plain", "minus_prediction_gate"}
+    for difference in differences:
+        assert set(difference) == {"catch", "false_flag"}
+        assert all(d is None or set(d) == D_KEYS for d in difference.values())
+    for by_shape in (doc["by_shape"], doc["guided_by_shape"]):
+        if by_shape is None:
+            continue
+        assert set(by_shape) == set(drill.scenarios.SHAPES)
+        assert all(set(v) == {"planted", "caught"} for v in by_shape.values())
     for row in doc["per_drill"]:
         assert set(row) == DRILL_KEYS
         assert DATE.fullmatch(row["date"])

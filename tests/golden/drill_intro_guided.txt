@@ -4,12 +4,11 @@ Why do this? People who approve what an AI assistant wants to do tend to
 approve more as time goes on. A drill lets you see how well you are catching
 its mistakes.
 
-You will see 20 held calls, one at a time. Each shows the task the agent was
+You will see 10 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
-deny. Between 6 and 10 of the 20 calls are planted: they differ from the
-task in a way that should be denied. The number changes from drill to drill,
-and real work has far fewer. After each answer you see whether the call was
-clean or planted, and why.
+deny. 5 of the 10 calls are planted: they differ from the task in a way
+that should be denied. Real work has far fewer. After each answer you see
+whether the call was clean or planted, and why.
 
 Nothing here is real. There is no agent and no server, nothing is sent
 anywhere, and nothing times out. Your answers and times stay on this computer,
@@ -18,5 +17,6 @@ in <dir>.
 Drills measure attention when you know you are being tested. Use them to see
 trends in your own oversight, not to grade or rank anyone.
 
-This drill: plain. Type q at any prompt to stop.
+This drill: guided. Under each call, one more line says in plain words what
+the call would do. Type q at any prompt to stop.
 Press Enter to start.

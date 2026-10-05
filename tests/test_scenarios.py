@@ -27,6 +27,14 @@ CLEAN = [s for s in ALL if s["answer"] == "clean"]
 # set version (section 6, Versioning). Set 1 is pinned unreviewed: until the owner's review at
 # stage 8's stop it has not shipped, and the owner's corrections edit it and update this value.
 PINNED = {1: "e2010c060409e8ba27147b4c9d7542cb33dd47f2556919ada5ff6b396692eb80"}
+# sha256 of each set's plain words file (section 6, Plain words). A changed line, like a changed
+# scenario, needs a new set version: a guided drill's set and set_sha256 then name its lines too.
+PLAIN_PINNED = {1: "0d683e047477e0f1c306090fdf1ee7a42ae489261e40546e4701fe3c0edc9011"}
+# The words a plain line never uses (the brief's list), and whole words that would compare the
+# call with its task.
+FORBIDDEN = ("planted", "clean", "wrong", "suspicious", "unexpected", "safe", "risky")
+COMPARING = ("task", "asked", "instead", "also", "extra", "another", "different", "however",
+             "actually", "but", "rather", "only")  # fmt: skip
 
 # Look-alike characters, each mapped to the Latin letter it imitates (section 6, look-alike).
 CONFUSABLES = {
@@ -157,6 +165,119 @@ def test_scenario_set_hash_pinned():
     for version, name in scenarios.shipped().items():
         data = resources.files(scenarios).joinpath(name).read_bytes()
         assert hashlib.sha256(data).hexdigest() == PINNED[version], name
+
+
+# --- the lines in plain words (section 6, Plain words) ----------------------------------------
+
+
+def plain_bytes(version: int) -> bytes:
+    return resources.files(scenarios).joinpath(scenarios.plain_name(version)).read_bytes()
+
+
+def test_plain_words_hash_pinned():
+    for version in scenarios.shipped():
+        assert hashlib.sha256(plain_bytes(version)).hexdigest() == PLAIN_PINNED[version]
+
+
+def test_every_scenario_has_one_plain_line():
+    """The companion file names this set and its sha256, and has exactly one line per scenario
+    of the set, no other ids; the loader gives them to the set."""
+    doc = json.loads(plain_bytes(SET.version))
+    assert doc["format"] == "polarizer-drill-plain-words" and doc["set"] == SET.version
+    assert doc["set_sha256"] == SET.sha256 == PINNED[SET.version]
+    assert sorted(doc["lines"]) == sorted(SET.scenarios) and len(doc["lines"]) == 150
+    assert SET.plain == doc["lines"]
+    assert plain_bytes(SET.version).isascii()
+
+
+def test_plain_words_use_no_forbidden_word():
+    """No line uses a word that judges the call or names its answer, in any case and inside any
+    word, nor a word that compares it with the task."""
+    for i, line in SET.plain.items():
+        lowered = line.lower()
+        assert not [w for w in FORBIDDEN if w in lowered], (i, line)
+        assert not set(re.findall(r"[a-z]+", lowered)) & set(COMPARING), (i, line)
+    assert set(FORBIDDEN) == set(scenarios.PLAIN_FORBIDDEN)
+    assert set(COMPARING) == set(scenarios.PLAIN_COMPARING)
+
+
+def test_plain_words_length():
+    """About one sentence: 4 to 24 words (under 25), at most 200 characters, one line of
+    printable ASCII, ending a sentence."""
+    for i, line in SET.plain.items():
+        assert 4 <= len(line.split()) <= 24 and len(line) <= 200, (i, line)
+        assert scenarios.printable_line(line) and line.rstrip('"').endswith((".", "?")), i
+
+
+def test_plain_words_name_the_call():
+    """Each line names its call exactly where it matters: a planted call's line shares a word
+    with the value that differs from its task (or, for a different tool, with the tool), and for
+    a changed argument or a look-alike holds that value's last part as `holds` would print
+    it."""
+    texts = audit.focus(ALL)
+    for s in PLANTED:
+        line, text = SET.plain[s["id"]], texts[s["id"]]
+        assert audit.words(text) & audit.words(line), (s["id"], text, line)
+        if s["shape"] in ("changed-argument", "look-alike"):
+            planted = printable(s["plant"]["planted"]).removeprefix("https://").rstrip("/")
+            assert planted.split("/")[-1] in line, (s["id"], planted, line)
+
+
+def test_plain_words_leak_nothing():
+    """Section 6, Plain words: on the guided screen, with the plain line's length and whether
+    it names the argument that matters added to the audit's features, no feature value has a
+    tell, and the best single-feature rule still beats always allow by at most 10 points."""
+    assert audit.tells(ALL, SET.plain) == []
+    split = audit.split(ALL, SET.plain)
+    assert set(split) >= set(audit.PLAIN_NAMES)
+    rows = audit.experiment(SET, 1000, SET.plain)
+    assert len(rows) == len(audit.NAMES) + len(audit.PLAIN_NAMES) + 2
+    allow, best = rows[0], audit.best_single(rows)
+    assert best[1] - allow[1] <= audit.MARGIN, best
+    assert max(r[2] for r in rows[1:-1]) - allow[2] <= audit.MARGIN, rows
+
+
+def test_plain_leak_check_catches_a_leak():
+    """The leak check fails on lines that give the answer away: planted lines made longer than
+    every clean one, and clean lines that never name their argument."""
+    long = {s["id"]: SET.plain[s["id"]] + " " + "word " * 12 for s in PLANTED}
+    vague = {s["id"]: "Xyzzy plugh." for s in CLEAN}
+    for lines in ({**SET.plain, **long}, {**SET.plain, **vague}):
+        assert audit.tells(ALL, lines) != []
+    found = audit.tells(ALL, {**SET.plain, **vague})
+    assert ("plain names the argument", "no", 0, 90) in found
+    found = audit.tells(ALL, {**SET.plain, **long})
+    assert ("plain length", "<70", 0, 26) in found and ("plain length", "70-99", 0, 28) in found
+
+
+def test_plain_words_loader_checks():
+    """The loader refuses a plain words file with a missing or an extra id, a line for another
+    copy of the set, a forbidden or comparing word, or a line too long, each as a SetProblem,
+    which the drill prints as its one refusal line."""
+    data = resources.files(scenarios).joinpath("drill-set-1.json").read_bytes()
+    good = json.loads(plain_bytes(1))
+    assert scenarios.parse(data, 1, plain_bytes(1)).plain == good["lines"]
+
+    def problem(change) -> str:
+        doc = json.loads(json.dumps(good))
+        change(doc)
+        with pytest.raises(scenarios.SetProblem) as e:
+            scenarios.parse(data, 1, json.dumps(doc).encode("ascii"))
+        return str(e.value)
+
+    assert problem(lambda d: d["lines"].pop("s042")) == "scenario s042 has no line in plain words"
+    assert problem(lambda d: d["lines"].update(s151="Delete the file x.")) == (
+        "the plain words file has a line for s151, which is not in the set"
+    )
+    assert "another copy of set 1" in problem(lambda d: d.update(set_sha256="0" * 64))
+    assert problem(lambda d: d["lines"].update(s001="Write a risky file now.")) == (
+        "scenario s001: the line in plain words uses the word 'risky'"
+    )
+    assert problem(lambda d: d["lines"].update(s001="Write it, but in a new place.")) == (
+        "scenario s001: the line in plain words uses the word 'but'"
+    )
+    assert "4 to 24 words" in problem(lambda d: d["lines"].update(s001="word " * 25 + "end."))
+    assert "not for set 1" in problem(lambda d: d.update(set=2))
 
 
 def test_clean_calls_match_their_task():
@@ -420,6 +541,7 @@ def test_review_sheet(tmp_path, capsys):
         section = text.split(f"\n## {s['id']}\n", 1)[1].split("\n## ", 1)[0]
         answer = f"planted, shape {s['shape']}" if s["answer"] == "planted" else "clean"
         block = drill.call_block(s, "0" * 16, "0" * 64, "1" * 16, helper.TS, helper.TS, 300)
+        block.append(drill.PLAIN_PREFIX + SET.plain[s["id"]])
         assert section.startswith(f"\n{answer}\n\n```text\ntask: {s['task']}\n\n"), s["id"]
         assert "\n".join(block) + "\n```\n\nReveal:\n" in section, s["id"]
         assert section.endswith(f"\n```text\nwhy: {s['why']}\n```\n"), s["id"]
@@ -433,6 +555,10 @@ def test_review_sheet(tmp_path, capsys):
     audit_part = summary.split("\n### Shortcut audit, set 1\n", 1)[1]
     assert "\n#### tool\n" in audit_part and "\n#### Leave-one-out accuracy\n" in audit_part
     assert "\nTells: none.\n" in audit_part
+    guided = audit_part.split("\n### Shortcut audit, set 1, guided screen\n", 1)[1]
+    assert "\n#### plain length\n" in guided and "\n#### plain names the argument\n" in guided
+    assert "\n#### tool\n" not in guided.split("\n### Planted count")[0]
+    assert "\nTells: none.\n" in guided
     assert audit_part.split("\n### Planted count, set 1\n", 1)[1].count("| 100.0% | 0 |") == 2
     assert text.endswith("|\n")
     assert helper.main(["sheet"]) == 2 and helper.main(["sheet", "--out"]) == 2
@@ -442,6 +568,7 @@ def test_review_sheet(tmp_path, capsys):
     assert (
         printed.startswith("# Shortcut audit, set 1\n") and "\n# Planted count, set 1\n" in printed
     )
+    assert "\n# Shortcut audit, set 1, guided screen\n" in printed
     assert printed.endswith("|\n") and helper.main(["audit", "x"]) == 2
 
 

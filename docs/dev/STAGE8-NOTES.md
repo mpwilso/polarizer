@@ -284,3 +284,71 @@ docs/DRILL-GUIDE.md's "How to read the numbers" gains one sentence: `Always answ
 - **`scripts/dev/guard.sh check`** against `snapshot-20261005T184537Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too; exit 0.
 - **`~/.local/share/polarizer-drills`** was not created; every drill in this round ran in a temporary directory or drew plans only.
 - **Not run:** anything on Windows or macOS; a person's drill under the drawn count; CI. Set 2 was not made (item 1).
+
+## Drill usability round (Oct 5, 2026, UTC)
+
+The owner's brief after a first drill run as a person who is not an engineer: they stopped after 3 calls, with no basis to judge calls they did not write, found the prediction step pointless, and could not see the value of doing it. Five items. Guard snapshot `snapshot-20261005T195857Z.txt` taken first. Written as the work goes.
+
+### 0. The ledger format
+
+Checked before building, as the brief asked: the guided condition needs no change to the ledger format, the hash chain, a status or an exit code. `guided` is a new value of `drill.started`'s `condition`, and `first-drill` a new value of its `condition_from` (a first guided drill is neither drawn nor flagged); no kind or field is added. LEDGER-SPEC.md's `drill.started` row now lists both fields' values. `--condition`'s usage line names guided, with the same exit 2.
+
+### 1. The guided condition
+
+**The lines.** `src/polarizer/scenarios/drill-set-1-plain.json` holds 150 lines, one per scenario, keyed by id, with `set` 1 and the set file's sha256; the set file and its pin are unchanged. They were written by hand in this session from a listing of each scenario's id, tool and compact arguments only (no answer, shape, task or reveal), so the wording could not follow the answer. Each names the action in everyday words and every file, place, recipient and value as the call has it.
+
+**What changed after the first look.** The first draft explained some files ("the private login key", "the saved website logins", "a script git runs automatically before each push") and wrote a URL inside a message as "with a link to". Counting each word over the answers showed those words only on planted lines: such glosses go to the files planted calls touch, so they hinted. All file glosses were removed and message bodies quoted as they are (35 lines rewritten, the same rule applied to every line of that kind whatever its answer). Then the 8 push lines were changed from "Upload the branch" to "Push (upload) the branch", so a push names its tool as other lines do. The small test set got its own 26 lines (`tests/helpers/drill_scenarios-plain.json`).
+
+**Rules, in the loader** (`scenarios.check_plain`, run by `scenarios.load` with the set, so a bad file is the set's one refusal line, exit 2): the format, the set version, `set_sha256` equal to the set file's, exactly one line per scenario and no other id; each line printable ASCII, 4 to 24 words, at most 200 characters, ending a sentence; none of the brief's seven words, as substrings in any case; none of twelve comparing words as whole words (`task`, `asked`, `instead`, `also`, `extra`, `another`, `different`, `however`, `actually`, `but`, `rather`, `only`), this round's addition. Set 1's lines are 6 to 24 words.
+
+**The leak audit** (`polarizer.scenarios.audit`, `guided=True`): the call screen's features plus two of the plain line, its length in characters (under 70, 70 to 99, 100 to 124, 125 and over: edges set at the first draft's quartiles, 69.75, 102.5 and 123.25; the final lines' are 67, 96 and 118) and whether it shares a word with the argument that matters (a planted call's `plant.planted`, or its tool for a different tool; for a clean call the argument planted calls on its tool change most often, or its first argument). Set 1: no tell. Plain length: under 70, 17 planted and 26 clean; 70 to 99, 10 and 28; 100 to 124, 20 and 24; 125 and over, 13 and 12. Names the argument: yes, 60 and 89; no, 0 and 1 (s080, an empty list). Leave-one-out over 1,000 drills: plain length 52.0% (scenarios) and 51.5% (drills), naming 60.0% and 59.9%, always allow 60.0% and 59.9%; the best single-feature rule is still argument bytes, 64.0% and 64.2%, as on the call screen; naive Bayes 43.3% and 43.8%. Planted lines run a little longer (median 107.5 characters against 94), since they describe more arguments; no length bucket reaches a tell.
+
+**The screen.** A guided call is the plain call with `In plain words: <line>` inserted after the block, before the blank line and `allow or deny? `. `test_guided_call_is_the_plain_call_and_one_line` checks for all 150 scenarios that taking that line out gives the plain screen byte for byte, and `test_drill_block_equals_holds_block`, unchanged, that the block is what `polarizer holds` prints.
+
+**Kept apart.** The report gets a `guided:` block, `guided minus plain` and `guided minus prediction gate` (labelled differences with their Newcombe intervals and the noise phrase), and `by kind of planted call, guided` beside `by kind of planted call, plain and prediction gate`; with no guided drill the report is as before, so `drill_report.txt` is unchanged. The export is schema version 2: `conditions.guided`, `guided_difference` (`minus_plain`, `minus_prediction_gate`) and `guided_by_shape`; `difference` and `by_shape` keep their meaning over the other two conditions. Only the report's first two lines and the export's `drills`, `answered` and `repeats` count every drill. A new fixture, `fx.WITH_GUIDED` (a guided first drill before the seven, a flagged guided drill after them), gives `drill_report_guided.txt` and `drill_export_guided.json`.
+
+### 2. A short first drill
+
+**Ten calls.** `planted_range(10)` is 5 to 5: every drill of 10 has 5 planted and 5 clean calls and every shape. `test_ten_call_drills` checks 2,000 drills of 10 in a row with the shipped set, each leaving out the two before it: all had 5 and 5, all five shapes, nothing repeated. Such a drill's end screen and report give both rates with intervals, wide ones: 5 of 5 caught is 100%, 95% interval 56% to 100%; 4 of 5 is 80%, 37% to 97%; 0 of 5 false flags is 0%, 0% to 44%. Stopped before 5 of a kind, it says `too few to say a rate (5 or more needed)`.
+
+**A first drill is guided.** Without `--condition`, a drill started when no drill in the ledger has an answer is guided, with `condition_from` `first-drill`, and its first screen says `This drill: guided, because it is your first.` A drill stopped before its first answer leaves the next one first (the report leaves such drills out too); counting any `drill.started` as a record would have taken the guided drill from a person who typed q at the first screen. Later drills draw plain or prediction gate as before. The plan's draw is made either way, so the order of calls doesn't change, `--seed` included.
+
+**The suggestion.** A first drill of more than 10 calls shows, before its `This drill:` lines: `A first try can be shorter: type q now and run polarizer drill --calls 10, / which takes about five minutes.` `polarizer drill --help` now reads:
+
+```text
+  --calls N           calls in the drill, 10 to 40 (default 20; 10 for a first
+                      try)
+  --condition NAME    plain, prediction-gate or guided (default: guided for a
+                      first drill, then plain or prediction-gate at random)
+```
+
+### 3. The first screen
+
+The intro gains, after its title: `Why do this? People who approve what an AI assistant wants to do tend to / approve more as time goes on. A drill lets you see how well you are catching / its mistakes.` The privacy paragraph and the closing lines are unchanged. The claim rests on MEASURE-SPEC.md section 2's first source (a fatiguing, overloaded reviewer rubber-stamps); the secondary 93% figure stays out. The prediction prompt is the brief's sentence, wrapped after `do,` to fit 80 columns: `Before you see the call, write a few words on what you think it will do, / from the task alone. This is not graded. `.
+
+**Golden files changed** (regenerated with `POLARIZER_UPDATE_GOLDEN=1`, each diff read): `drill_intro_plain.txt` and `drill_intro_prediction_gate.txt` (the `Why do this?` paragraph only), `drill_call_prediction_gate.txt` (the prompt only), `drill_refused_condition.txt` (the usage line), `drill_export.json` (format version 2, `guided` null, the two new keys). New: `drill_intro_first.txt`, `drill_intro_guided.txt`, `drill_call_guided.txt` (the plain call's golden plus one line, `diff` checked), `drill_report_guided.txt`, `drill_export_guided.json`. Unchanged: every other golden file, `drill_report.txt` and every `holds_*`, `allow_*` and `deny_*` file included.
+
+### 4. The guide
+
+docs/DRILL-GUIDE.md now says first who drills are for (people who approve what AI assistants do, such as developers, and anyone curious, with the guided version), recommends `polarizer drill --calls 10` as the first drill (about five minutes), explains the three conditions in two sentences, shows a guided call of 10 with its plain line, and reads the numbers of a drill of 10. About 1,000 words of prose (965 before). `tests/test_drill_guide.py` passes, with three changes that follow the guide: its one drill command is now `polarizer drill --calls 10`, the excerpt is compared with `drill_call_guided.txt`, and the pseudo-terminal run expects a guided drill of 10 (and answers the new prediction prompt, which a first drill doesn't show).
+
+### 5. Tests changed, and why
+
+- **`golden_drill`** passes `--condition plain`, since a first drill in a new directory is now guided; a later `--condition` still wins. Tests that ran a fresh drill and expected plain (`test_over_300_is_marked`, the stopped drill in `test_drill_golden`) pass it too.
+- **`test_condition_random_and_flag`** became `test_condition_first_random_and_flag` (first drill, flag on a first drill, later drill, guided by flag, stopped-at-intro first drill, a first drill of 10).
+- **`test_plan_is_reproducible_from_the_ledger`** expects its first drill guided (`first-drill`) and its second the plan's draw.
+- **`test_drill_golden`** runs the plain and prediction-gate drills after an earlier answered drill, so their intros are the ordinary ones, and adds the first-drill and guided screens.
+- **`test_review_sheet`** expects the plain line inside each scenario's screen and the guided screen's audit after the call screen's.
+- **`check_schema`** in `test_drill_report.py` is schema version 2.
+
+### 6. Runs
+
+- **`scripts/test.sh`** on the finished tree: ruff check and format clean, `check_docs: 28 files, 0 findings`, `1270 passed, 13 skipped in 281.37s (0:04:41)`, exit 0, 282 s wall (1256 before this round). An earlier run, before the last comment and docs edits, gave the same counts in 274.40 s.
+- **The new and changed test files** (`tests/test_drill.py`, `test_scenarios.py`, `test_drill_guide.py`, `test_drill_report.py`; 439 tests), five times in a row: 439 passed each time, in 22.16 s to 23.29 s.
+- **Once under load,** with two busy-loop Python processes (`python3 -c 'while True: pass'`, PIDs 88774 and 88775, each at 99% CPU before and 99.9% after), started before and stopped by their PIDs after: 439 passed in 23.70 s.
+- **Time bounds:** the new tests don't wait. `test_guided_call_is_the_plain_call_and_one_line` runs 300 two-call drills in process; `test_plain_words_leak_nothing` draws 1,000 plans; `test_ten_call_drills` 2,000.
+- **The package:** an offline wheel build (`UV_OFFLINE=1 uv build --wheel`, into the scratch directory) holds `polarizer/scenarios/drill-set-1-plain.json` beside the set file.
+- **The pre-push scan** (the owner's home path, the Windows users path, the Windows user name and five other words, case-insensitive), over all 378 files in the commit: 0 of each.
+- **`scripts/dev/guard.sh check`** against `snapshot-20261005T195857Z.txt`, before the commit: no changes in any guarded repo or directory, the MCP config hashes in `~/.claude.json` unchanged (6 locations); its size and mtime changed (92461 to 92297 bytes, 20:33:21Z), which is Claude Code's own bookkeeping and informational; exit 0.
+- **`~/.local/share/polarizer-drills` exists,** created at 19:17:27 UTC and last written at 19:52:36 UTC, before this session's snapshot (19:58:57 UTC): the owner's own first drill. This session did not open it or write to it; every drill here ran in a temporary directory. That ledger has answered calls, so the owner's next `polarizer drill` there is not a first drill and draws plain or prediction gate; `--condition guided` gives a guided one.
+- **Not run:** anything on Windows or macOS; CI; a person's guided drill. The plain lines have been read by their author only; section 6's second-reader rule applies to them as to scenarios, and the review sheet now shows each line under its block for that.

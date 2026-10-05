@@ -1,1 +1,1 @@
-polarizer: --condition must be plain or prediction-gate
+polarizer: --condition must be plain, prediction-gate or guided

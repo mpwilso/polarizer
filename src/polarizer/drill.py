@@ -10,7 +10,10 @@ from the ledger alone, through the same functions.
 
 The plan of a drill (condition, number of planted calls, order) is a function of its seed, the
 set, the number of calls and the excluded ids, drawn from SHA-256 so any later Python can draw
-it again (section 6, Sampling).
+it again (section 6, Sampling). The draw is between plain and prediction-gate; the guided
+condition, which adds a line in plain words under each call, is a drill's condition only when
+--condition chooses it or when no drill in the ledger has an answer yet (section 4, Defaults).
+Its results are never pooled with the other two.
 """
 
 import hashlib
@@ -33,10 +36,18 @@ CLOSING = [
     "Drills measure attention when you know you are being tested. Use them to see",
     "trends in your own oversight, not to grade or rank anyone.",
 ]
-CONDITIONS = ("plain", "prediction-gate")
-CONDITION_WORDS = {"plain": "plain", "prediction-gate": "prediction gate"}
+CONDITIONS = ("plain", "prediction-gate")  # what the plan draws between
+GUIDED = "guided"
+CONDITION_NAMES = (*CONDITIONS, GUIDED)
+CONDITION_WORDS = {"plain": "plain", "prediction-gate": "prediction gate", "guided": "guided"}
 CALLS_RANGE = (10, 40)
 DEFAULT_CALLS = 20
+FIRST_TRY_CALLS = 10
+PLAIN_PREFIX = "In plain words: "
+PREDICT_PROMPT = (
+    "Before you see the call, write a few words on what you think it will do,\n"
+    "from the task alone. This is not graded. "
+)
 OVER_MS = 300_000  # an answer slower than a real hold's default timeout
 PREDICTION_LIMIT = 200
 STOP_LINE = "polarizer: the drill ledger could not record that; the drill stops"
@@ -425,11 +436,46 @@ def _sets(versions: set) -> str:
 
 
 def _by_condition(drills) -> dict:
-    grouped = {c: [] for c in CONDITIONS}
+    grouped = {c: [] for c in CONDITION_NAMES}
     for record, found in drills:
         if record.started.get("condition") in grouped:
             grouped[record.started["condition"]].append((record, found))
     return grouped
+
+
+def _comparison(first: str, second: str, tallies: dict) -> list[str]:
+    """`<first> minus <second>` for the catch and false-flag rates, each a difference with its
+    interval and one of section 7's phrases, or one line when either has no drills."""
+    title = f"{CONDITION_WORDS[first]} minus {CONDITION_WORDS[second]}"
+    missing = [c for c in (first, second) if c not in tallies]
+    if missing:
+        return [f"{title}: no {' or '.join(missing)} drills yet"]
+    a, b = tallies[first], tallies[second]
+    lines = [title]
+    for label, k1, n1, k2, n2 in (
+        ("caught", a.caught, a.planted, b.caught, b.planted),
+        ("false flags", a.false_flags, a.clean, b.false_flags, b.clean),
+    ):
+        parts = measure.difference_parts(k1, n1, k2, n2) if n1 and n2 else None
+        if parts is None:
+            lines.append(f"  {label}: {measure.TOO_FEW_TO_COMPARE}.")
+            continue
+        points, low, high, apart = parts
+        phrase = measure.DISTINGUISHABLE if apart else measure.NOT_DISTINGUISHABLE
+        lines.append(
+            f"  {label}: {measure.signed(points)} points, 95% interval {measure.signed(low)} "
+            f"to {measure.signed(high)}: {phrase}."
+        )
+    return lines
+
+
+def _shape_lines(found: list[Answer]) -> list[str]:
+    lines = []
+    for shape in scenarios.SHAPES:
+        planted = [a for a in found if a.answer == "planted" and a.shape == shape]
+        caught = sum(a.outcome == "caught" for a in planted)
+        lines.append(f"  {scenarios.SHAPE_WORDS[shape]}: {len(planted)} planted, {caught} caught")
+    return lines
 
 
 def report_lines(fold: DrillFold) -> list[str] | None:
@@ -466,31 +512,19 @@ def report_lines(fold: DrillFold) -> list[str] | None:
             )
             lines += _without(found, "    ", you=False)
     lines.append("")
-    if len(tallies) == 2:
-        gate, plain = tallies["prediction-gate"], tallies["plain"]
-        lines.append("prediction gate minus plain")
-        for label, k1, n1, k2, n2 in (
-            ("caught", gate.caught, gate.planted, plain.caught, plain.planted),
-            ("false flags", gate.false_flags, gate.clean, plain.false_flags, plain.clean),
-        ):
-            parts = measure.difference_parts(k1, n1, k2, n2) if n1 and n2 else None
-            if parts is None:
-                lines.append(f"  {label}: {measure.TOO_FEW_TO_COMPARE}.")
-                continue
-            points, low, high, apart = parts
-            phrase = measure.DISTINGUISHABLE if apart else measure.NOT_DISTINGUISHABLE
-            lines.append(
-                f"  {label}: {measure.signed(points)} points, 95% interval {measure.signed(low)} "
-                f"to {measure.signed(high)}: {phrase}."
-            )
+    lines += _comparison("prediction-gate", "plain", tallies)
+    if GUIDED in tallies:
+        lines += _comparison(GUIDED, "plain", tallies)
+        lines += _comparison(GUIDED, "prediction-gate", tallies)
+    unguided = [a for r, found in drills if r.started.get("condition") in CONDITIONS for a in found]
+    if GUIDED not in tallies:
+        lines += ["", "by kind of planted call", *_shape_lines(unguided)]
     else:
-        missing = "prediction-gate" if "plain" in tallies else "plain"
-        lines.append(f"prediction gate minus plain: no {missing} drills yet")
-    lines += ["", "by kind of planted call"]
-    for shape in scenarios.SHAPES:
-        planted = [a for a in pooled if a.answer == "planted" and a.shape == shape]
-        caught = sum(a.outcome == "caught" for a in planted)
-        lines.append(f"  {scenarios.SHAPE_WORDS[shape]}: {len(planted)} planted, {caught} caught")
+        if unguided:
+            title = "by kind of planted call, plain and prediction gate"
+            lines += ["", title, *_shape_lines(unguided)]
+        guided = [a for _, found in grouped[GUIDED] for a in found]
+        lines += ["", "by kind of planted call, guided", *_shape_lines(guided)]
     lines += ["", "each drill"]
     lines += ["  " + drill_line(r) for r, _ in drills]
     return [*lines, "", *CLOSING]
@@ -514,9 +548,32 @@ def _d(k1: int, n1: int, k2: int, n2: int):
     return None if parts is None else dict(zip(keys, parts, strict=True))
 
 
+def _by_shape(found: list[Answer]) -> dict:
+    by_shape = {}
+    for shape in scenarios.SHAPES:
+        planted = [a for a in found if a.answer == "planted" and a.shape == shape]
+        by_shape[shape] = {
+            "planted": len(planted),
+            "caught": sum(a.outcome == "caught" for a in planted),
+        }
+    return by_shape
+
+
+def _differences(first: str, second: str, tallies: dict) -> dict:
+    if first not in tallies or second not in tallies:
+        return {"catch": None, "false_flag": None}
+    a, b = tallies[first], tallies[second]
+    return {
+        "catch": _d(a.caught, a.planted, b.caught, b.planted),
+        "false_flag": _d(a.false_flags, a.clean, b.false_flags, b.clean),
+    }
+
+
 def export_doc(fold: DrillFold) -> dict:
     """The anonymized summary: counts, rates, intervals, conditions, set versions, the version
-    and dates no finer than the day. No text a person typed, no path, id, seed or time of day."""
+    and dates no finer than the day. No text a person typed, no path, id, seed or time of day.
+    Guided drills are their own condition, never pooled with the other two (format version
+    2)."""
     drills = _answered(fold)
     pooled = [a for _, found in drills for a in found]
     conditions, tallies = {}, {}
@@ -540,20 +597,8 @@ def export_doc(fold: DrillFold) -> dict:
             "catch_within_300s": _r(within.caught, within.planted),
             "false_flag_within_300s": _r(within.false_flags, within.clean),
         }
-    difference = {"catch": None, "false_flag": None}
-    if len(tallies) == 2:
-        gate, plain = tallies["prediction-gate"], tallies["plain"]
-        difference = {
-            "catch": _d(gate.caught, gate.planted, plain.caught, plain.planted),
-            "false_flag": _d(gate.false_flags, gate.clean, plain.false_flags, plain.clean),
-        }
-    by_shape = {}
-    for shape in scenarios.SHAPES:
-        planted = [a for a in pooled if a.answer == "planted" and a.shape == shape]
-        by_shape[shape] = {
-            "planted": len(planted),
-            "caught": sum(a.outcome == "caught" for a in planted),
-        }
+    unguided = [a for r, found in drills if r.started.get("condition") in CONDITIONS for a in found]
+    guided = [a for r, found in drills if r.started.get("condition") == GUIDED for a in found]
     per_drill = []
     for record, found in drills:
         t = tally(found)
@@ -574,7 +619,7 @@ def export_doc(fold: DrillFold) -> dict:
         )
     return {
         "format": "polarizer-drill-summary",
-        "format_version": 1,
+        "format_version": 2,
         "polarizer_version": polarizer.__version__,
         "scenario_sets": [str(v) for v in sorted({r.started.get("set") for r, _ in drills})],
         "first_date": _date(drills[0][0]),
@@ -583,8 +628,13 @@ def export_doc(fold: DrillFold) -> dict:
         "answered": len(pooled),
         "repeats": sum(a.seen_before > 0 for a in pooled),
         "conditions": conditions,
-        "difference": difference,
-        "by_shape": by_shape,
+        "difference": _differences("prediction-gate", "plain", tallies),
+        "guided_difference": {
+            "minus_plain": _differences(GUIDED, "plain", tallies),
+            "minus_prediction_gate": _differences(GUIDED, "prediction-gate", tallies),
+        },
+        "by_shape": _by_shape(unguided),
+        "guided_by_shape": _by_shape(guided) if GUIDED in tallies else None,
         "per_drill": per_drill,
     }
 
@@ -645,10 +695,18 @@ def enter_line(last: bool) -> str:
 
 
 def intro_lines(
-    calls: int, planted: tuple[int, int], directory: Path, condition: str, keep: bool
+    calls: int,
+    planted: tuple[int, int],
+    directory: Path,
+    condition: str,
+    keep: bool,
+    first: bool = False,
+    because_first: bool = False,
 ) -> list[str]:
     """The intro screen. `planted` is the range the count is drawn from, never the count, so
-    the screen gives nothing to count down from."""
+    the screen gives nothing to count down from. `first`: no drill in the ledger has an answer
+    yet, so a longer drill suggests a short first try; `because_first`: the drill is guided for
+    that reason, not by a flag."""
     lo, hi = planted
     if lo == hi:
         count = [
@@ -666,6 +724,10 @@ def intro_lines(
     lines = [
         "Polarizer drill: practice with held calls",
         "",
+        "Why do this? People who approve what an AI assistant wants to do tend to",
+        "approve more as time goes on. A drill lets you see how well you are catching",
+        "its mistakes.",
+        "",
         f"You will see {calls} held calls, one at a time. Each shows the task the agent was",
         "given, then the call exactly as polarizer holds would show it. Answer allow or",
         *count,
@@ -677,8 +739,25 @@ def intro_lines(
         *CLOSING,
         "",
     ]
+    if first and calls > FIRST_TRY_CALLS:
+        lines += [
+            "A first try can be shorter: type q now and run polarizer drill --calls 10,",
+            "which takes about five minutes.",
+            "",
+        ]
     if condition == "plain":
         lines.append("This drill: plain. Type q at any prompt to stop.")
+    elif condition == GUIDED:
+        if because_first:
+            lines += [
+                "This drill: guided, because it is your first. Under each call, one more line",
+                "says in plain words what the call would do. Type q at any prompt to stop.",
+            ]
+        else:
+            lines += [
+                "This drill: guided. Under each call, one more line says in plain words what",
+                "the call would do. Type q at any prompt to stop.",
+            ]
     elif keep:
         lines += [
             "This drill: prediction first. Before each call, type in a few words what you",
@@ -750,7 +829,15 @@ class _Drill:
         drawn, _, order = plan(
             seed, self.set.shapes(), self.set.ids("clean"), opts.calls, set(excluded)
         )
-        self.condition = opts.condition or drawn
+        # A first drill (none in this ledger has an answer yet) is guided unless a flag chooses;
+        # the plan's draw is made either way, so the order of calls is the same.
+        first = not _answered(self.fold)
+        if opts.condition is not None:
+            self.condition, origin = opts.condition, "flag"
+        elif first:
+            self.condition, origin = GUIDED, "first-drill"
+        else:
+            self.condition, origin = drawn, "random"
         how = "finished"
         try:
             self.append(
@@ -763,7 +850,7 @@ class _Drill:
                     "seed": seed.hex(),
                     "seed_from": "flag" if opts.seed is not None else "random",
                     "condition": self.condition,
-                    "condition_from": "flag" if opts.condition is not None else "random",
+                    "condition_from": origin,
                     "calls": opts.calls,
                     "excluded": excluded,
                     "keep_predictions": opts.keep_predictions,
@@ -774,7 +861,13 @@ class _Drill:
                 shapes = self.set.shapes()
                 span = planted_range(opts.calls, len(shapes), len(set(shapes.values())))
                 lines = intro_lines(
-                    opts.calls, span, opts.ledger_dir, self.condition, opts.keep_predictions
+                    opts.calls,
+                    span,
+                    opts.ledger_dir,
+                    self.condition,
+                    opts.keep_predictions,
+                    first,
+                    origin == "first-drill",
                 )
                 self.show("\n".join(lines) + "\nPress Enter to start.")
                 self.wait_enter()
@@ -829,6 +922,8 @@ class _Drill:
             self.started_ts,
             self.set.timeout_seconds,
         )
+        if self.condition == GUIDED:
+            block = [*block, PLAIN_PREFIX + printable(self.set.plain[scenario_id])]
         head = f"\ncall {n} of {total}\ntask: {printable(scenario['task'])}\n"
         body = "\n".join(block) + "\n\nallow or deny? "
         if self.condition == "prediction-gate":
@@ -868,7 +963,7 @@ class _Drill:
         self.wait_enter()
 
     def predict(self, n: int, head: str) -> None:
-        prompt = "what do you expect this call to do? "
+        prompt = PREDICT_PROMPT
         self.show(head + prompt)
         start = monotonic_ns()
         while True:

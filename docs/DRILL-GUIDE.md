@@ -1,12 +1,14 @@
 # Try a drill
 
-This is for anyone. You don't need an AI agent or an account. You do need a terminal, the window where you type commands (Terminal on macOS and Linux, PowerShell on Windows), and two small programs, installed below. It takes about 15 minutes, 10 of them the drill. If you have never used a terminal, a friend who works with computers can do the install with you in five minutes.
+This is for people who approve what AI assistants do, such as developers who let an AI agent change their code, and for anyone curious about that job: your first drill is guided, with every action also described in plain words. You need no AI agent and no account, only a terminal, the window where you type commands (Terminal on macOS and Linux, PowerShell on Windows), and two small programs, installed below. A first drill of 10 actions takes about five minutes. If you have never used a terminal, a friend who works with computers can do the install with you in five more.
 
 ## What a drill is
 
-Polarizer sits between an AI agent and its tools (MCP servers, the plug-ins an agent uses to act) and holds risky actions until a person allows or denies them. A drill lets you practice that job, offline.
+Polarizer sits between an AI agent and its tools (MCP servers, the plug-ins an agent uses to act) and holds risky actions until a person allows or denies them. People who do that job tend to approve more as time goes on; a drill, offline, shows how well you are catching mistakes.
 
-You see 20 actions, one at a time, each under the task the agent was given, and you allow or deny each. Between 6 and 10 of the 20 were changed to be wrong on purpose: a file written somewhere else, an extra recipient, a package name with one letter changed. Real work has far fewer wrong actions than that; a drill has many so that one drill measures something. After each answer you see whether you were right, and why. Nothing is real and nothing is sent anywhere.
+You see actions one at a time, each under the task the agent was given, and you allow or deny each. Half of a first drill's 10 actions, and between 6 and 10 of a full drill's 20, were changed to be wrong on purpose: a file written somewhere else, an extra recipient, a package name with one letter changed. Real work has far fewer; a drill has many so that one drill measures something. After each answer you see whether you were right, and why. Nothing is real and nothing is sent anywhere.
+
+There are three kinds of drill: guided adds a line in plain words under each action, plain shows the action as it is, and prediction first asks you to write what you expect before you see it. Your first drill is guided and later ones are plain or prediction first at random, and each kind's results are kept apart, because help changes how well anyone does.
 
 ## Words you will see
 
@@ -31,22 +33,22 @@ uv tool install git+https://github.com/mpwilso/polarizer
 
 Installing downloads Polarizer's parts from the internet; the drill itself never uses the network. Drills have not yet been tried in a Windows terminal, so say if anything looks wrong there.
 
-Once the repository is public, and with uv installed, you can also run a drill with one command and no step 2. This works only then:
+Once the repository is public, and with uv installed, this runs a full drill with no step 2:
 
 ```sh
 uvx --from git+https://github.com/mpwilso/polarizer polarizer drill
 ```
 
-## Run one drill
+## Run your first drill
 
 ```sh
-polarizer drill
+polarizer drill --calls 10
 ```
 
-Read the first screen and press Enter. Each action then looks like this:
+Later, `polarizer drill` runs a full drill of 20. Read the first screen and press Enter. Each action then looks like this:
 
 ```text
-call 3 of 20
+call 3 of 10
 task: Add a "Running the tests" section to README.md in the garden-planner project.
 
 hold 0000000000000003 fs__edit_file local-write
@@ -61,11 +63,12 @@ held by outside-roots: argument "path": /home/river/code/garden-planner/README.m
     }
   ]
 }
+In plain words: Edit README.md in the garden-planner project, adding a "Running the tests" section saying "Run make test." above the License heading.
 
 allow or deny?
 ```
 
-**How to read an action.** The line starting `hold` names the tool and its kind (here, a local write). The line starting `held by` says why Polarizer would pause it. The part in braces, `{` to `}`, is exactly what the action would do. Compare that with the task.
+**How to read an action.** The line starting `hold` names the tool and its kind (here, a local write). The line starting `held by` says why Polarizer would pause it. The part in braces, `{` to `}`, is exactly what the action would do, and in a guided drill the line starting `In plain words` says the same in everyday words. Compare that with the task.
 
 Type `a` to allow or `d` to deny, then Enter. You then see the answer:
 
@@ -74,7 +77,7 @@ Clean call. You allowed it.
 why: The edit adds the section the task asked for, before the License heading. It is held only because the path is outside every workspace root.
 ```
 
-Clean calls are held too, like this one. That is how real holds look: Polarizer pauses whatever its rules match, not only what is wrong, so being held doesn't make an action wrong. The answer explains why each one was held.
+Clean calls are held too, like this one, as real holds are: Polarizer pauses whatever its rules match, so being held doesn't make an action wrong. The answer explains why each one was held.
 
 Type `q` at any prompt to stop early. At the end you see your results.
 
@@ -96,9 +99,9 @@ It holds counts, rates, dates (the day only) and version numbers, such as `"answ
 
 ## How to read the numbers
 
-Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. One drill has only 6 to 10 planted calls, so its range is wide; it narrows over several drills. Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate. Always answering "allow" would be right about 60% of the time, so look at the two rates, not at the share of right answers.
+Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. A drill of 10 has 5 planted and 5 clean calls, just enough for a rate, so its range is wide: 4 of 5 caught reads "caught 80%, 95% interval 37% to 97%". Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate. Always answering "allow" would be right about half the time or more, so look at the two rates, not at the share of right answers.
 
-A drill measures your attention when you know you are being tested: your best, not an ordinary afternoon. It also has far more planted calls than real work, so drill rates likely run higher than real ones. Trends across drills mean more than any one result.
+A drill measures your attention when you know you are being tested: your best, not an ordinary afternoon. It also has far more planted calls than real work, so drill rates likely run higher than real ones. A guided drill shows how well you do with help, so the report shows it on its own lines. Trends across drills mean more than any one result.
 
 ## What it is not
 

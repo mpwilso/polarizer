@@ -1,7 +1,7 @@
 """In-process drills for the tests: a scripted console, an injected monotonic clock, fixed ids
 and salts, a fixed ledger timestamp and the small test scenario set
-(tests/helpers/drill_scenarios.json), so every byte a drill prints is the same on every run
-(docs/MEASURE-SPEC.md, section 5).
+(tests/helpers/drill_scenarios.json, with its plain words in drill_scenarios-plain.json), so
+every byte a drill prints is the same on every run (docs/MEASURE-SPEC.md, section 5).
 
 The console records what the drill writes between two reads as one segment, so a test can take
 the intro, one call's screen or one reveal on its own. Typed input is not echoed.
@@ -14,7 +14,11 @@ from pathlib import Path
 from polarizer import cli, drill, scenarios, writer
 
 HERE = Path(__file__).resolve().parent
-TEST_SET = scenarios.parse((HERE / "drill_scenarios.json").read_bytes(), 1)
+TEST_SET = scenarios.parse(
+    (HERE / "drill_scenarios.json").read_bytes(),
+    1,
+    (HERE / "drill_scenarios-plain.json").read_bytes(),
+)
 TS = "2026-10-06T18:02:11.425Z"
 # The first seed whose plan matches section 5's example end screen: the plain condition, 8
 # planted calls of 20 (drawn from 6 to 10), the README scenario at call 3, a look-alike at call

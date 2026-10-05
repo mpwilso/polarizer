@@ -51,8 +51,19 @@ def kinds(directory) -> list[str]:
 
 
 def golden_drill(monkeypatch, directory, *args, prediction=None):
+    """The example drill, plain unless args choose another condition (a later --condition
+    wins), so a first drill in a new directory is not guided."""
     inputs = dk.golden_answers(prediction=prediction)
-    return dk.run(monkeypatch, directory, inputs, "--seed", dk.GOLDEN_SEED, *args)
+    return dk.run(monkeypatch, directory, inputs, "--seed", dk.GOLDEN_SEED, "--condition",
+                  "plain", *args)  # fmt: skip
+
+
+def earlier_drill(monkeypatch, directory) -> None:
+    """One answered call in a drill of its own session, so the next drill in the directory is
+    not a first drill."""
+    code, _ = dk.run(monkeypatch, directory, ["", "a", "q"], "--seed", dk.GOLDEN_SEED,
+                     "--condition", "plain", session="0" * 16)  # fmt: skip
+    assert code == 0
 
 
 # --- the plan (section 6, Sampling) ---------------------------------------------------------
@@ -121,9 +132,38 @@ def test_planted_count_and_shapes():
     assert set(counts) == {6, 7, 8, 9, 10}
 
 
+def test_ten_call_drills(monkeypatch, tmp_path):
+    """A drill of 10, the short first try, has 5 planted and 5 clean calls with one of each
+    shape: 2,000 drills in a row with the shipped set, each leaving out the two before it. Its
+    end screen then gives both rates with their intervals, since 5 is enough for a rate."""
+    the_set = scenarios.newest()
+    planted, clean = the_set.shapes(), the_set.ids("clean")
+    last = [set(), set()]
+    for i in range(2000):
+        seed = hashlib.sha256(i.to_bytes(4, "big")).digest()[:16]
+        _, k, order = drill.plan(seed, planted, clean, 10, last[0] | last[1])
+        shapes = Counter(planted[x] for x in order if x in planted)
+        assert k == 5 and len(order) == 10 and sum(shapes.values()) == 5
+        assert set(shapes) == set(scenarios.SHAPES)
+        assert not (last[0] | last[1]) & set(order)
+        last = [last[1], set(order)]
+    _, _, order = dk.golden_plan(calls=10)
+    inputs = [""]
+    for scenario_id in order:
+        inputs += ["d" if dk.TEST_SET.scenarios[scenario_id]["answer"] == "planted" else "a", ""]
+    code, console = dk.run(monkeypatch, tmp_path / "d", inputs, "--seed", dk.GOLDEN_SEED,
+                           "--calls", "10")  # fmt: skip
+    assert code == 0
+    end = console.text(len(console.segments) - 1)
+    assert "Drill finished: 10 of 10 calls answered (guided)." in end
+    assert "planted calls: 5. You denied 5: caught 100%, 95% interval 56% to 100%." in end
+    assert "clean calls: 5. You denied 0: false flags 0%, 95% interval 0% to 44%." in end
+
+
 def test_plan_is_reproducible_from_the_ledger(monkeypatch, tmp_path):
     """The plan drawn again from drill.started equals the drill.shown sequence and the
-    condition, with the shipped set, a random seed and a drill excluded before it."""
+    condition, with the shipped set, a random seed and a drill excluded before it. The first
+    drill is guided, as a first drill is; the second has the plan's condition."""
     directory = tmp_path / "drills"
     the_set = scenarios.newest()
     for i in range(2):
@@ -139,24 +179,57 @@ def test_plan_is_reproducible_from_the_ledger(monkeypatch, tmp_path):
         shown = [e["data"]["scenario"] for e in dk.entries(directory)
                  if e["kind"] == "drill.shown" and e["data"]["session"] == data["session"]]  # fmt: skip
         assert shown == order and len(shown) == data["calls"]
-        assert condition == data["condition"] and data["condition_from"] == "random"
         assert sum(the_set.scenarios[i]["answer"] == "planted" for i in shown) == k
+        if data is started[0]:
+            assert data["condition"] == "guided" and data["condition_from"] == "first-drill"
+        else:
+            assert condition == data["condition"] and data["condition_from"] == "random"
     assert started[1]["excluded"] != [] and started[0]["excluded"] == []
 
 
-def test_condition_random_and_flag(monkeypatch, tmp_path):
-    """Without --condition the condition is the plan's draw; with it, the flag's value, and the
-    order of calls doesn't change."""
-    orders = {}
-    for name, args in (("random", []), ("flag", ["--condition", "prediction-gate"])):
+def shown_order(directory, session=dk.SESSION) -> list:
+    return [e["data"]["scenario"] for e in dk.entries(directory)
+            if e["kind"] == "drill.shown" and e["data"]["session"] == session]  # fmt: skip
+
+
+def test_condition_first_random_and_flag(monkeypatch, tmp_path):
+    """Section 4, Defaults: without --condition a first drill (no drill in the ledger has an
+    answer) is guided, recorded as first-drill, and its first screen says why; a drill stopped
+    before its first answer leaves the next one first. After an answered drill the condition is
+    the plan's draw. --condition chooses any of the three, guided included, first drill or not.
+    The order of calls is the plan's in every case."""
+    _, _, order = dk.golden_plan()
+    cases = [
+        ("first", [], False, "guided", "first-drill"),
+        ("first, flag", ["--condition", "prediction-gate"], False, "prediction-gate", "flag"),
+        ("later", [], True, "plain", "random"),
+        ("later, flag", ["--condition", "guided"], True, "guided", "flag"),
+    ]
+    for name, args, later, condition, origin in cases:
         directory = tmp_path / name
-        code, _ = dk.run(monkeypatch, directory, ["q"], "--seed", dk.GOLDEN_SEED, *args)
-        assert code == 0
-        data = dk.entries(directory)[1]["data"]
-        assert data["condition_from"] == name
-        assert data["condition"] == ("plain" if name == "random" else "prediction-gate")
-        orders[name] = dk.golden_plan()[2]
-    assert orders["random"] == orders["flag"]
+        if later:
+            earlier_drill(monkeypatch, directory)
+        code, console = dk.run(monkeypatch, directory, ["", "a", "q"], "--seed",
+                               dk.GOLDEN_SEED, *args)  # fmt: skip
+        assert code == 0, name
+        data = [e["data"] for e in dk.entries(directory) if e["kind"] == "drill.started"][-1]
+        assert (data["condition"], data["condition_from"]) == (condition, origin), name
+        assert shown_order(directory) == order[:1], name
+        intro = console.text(0)
+        assert ("because it is your first" in intro) == (origin == "first-drill"), name
+        assert ("polarizer drill --calls 10" in intro) == (not later), name
+    assert dk.golden_plan()[0] == "plain"  # the draw that "later" took
+    # Stopped before its first answer: the next drill is still a first drill.
+    directory = tmp_path / "stopped first"
+    assert dk.run(monkeypatch, directory, ["q"], session="0" * 16)[0] == 0
+    assert dk.run(monkeypatch, directory, ["q"])[0] == 0
+    froms = [e["data"]["condition_from"] for e in dk.entries(directory)
+             if e["kind"] == "drill.started"]  # fmt: skip
+    assert froms == ["first-drill", "first-drill"]
+    # A first drill of 10 calls is already the short first try: no suggestion.
+    code, console = dk.run(monkeypatch, tmp_path / "ten", ["q"], "--calls", "10")
+    assert code == 0 and "--calls 10" not in console.text(0)
+    assert "because it is your first" in console.text(0)
 
 
 def test_no_repeat_of_last_two_drills(monkeypatch, tmp_path):
@@ -220,16 +293,49 @@ def test_drill_block_equals_holds_block(tmp_path, monkeypatch, capsys):
         assert printed == "holds: 1 open\n\n" + "\n".join(expected) + "\n", scenario_id
 
 
+def test_guided_call_is_the_plain_call_and_one_line(monkeypatch, tmp_path):
+    """For every scenario of the shipped set, the guided call screen is the plain call screen
+    with one line inserted under the block, `In plain words: ` and the scenario's line; so the
+    part above that line is the block holds prints (test_drill_block_equals_holds_block)."""
+    the_set = scenarios.newest()
+    for i, scenario_id in enumerate(the_set.scenarios):
+        two = one_scenario_set(scenario_id)
+        screens = {}
+        for condition in ("plain", "guided"):
+            directory = tmp_path / f"{i}-{condition}"
+            code, console = dk.run(monkeypatch, directory, ["", "a", "", "a", ""], "--condition",
+                                   condition, the_set=two)  # fmt: skip
+            assert code == 0
+            n = shown_order(directory).index(scenario_id) + 1
+            screens[condition] = console.text(2 * n - 1)
+        line = drill.PLAIN_PREFIX + the_set.plain[scenario_id]
+        plain, guided = screens["plain"], screens["guided"]
+        assert guided.count("\n" + line + "\n") == 1, scenario_id
+        assert guided.replace(line + "\n", "", 1) == plain, scenario_id
+        block_end = plain.rindex("\n\nallow or deny? ")
+        assert guided == plain[:block_end] + "\n" + line + plain[block_end:], scenario_id
+
+
+def test_plain_words_are_shown_only_when_guided(monkeypatch, tmp_path):
+    """Plain and prediction-gate screens have no line in plain words."""
+    for condition in ("plain", "prediction-gate"):
+        code, console = golden_drill(monkeypatch, tmp_path / condition, "--condition", condition,
+                                     prediction="a guess")  # fmt: skip
+        assert code == 0 and drill.PLAIN_PREFIX not in console.text()
+
+
 # --- a call, answers and reveals ------------------------------------------------------------
 
 
 def one_scenario_set(scenario_id: str):
-    """A set of the shipped scenario and one scenario of the other kind, so a drill shows both."""
+    """A set of the shipped scenario and one scenario of the other kind, so a drill shows both,
+    with their lines in plain words."""
     the_set = scenarios.newest()
     target = the_set.scenarios[scenario_id]
     other = next(s for s in the_set.scenarios.values() if s["answer"] != target["answer"])
     chosen = {s["id"]: s for s in (target, other)}
-    return scenarios.ScenarioSet(1, "0" * 64, 300, chosen, {})
+    plain = {i: the_set.plain[i] for i in chosen}
+    return scenarios.ScenarioSet(1, "0" * 64, 300, chosen, {}, plain)
 
 
 REVEAL_CASES = [(i, a) for i in scenarios.newest().scenarios for a in ("allow", "deny")]
@@ -284,11 +390,8 @@ def test_prediction_gate_flow(monkeypatch, tmp_path):
                                "--condition", "prediction-gate", *args)  # fmt: skip
         assert code == 0
         first = console.text(1)
-        assert first.endswith("what do you expect this call to do? ") and "hold " not in first
-        assert (
-            console.text(2)
-            == "type a few words, or q to stop\nwhat do you expect this call to do? "
-        )
+        assert first.endswith(drill.PREDICT_PROMPT) and "hold " not in first
+        assert console.text(2) == "type a few words, or q to stop\n" + drill.PREDICT_PROMPT
         assert console.text(3).startswith("\nhold ") and console.text(3).endswith("allow or deny? ")
         predicted = [e["data"] for e in dk.entries(directory) if e["kind"] == "drill.predicted"]
         assert len(predicted) == 1
@@ -324,7 +427,8 @@ def test_over_300_is_marked(monkeypatch, tmp_path):
     inputs = dk.golden_answers()
     inputs[1] = (inputs[1][0], 300_001)  # call 1's answer
     inputs[3] = (inputs[3][0], 300_000)  # call 2's answer
-    code, console = dk.run(monkeypatch, tmp_path / "d", inputs, "--seed", dk.GOLDEN_SEED)
+    code, console = dk.run(monkeypatch, tmp_path / "d", inputs, "--seed", dk.GOLDEN_SEED,
+                           "--condition", "plain")  # fmt: skip
     assert code == 0
     assert drill.OVER_LINE in console.text(2)
     assert drill.OVER_LINE not in console.text(4)
@@ -378,7 +482,7 @@ def test_end_screen_equals_report_line(monkeypatch, tmp_path, capsys):
 
 
 def test_drill_kinds_and_fields(monkeypatch, tmp_path):
-    for condition in ("plain", "prediction-gate"):
+    for condition in ("plain", "prediction-gate", "guided"):
         directory = tmp_path / condition
         prediction = "it writes a file" if condition == "prediction-gate" else None
         code, _ = golden_drill(monkeypatch, directory, "--condition", condition,
@@ -390,7 +494,7 @@ def test_drill_kinds_and_fields(monkeypatch, tmp_path):
             assert canon.subset_problem(e["data"]) is None
             assert all(isinstance(k, str) and k.isascii() for k in e["data"])
             seen.add(e["kind"])
-        want = set(KINDS) - ({"drill.predicted"} if condition == "plain" else set())
+        want = set(KINDS) - ({"drill.predicted"} if condition != "prediction-gate" else set())
         assert seen == want
 
 
@@ -532,7 +636,8 @@ def test_loading_check(monkeypatch, tmp_path, capsys):
 
 USAGE = {
     "calls": (["--calls", "9"], "polarizer: --calls must be a whole number from 10 to 40"),
-    "condition": (["--condition", "fast"], "polarizer: --condition must be plain or prediction-gate"),
+    "condition": (["--condition", "fast"],
+                  "polarizer: --condition must be plain, prediction-gate or guided"),
     "seed": (["--seed", "ABC"], "polarizer: --seed must be 32 lowercase hex characters"),
     "keep_predictions": (["report", "--keep-predictions"],
                          "polarizer: --keep-predictions goes with drill"),
@@ -679,6 +784,10 @@ def test_audit_hook_sees_what_it_watches(tmp_path):
 
 SPEC_INTRO = """Polarizer drill: practice with held calls
 
+Why do this? People who approve what an AI assistant wants to do tend to
+approve more as time goes on. A drill lets you see how well you are catching
+its mistakes.
+
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
 deny. Between 6 and 10 of the 20 calls are planted: they differ from the
@@ -713,10 +822,45 @@ trends in your own oversight, not to grade or rank anyone.
 """
 
 
+SPEC_FIRST_TAIL = """
+A first try can be shorter: type q now and run polarizer drill --calls 10,
+which takes about five minutes.
+
+This drill: guided, because it is your first. Under each call, one more line
+says in plain words what the call would do. Type q at any prompt to stop.
+Press Enter to start."""
+
+SPEC_GUIDED_CALL = """
+call 3 of 10
+task: Add a "Running the tests" section to README.md in the garden-planner project.
+
+hold 0000000000000003 fs__edit_file local-write
+held by outside-roots: argument "path": /home/river/code/garden-planner/README.md is outside every workspace root
+waiting about 0m00s; times out after 300 s
+session 8e41c6b2d09a7f35 started 2026-10-06T18:02:11.425Z, running
+args_commit {commit}, 152 bytes of arguments
+{{
+  "path": "/home/river/code/garden-planner/README.md",
+  "edits": [
+    {{
+      "oldText": "## License",
+      "newText": "## Running the tests\\n\\nRun make test.\\n\\n## License"
+    }}
+  ]
+}}
+In plain words: Edit README.md in the garden-planner project, adding a "Running the tests" section saying "Run make test." above the License heading.
+
+allow or deny? """
+GUIDED_SEED = "00000000000000000000000000000001"  # its 10-call plan has the README call at 3
+
+
 def test_drill_golden(monkeypatch, tmp_path):
     """Every drill screen of section 9's golden table, from one plain and one prediction-gate
-    drill of the example, checked against section 5's exact text where it gives one."""
+    drill of the example, each after an earlier drill so it is not a first drill, a first
+    drill, and a guided drill of 10; checked against section 5's exact text where it gives
+    one."""
     directory = tmp_path / "plain"
+    earlier_drill(monkeypatch, directory)
     code, console = golden_drill(monkeypatch, directory)
     assert code == 0
     intro = console.text(0).replace(str(directory), "<dir>")
@@ -749,6 +893,7 @@ def test_drill_golden(monkeypatch, tmp_path):
     check_golden("drill_end.txt", end)
 
     directory = tmp_path / "gate"
+    earlier_drill(monkeypatch, directory)
     code, console = golden_drill(monkeypatch, directory, "--condition", "prediction-gate",
                                  prediction="adds a section")  # fmt: skip
     assert code == 0
@@ -764,18 +909,58 @@ def test_drill_golden(monkeypatch, tmp_path):
     call3 = console.text(7) + console.text(8)
     assert console.text(7) == (
         '\ncall 3 of 20\ntask: Add a "Running the tests" section to README.md in the '
-        "garden-planner project.\nwhat do you expect this call to do? "
+        "garden-planner project.\nBefore you see the call, write a few words on what you think "
+        "it will do,\nfrom the task alone. This is not graded. "
     )
     assert console.text(8).startswith("\nhold 0000000000000003 fs__edit_file local-write\n")
     check_golden("drill_call_prediction_gate.txt", call3)
 
     directory = tmp_path / "stopped"
     inputs = dk.golden_answers()[:7] + ["q"]
-    code, console = dk.run(monkeypatch, directory, inputs, "--seed", dk.GOLDEN_SEED)
+    code, console = dk.run(monkeypatch, directory, inputs, "--seed", dk.GOLDEN_SEED,
+                           "--condition", "plain")  # fmt: skip
     assert code == 0
     end = console.text(len(console.segments) - 1)
     assert end.startswith("\nDrill stopped: 3 of 20 calls answered (plain).\n\n")
     check_golden("drill_end_stopped.txt", end)
+
+    # A first drill: guided, with the suggestion of a short first try.
+    directory = tmp_path / "first"
+    code, console = dk.run(monkeypatch, directory, ["q"], "--seed", dk.GOLDEN_SEED)
+    assert code == 0
+    intro = console.text(0).replace(str(directory), "<dir>")
+    assert intro == SPEC_INTRO.replace(
+        "\nThis drill: plain. Type q at any prompt to stop.\nPress Enter to start.",
+        SPEC_FIRST_TAIL,
+    )
+    check_golden("drill_intro_first.txt", intro)
+
+    # A guided drill of 10, chosen with the flag after an earlier drill.
+    directory = tmp_path / "guided"
+    earlier_drill(monkeypatch, directory)
+    code, console = dk.run(monkeypatch, directory, ["", "a", "", "d", "", "a", "q"], "--seed",
+                           GUIDED_SEED, "--calls", "10", "--condition", "guided")  # fmt: skip
+    assert code == 0
+    intro = console.text(0).replace(str(directory), "<dir>")
+    assert intro == SPEC_INTRO.replace("20 held calls", "10 held calls").replace(
+        "deny. Between 6 and 10 of the 20 calls are planted: they differ from the\n"
+        "task in a way that should be denied. The number changes from drill to drill,\n"
+        "and real work has far fewer. After each answer you see whether the call was\n"
+        "clean or planted, and why.",
+        "deny. 5 of the 10 calls are planted: they differ from the task in a way\n"
+        "that should be denied. Real work has far fewer. After each answer you see\n"
+        "whether the call was clean or planted, and why.",
+    ).replace(
+        "This drill: plain. Type q at any prompt to stop.",
+        "This drill: guided. Under each call, one more line says in plain words what\n"
+        "the call would do. Type q at any prompt to stop.",
+    )
+    check_golden("drill_intro_guided.txt", intro)
+    call3 = console.text(5)
+    commit = [e["data"]["args_commit"] for e in dk.entries(directory)
+              if e["kind"] == "drill.shown" and e["data"]["n"] == 3][-1]  # fmt: skip
+    assert call3 == SPEC_GUIDED_CALL.format(commit=commit)
+    check_golden("drill_call_guided.txt", call3)
 
 
 # --- on a pseudo-terminal -----------------------------------------------------------------

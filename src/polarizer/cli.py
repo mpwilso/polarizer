@@ -100,8 +100,15 @@ def _parser() -> argparse.ArgumentParser:
     drill.add_argument(
         "--ledger-dir", metavar="DIR", help="absolute path to the drill ledger directory"
     )
-    drill.add_argument("--calls", metavar="N", help="calls in the drill, 10 to 40 (default 20)")
-    drill.add_argument("--condition", metavar="NAME", help="plain or prediction-gate")
+    drill.add_argument(
+        "--calls", metavar="N", help="calls in the drill, 10 to 40 (default 20; 10 for a first try)"
+    )
+    drill.add_argument(
+        "--condition",
+        metavar="NAME",
+        help="plain, prediction-gate or guided (default: guided for a first drill, then plain or "
+        "prediction-gate at random)",
+    )
     drill.add_argument("--seed", metavar="HEX", help="32 hex characters: the same drill again")
     drill.add_argument(
         "--keep-predictions",
@@ -179,8 +186,8 @@ def _drill_options(args):
         if not re.fullmatch("[0-9]+", args.calls) or not low <= int(args.calls) <= high:
             raise UsageError(f"--calls must be a whole number from {low} to {high}")
         calls = int(args.calls)
-    if args.condition is not None and args.condition not in drill_mod.CONDITIONS:
-        raise UsageError("--condition must be plain or prediction-gate")
+    if args.condition is not None and args.condition not in drill_mod.CONDITION_NAMES:
+        raise UsageError("--condition must be plain, prediction-gate or guided")
     if args.seed is not None and not _SEED.fullmatch(args.seed):
         raise UsageError("--seed must be 32 lowercase hex characters")
     directory = Path(args.ledger_dir) if args.ledger_dir else drill_mod.default_dir()

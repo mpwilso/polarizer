@@ -7,6 +7,11 @@ Totals, as section 9's example prints them: plain, 3 drills, 17 planted calls wi
 and 40 clean with 2 false flags, median 16.1 s; 116 answered calls, 9 of them seen before; by
 shape (planted, caught): changed argument 7, 6; different tool 6, 6; extra effect 8, 6;
 misleading summary 7, 5; look-alike 6, 5. One plain answer took over 300 s.
+
+WITH_GUIDED, behind drill_report_guided.txt, is the same ledger with a guided first drill before
+the seven and a guided drill chosen with the flag after them: guided, 2 drills, 13 planted calls
+with 12 caught and 17 clean with 2 false flags; by shape (planted, caught) changed argument 3, 3;
+different tool 3, 3; extra effect 3, 2; misleading summary 2, 2; look-alike 2, 2; median 9.0 s.
 """
 
 from pathlib import Path
@@ -102,7 +107,25 @@ def drill_7():
     return "2026-10-20", "prediction-gate", 20, "stopped", calls, True
 
 
+def guided_first():
+    """2026-10-05, guided, the person's first drill (condition_from first-drill), 10 of 10,
+    finished: 5 planted, all caught; 5 clean, 1 false flag; median 7.0 s."""
+    calls = _calls(5, 0, 5, 1, list(SHAPES), _times((5, 7000), (1, 9000), (4, 11000)))
+    return "2026-10-05", "guided", 10, "finished", calls, False
+
+
+def guided_flag():
+    """2026-10-24, guided, chosen with --condition guided, 20 of 20, finished: 8 planted, 7
+    caught (an extra effect missed); 12 clean, 1 false flag; median 10.0 s."""
+    shapes = ["extra-effect", "changed-argument", "different-tool", "misleading-summary",
+              "look-alike", "changed-argument", "different-tool", "extra-effect"]  # fmt: skip
+    calls = _calls(8, 1, 12, 1, shapes, _times((9, 8000), (1, 10000), (10, 12000)))
+    return "2026-10-24", "guided", 20, "finished", calls, False
+
+
 DRILLS = [drill_1, drill_2, drill_3, drill_4, drill_5, drill_6, drill_7]
+WITH_GUIDED = [guided_first, *DRILLS, guided_flag]
+FROM = {guided_first: "first-drill", guided_flag: "flag"}
 
 
 def session_of(i: int) -> str:
@@ -118,7 +141,7 @@ def specs(drills=DRILLS, version=1):
         out.append((ts, "drill.started", {
             "session": session, "polarizer_version": "0.1.0", "set": version,
             "set_sha256": "e" * 64, "seed": SEED, "seed_from": "random", "condition": condition,
-            "condition_from": "random", "calls": calls, "excluded": [],
+            "condition_from": FROM.get(piece, "random"), "calls": calls, "excluded": [],
             "keep_predictions": keep,
         }))  # fmt: skip
         for n, (answer, shape, outcome, ms, seen) in enumerate(answered, 1):

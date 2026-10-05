@@ -1,5 +1,9 @@
 Polarizer drill: practice with held calls
 
+Why do this? People who approve what an AI assistant wants to do tend to
+approve more as time goes on. A drill lets you see how well you are catching
+its mistakes.
+
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
 deny. Between 6 and 10 of the 20 calls are planted: they differ from the

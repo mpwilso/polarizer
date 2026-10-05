@@ -59,7 +59,7 @@ def test_guide_commands_exist():
     a test here or needs the network."""
     found = commands()
     assert [c for c in found if c.startswith("polarizer ")] == [
-        "polarizer drill",
+        "polarizer drill --calls 10",
         "polarizer drill report",
         "polarizer drill report --export drill-summary.json",
     ]
@@ -177,10 +177,10 @@ def test_guide_quotes_the_closing_lines():
 
 
 def test_guide_excerpts_are_what_a_drill_prints():
-    """The call and reveal excerpts are lines of the golden screens, and the export's example
-    is in the golden export."""
+    """The call and reveal excerpts are lines of the golden screens (a guided call of a first
+    drill's 10), and the export's example is in the golden export."""
     call, reveal = blocks("text")
-    printed = (GOLDEN / "drill_call_plain.txt").read_text(encoding="utf-8").splitlines()
+    printed = (GOLDEN / "drill_call_guided.txt").read_text(encoding="utf-8").splitlines()
     for line in call.splitlines():
         if line not in ("...", "allow or deny?"):
             assert line in printed, line
@@ -213,7 +213,8 @@ def test_guide_commands_run(tmp_path):
     polarizer_cmd = [sys.executable, "-m", "polarizer"]
     run_order = [c for c in commands() if c.startswith("polarizer ")]
 
-    # polarizer drill, on a pseudo-terminal: Enter, then each call denied, then Enter.
+    # polarizer drill --calls 10, on a pseudo-terminal: Enter, then each call denied, then Enter.
+    # A first drill in a new home, so it is guided.
     controller, terminal = pty.openpty()
     argv = polarizer_cmd + shlex.split(run_order[0])[1:]
     proc = subprocess.Popen(argv, stdin=terminal, stdout=terminal, stderr=terminal, env=env,
@@ -221,7 +222,7 @@ def test_guide_commands_run(tmp_path):
     os.close(terminal)
     replies = {
         b"Press Enter to start.": b"\n",
-        b"what do you expect this call to do? ": b"it does what the task says\n",
+        drill.PREDICT_PROMPT.encode().replace(b"\n", b"\r\n"): b"it does what the task says\n",
         b"allow or deny? ": b"d\n",
         b"Press Enter for the next call.": b"\n",
         b"Press Enter to see the results.": b"\n",
@@ -251,7 +252,8 @@ def test_guide_commands_run(tmp_path):
             proc.kill()
         os.close(controller)
     assert code == 0, output.decode()
-    assert b"Drill finished: 20 of 20 calls answered" in output
+    assert b"Drill finished: 10 of 10 calls answered (guided)." in output
+    assert output.count(drill.PLAIN_PREFIX.encode()) == 10
     assert (home / ".local" / "share" / "polarizer-drills" / "ledger.jsonl").exists()
 
     report = subprocess.run(polarizer_cmd + shlex.split(run_order[1])[1:], env=env, cwd=work,
@@ -261,4 +263,4 @@ def test_guide_commands_run(tmp_path):
                             capture_output=True, text=True, timeout=120)  # fmt: skip
     assert export.returncode == 0, export.stderr
     assert export.stdout == report.stdout
-    assert (work / "drill-summary.json").read_text(encoding="utf-8").startswith('{"answered":20,')
+    assert (work / "drill-summary.json").read_text(encoding="utf-8").startswith('{"answered":10,')

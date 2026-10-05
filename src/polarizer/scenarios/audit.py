@@ -8,11 +8,19 @@ scenario is answered by a rule learned from all the others, either the majority 
 feature's value or a naive Bayes over every feature, and scored over the scenarios and over
 seeded 20-call drills drawn by the drill's own sampler, next to always answering allow.
 
+The guided screen adds one line in plain words under the block, so its audit adds two features
+of that line: its length, and whether it names the argument that matters, which for a planted
+call is the value that differs from the task (section 6, Plain words). A planted call's line
+must describe that value exactly, so the check is that clean calls' lines name their own
+argument just as often, and are as long.
+
 Standard library only. tests/test_scenarios.py runs it over the shipped set, and
 `python -m polarizer.scenarios audit` and the review sheet print it.
 """
 
+import json
 import math
+import re
 from collections import Counter, defaultdict
 
 from polarizer import drill
@@ -23,6 +31,11 @@ MARGIN = 0.10  # how far the best single-feature rule may beat always-allow, at 
 SUBSTRINGS = ("..", ".git", ".ssh", ".env", "http", "@")
 ARGS_EDGES = (60, 100, 140)  # bytes of arguments, as the block's args_commit line counts them
 TASK_EDGES = (60, 75, 90)  # characters in the task line
+PLAIN_EDGES = (70, 100, 125)  # characters in the plain line, near set 1's quartiles (67, 96, 118)
+PLAIN_NAMES = ("plain length", "plain names the argument")
+# Parts of a value too common to show that a line names it.
+GENERIC = {"the", "and", "com", "net", "org", "example", "https", "http", "www", "home",
+           "users", "file"}  # fmt: skip
 CALLS = 20
 SESSIONS = 1000
 PER_CONDITION = 10000
@@ -62,20 +75,84 @@ NAMES = (
 )  # fmt: skip
 
 
-def split(items: list) -> dict:
-    """{feature: {value: [planted, clean]}}."""
-    table = {name: defaultdict(lambda: [0, 0]) for name in NAMES}
+def words(text: str) -> set:
+    """The parts of a text that can show it names a value: runs of letters and digits,
+    two characters or more, lowercased, without the generic ones."""
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) >= 2} - GENERIC
+
+
+def _text(value) -> str:
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def focus(items: list) -> dict:
+    """{id: the text of the argument that matters}. For a planted call, the value that differs
+    from the task (`plant.planted`), or the tool for a different tool. For a clean call, the
+    value of the argument that planted calls on its tool change most often (the first by name
+    on a tie), or its first argument when none on its tool changes one."""
+    changed = defaultdict(Counter)
     for s in items:
-        for name, value in features(s).items():
-            table[name][value][s["answer"] == "clean"] += 1
-    return table
+        if s["answer"] == "planted" and "argument" in s["plant"]:
+            changed[s["call"]["tool"]][s["plant"]["argument"]] += 1
+    found = {}
+    for s in items:
+        call = s["call"]
+        if s["answer"] == "planted":
+            plant = s["plant"]
+            found[s["id"]] = call["tool"] if "planted" not in plant else _text(plant["planted"])
+            continue
+        counts = changed[call["tool"]]
+        named = sorted(counts, key=lambda a: (-counts[a], a))
+        name = next((a for a in named if a in call["arguments"]), None)
+        if name is None:
+            name = next(iter(call["arguments"]), None)
+        found[s["id"]] = "" if name is None else _text(call["arguments"][name])
+    return found
 
 
-def tells(items: list) -> list[tuple]:
+def plain_features(items: list, plain: dict) -> dict:
+    """{id: the guided screen's two features of its plain line}."""
+    texts = focus(items)
+    found = {}
+    for s in items:
+        line = plain[s["id"]]
+        named = words(texts[s["id"]]) & words(line)
+        found[s["id"]] = {
+            "plain length": bucket(len(line), PLAIN_EDGES),
+            "plain names the argument": "yes" if named else "no",
+        }
+    return found
+
+
+def names(plain: dict | None = None) -> tuple:
+    return NAMES + (PLAIN_NAMES if plain is not None else ())
+
+
+def table(items: list, plain: dict | None = None) -> dict:
+    """{id: every feature of the screen}: the plain screen's, and with `plain` (id -> line) the
+    guided screen's two more."""
+    found = {s["id"]: features(s) for s in items}
+    if plain is not None:
+        for i, extra in plain_features(items, plain).items():
+            found[i].update(extra)
+    return found
+
+
+def split(items: list, plain: dict | None = None) -> dict:
+    """{feature: {value: [planted, clean]}}."""
+    feats = table(items, plain)
+    found = {name: defaultdict(lambda: [0, 0]) for name in names(plain)}
+    for s in items:
+        for name, value in feats[s["id"]].items():
+            found[name][value][s["answer"] == "clean"] += 1
+    return found
+
+
+def tells(items: list, plain: dict | None = None) -> list[tuple]:
     """(feature, value, planted, clean) of every value with at least TELL_MIN scenarios of
     which at least TELL_SHARE share one answer."""
     found = []
-    for name, values in split(items).items():
+    for name, values in split(items, plain).items():
         for value, (p, c) in sorted(values.items()):
             if p + c >= TELL_MIN and max(p, c) >= TELL_SHARE * (p + c):
                 found.append((name, value, p, c))
@@ -85,27 +162,29 @@ def tells(items: list) -> list[tuple]:
 # Leave-one-out: each scenario is answered by a rule learned from all the others. ------------
 
 
-def majority_loo(items: list, name: str) -> dict:
+def majority_loo(items: list, name: str, plain: dict | None = None) -> dict:
     """{id: the majority answer for its value of one feature, learned without it}. Deny only
     where planted is the strict majority; a tie, or a value no other scenario has, is allow."""
+    feats = table(items, plain)
     counts = defaultdict(Counter)
     for s in items:
-        counts[features(s)[name]][s["answer"]] += 1
+        counts[feats[s["id"]][name]][s["answer"]] += 1
     out = {}
     for s in items:
-        c = counts[features(s)[name]].copy()
+        c = counts[feats[s["id"]][name]].copy()
         c[s["answer"]] -= 1
         out[s["id"]] = "planted" if c["planted"] > c["clean"] else "clean"
     return out
 
 
-def bayes_loo(items: list) -> dict:
+def bayes_loo(items: list, plain: dict | None = None) -> dict:
     """{id: naive Bayes over every feature, add-one smoothing, learned without it}; deny only
     where planted scores strictly higher."""
-    feats = {s["id"]: features(s) for s in items}
-    sizes = {name: len({f[name] for f in feats.values()}) for name in NAMES}
+    feats = table(items, plain)
+    every = names(plain)
+    sizes = {name: len({f[name] for f in feats.values()}) for name in every}
     totals = Counter(s["answer"] for s in items)
-    counts = Counter((s["answer"], name, feats[s["id"]][name]) for s in items for name in NAMES)
+    counts = Counter((s["answer"], name, feats[s["id"]][name]) for s in items for name in every)
     out = {}
     for s in items:
         own = feats[s["id"]]
@@ -113,7 +192,7 @@ def bayes_loo(items: list) -> dict:
         for answer in ("planted", "clean"):
             n = totals[answer] - (s["answer"] == answer)
             total = math.log((n + 1) / (len(items) - 1 + 2))
-            for name in NAMES:
+            for name in every:
                 hits = counts[answer, name, own[name]] - (s["answer"] == answer)
                 total += math.log((hits + 1) / (n + sizes[name]))
             score[answer] = total
@@ -128,9 +207,10 @@ def plans(the_set, count: int, calls: int = CALLS) -> list[tuple]:
     return [drill.plan(i.to_bytes(16, "big"), shapes, clean, calls, set()) for i in range(count)]
 
 
-def experiment(the_set, count: int = SESSIONS) -> list[tuple]:
+def experiment(the_set, count: int = SESSIONS, plain: dict | None = None) -> list[tuple]:
     """(rule, accuracy over the scenarios, mean accuracy over `count` drills), always-allow
-    first, then each feature's majority rule, then naive Bayes."""
+    first, then each feature's majority rule, then naive Bayes. With `plain`, over the guided
+    screen's features."""
     items = list(the_set.scenarios.values())
     answer = {s["id"]: s["answer"] for s in items}
     drawn = [order for _, _, order in plans(the_set, count)]
@@ -141,8 +221,8 @@ def experiment(the_set, count: int = SESSIONS) -> list[tuple]:
         return name, over_items, sum(per_drill) / len(per_drill)
 
     rows = [row("always allow", dict.fromkeys(answer, "clean"))]
-    rows += [row(name, majority_loo(items, name)) for name in NAMES]
-    rows.append(row("naive Bayes, all features", bayes_loo(items)))
+    rows += [row(name, majority_loo(items, name, plain)) for name in names(plain)]
+    rows.append(row("naive Bayes, all features", bayes_loo(items, plain)))
     return rows
 
 
@@ -181,30 +261,49 @@ def _pct(x: float) -> str:
     return f"{100 * x:.1f}%"
 
 
-def report(the_set, sessions: int = SESSIONS, level: int = 1) -> list[str]:
-    """The audit in markdown, its top heading at `level`."""
+def report(the_set, sessions: int = SESSIONS, level: int = 1, guided: bool = False) -> list[str]:
+    """The audit in markdown, its top heading at `level`. With `guided`, the audit of the guided
+    screen: the tables of the plain line's two features, then the leave-one-out accuracy and the
+    tells over all of that screen's features."""
     h = "#" * level
     items = list(the_set.scenarios.values())
+    plain = the_set.plain if guided else None
     planted = sum(s["answer"] == "planted" for s in items)
-    found = tells(items)
+    found = tells(items, plain)
     flagged = {(t[0], t[1]) for t in found}
-    lines = [
-        f"{h} Shortcut audit, set {the_set.version}",
-        "",
-        f"{len(items)} scenarios: {planted} planted, {len(items) - planted} clean. Features are "
-        "what a drill shows before the answer. Argument bytes are the length the block's "
-        "args_commit line gives; task length is in characters. A tell is a value with at least "
-        f"{TELL_MIN} scenarios of which at least {round(100 * TELL_SHARE)}% share one answer.",
-        "",
-    ]
-    for name, values in split(items).items():
+    if guided:
+        lines = [
+            f"{h} Shortcut audit, set {the_set.version}, guided screen",
+            "",
+            "The guided screen is the call screen with one line in plain words under the block. "
+            "Its features are the call screen's and two of that line: its length in characters, "
+            "and whether it names the argument that matters (for a planted call the value that "
+            "differs from the task, for a different tool the tool; for a clean call the "
+            "argument planted calls on its tool change most often). Only the two new features' "
+            "tables are below; the rest are in the call screen's audit.",
+            "",
+        ]
+    else:
+        lines = [
+            f"{h} Shortcut audit, set {the_set.version}",
+            "",
+            f"{len(items)} scenarios: {planted} planted, {len(items) - planted} clean. Features "
+            "are what a drill shows before the answer. Argument bytes are the length the block's "
+            "args_commit line gives; task length is in characters. A tell is a value with at "
+            f"least {TELL_MIN} scenarios of which at least {round(100 * TELL_SHARE)}% share one "
+            "answer.",
+            "",
+        ]
+    for name, values in split(items, plain).items():
+        if guided and name not in PLAIN_NAMES:
+            continue
         lines += [f"{h}# {name}", "", "| value | planted | clean | planted share | tell |",
                   "|---|---|---|---|---|"]  # fmt: skip
         for value, (p, c) in sorted(values.items(), key=lambda kv: (-sum(kv[1]), kv[0])):
             mark = "tell" if (name, value) in flagged else ""
             lines.append(f"| {value} | {p} | {c} | {_pct(p / (p + c))} | {mark} |")
         lines.append("")
-    rows = experiment(the_set, sessions)
+    rows = experiment(the_set, sessions, plain)
     best = best_single(rows)
     lines += [
         f"{h}# Leave-one-out accuracy",

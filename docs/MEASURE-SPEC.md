@@ -9,6 +9,7 @@ The goal of the whole project is to measure whether a person's approvals still c
 **In this slice:**
 - **Drills** (stage 8). `polarizer drill` runs an offline practice session: no agent, no model, no network, no upstream server, and nothing forwarded anywhere. It shows about 20 held calls, one at a time, each under the one-line task the agent was given and rendered exactly as `polarizer holds` renders a real hold. The person answers allow or deny, and each answer is revealed at once as right or wrong, with the reason. `polarizer drill report` summarizes every drill so far, and `--export` writes an anonymized summary a person may choose to share (sections 4 to 9).
 - **The prediction gate** (stage 8), a drill condition in which the person writes what they expect the call to do before they see it (section 4).
+- **The guided condition** (stage 8, drill usability round), in which each call has one more line under its block, `In plain words:`, saying literally what the call would do, for a person who has never used a developer tool. A first drill is guided unless a flag chooses (section 4, Defaults). The lines are data, written by hand, one per scenario (section 6, Plain words).
 - **Stats over real holds** (stage 9). `polarizer stats` reads a serve ledger and prints holds and their endings per session, the approval rate with its interval, the time to a decision, how often each tool and rule was allowed, and the warning sign the research names: decisions getting faster while the approval rate does not fall (section 10).
 - **Live planted calls** (stage 10, specified here and built after M3). With an opt-in config key, `serve` occasionally creates a hold that the agent never made and that is never forwarded, to see whether the person catches it during real work. Every hold of such a session carries a commitment, and every ending is followed by a reveal that can be checked against it (section 11).
 
@@ -23,7 +24,8 @@ The goal of the whole project is to measure whether a person's approvals still c
 ### What the numbers can show
 
 - **A drill measures attention under drill conditions.** The person knows a drill is a test, and that some calls are planted. They read more carefully than during real work, so a drill's catch rate is closer to the best this person does than to what they do on an ordinary afternoon.
-- **Trends across drills still mean something,** because that bias is roughly the same in every drill one person runs. A catch rate that falls across drills, under conditions where the person is trying, is a stronger signal than one low drill. The two conditions (plain and prediction gate) are both under drill conditions, so comparing them compares like with like.
+- **Trends across drills still mean something,** because that bias is roughly the same in every drill one person runs. A catch rate that falls across drills, under conditions where the person is trying, is a stronger signal than one low drill. The plain and prediction-gate conditions are both under drill conditions, so comparing them compares like with like.
+- **Guided drills measure something else:** how well a person does with help, not how well they read a raw hold. Their results are never pooled with the other two conditions; they are reported on their own lines and compared with each only as a labelled difference with its interval (section 9).
 - **Stats over real holds** show what happened, not why. An approval rate near 100% can mean that the rules hold only calls that should run, or that the person stopped reading. Decisions getting faster can mean less reading, or calls that became easier to judge. TrueFoundry's guide makes the same point about a falling denial rate (section 2). That is why stats never print a verdict on the person, and why drills exist: a drill call has a known answer, so it separates the two explanations.
 - **Live planted calls** measure attention during real work, at the cost of a test the person agreed to in advance and can turn off (section 11).
 
@@ -74,7 +76,7 @@ trends in your own oversight, not to grade or rank anyone.
 1. The person runs `polarizer drill`. Usage is checked, then the terminal (section 9), then the location of the drill directory.
 2. The scenario set is loaded from the package and checked (section 6, Loading). A set that fails its check stops the drill before anything is written, so this comes before the ledger is opened, which would write a genesis entry into a new directory (section 17, Stage 8 build).
 3. The ledger is opened as a writer (2 s lock wait, full verification). A ledger holding any `session.started` entry is a serve ledger and is refused (section 9).
-4. The plan is drawn (section 6, Sampling): the condition, the number of planted calls, and the order of calls. `drill.started` is appended with the seed and everything else needed to draw the plan again.
+4. The plan is drawn (section 6, Sampling): the condition, the number of planted calls, and the order of calls. The drill's condition is then the flag's, or `guided` for a first drill, or the plan's draw (Defaults, below). `drill.started` is appended with the seed, the condition and where it came from, and everything else needed to draw the plan again.
 5. The intro screen is printed (section 5), and the drill waits for Enter.
 
 ### Each call
@@ -82,7 +84,7 @@ trends in your own oversight, not to grade or rank anyone.
 For call `i` of `n`:
 1. A fresh hold id (16 random lowercase hex characters) and a fresh 32-byte salt are drawn from `secrets`, never from the plan's seed, so two showings of one scenario look like two different holds. `args_commit` is `hex(sha256(salt + bytes))`, where `bytes` is the scenario's arguments serialized exactly as a side file stores them (LEDGER-SPEC.md, Part 3). No side file is written: the arguments are in the package, and a drill ledger holds no `args/` directory.
 2. `drill.shown` is appended (section 8) and awaited.
-3. **Plain condition:** the call header, the task line and the hold block are printed together, then the prompt `allow or deny? `, flushed. **Prediction gate:** see below.
+3. **Plain condition:** the call header, the task line and the hold block are printed together, then the prompt `allow or deny? `, flushed. **Guided:** the same, with one line between the block and the blank line before the prompt: `In plain words: ` and the scenario's line from the set's plain words file (section 6, Plain words). Nothing else differs. **Prediction gate:** see below.
 4. The answer is read (below). `drill.decided` is appended, then `drill.revealed`, each awaited; then the reveal is printed (section 5).
 5. The drill waits for Enter (`Press Enter for the next call.`, or after the last call `Press Enter to see the results.`). That wait is not timed.
 
@@ -113,7 +115,13 @@ The answer line is read with `readline`, stripped and lowercased:
 ### The prediction gate
 
 In the `prediction-gate` condition, step 3 becomes:
-1. The call header and the task line are printed, then the prompt `what do you expect this call to do? `, flushed.
+1. The call header and the task line are printed, then the prompt, two lines ending in a space and no newline, flushed:
+
+```
+Before you see the call, write a few words on what you think it will do,
+from the task alone. This is not graded. 
+```
+
 2. The line is read. `q` or `quit` stops the drill. A line that is empty after stripping prints `type a few words, or q to stop` and asks again.
 3. `drill.predicted` is appended with the prediction's length and the time taken, and with the prediction itself, folded and cut (section 8), only when the drill was started with `--keep-predictions`; awaited.
 4. A blank line, the hold block and `allow or deny? ` are printed, flushed. From here the call goes on as in the plain condition.
@@ -122,7 +130,7 @@ The prediction is never scored, never shown again during the drill, and never ex
 
 ### Time
 
-`elapsed_ms` is measured in the drill process on the monotonic clock (`time.monotonic_ns()`), from just after the `allow or deny? ` prompt is flushed to just after the answer line is read, as whole milliseconds rounded down. Invalid answers in between are included. In the prediction gate, `drill.predicted`'s `elapsed_ms` runs from just after `what do you expect this call to do? ` is flushed to just after the prediction is read. Both are stored in the entry, never derived from `ts` differences, which step on WSL2 (verified-facts.md, Wall clock and monotonic clock on WSL2). So decision times in the two conditions measure the same thing: from seeing the block to answering.
+`elapsed_ms` is measured in the drill process on the monotonic clock (`time.monotonic_ns()`), from just after the `allow or deny? ` prompt is flushed to just after the answer line is read, as whole milliseconds rounded down. Invalid answers in between are included. In the prediction gate, `drill.predicted`'s `elapsed_ms` runs from just after the prediction prompt is flushed to just after the prediction is read. Both are stored in the entry, never derived from `ts` differences, which step on WSL2 (verified-facts.md, Wall clock and monotonic clock on WSL2). So decision times in the two conditions measure the same thing: from seeing the block to answering.
 
 **Answers over 300 s.** A real hold times out after 300 s, and a drill call never does. A drill answer whose `elapsed_ms` is above 300000 is **over 300 s**: its reveal says so, and the end screen, `drill report` and the export give the rates both with and without such answers (section 5; section 9, `polarizer drill report` and The export). Nothing new is recorded: the mark is computed from `elapsed_ms` (section 16, question 4).
 
@@ -137,18 +145,23 @@ The prediction is never scored, never shown again during the drill, and never ex
 ### Defaults, and why
 
 - **20 calls per drill** (`--calls` from 10 to 40). At about 30 seconds per call, reading the reveal included, that is about ten minutes: short enough to stay attentive and to repeat weekly, long enough for 6 to 10 planted calls.
+- **10 calls for a first try.** The guide recommends `polarizer drill --calls 10`, about five minutes, and a first drill's first screen suggests it when its `--calls` is above 10. A drill of 10 has exactly 5 planted and 5 clean calls, one of each shape (Sampling: `planted_range` is 5 to 5), so its end screen and report give both rates with their intervals, wide ones: 5 of 5 caught is 100%, 95% interval 56% to 100%, and 4 of 5 is 80%, 37% to 97%. Stopped before 5 of a kind, it says `too few to say`.
 - **30 to 50 percent of the calls are planted:** 6 to 10 of 20, drawn uniformly per drill from the plan's seed, and the rest clean (section 6, Sampling). Other values of `--calls` keep the proportions, with at least 5 planted and at least one per shape when the length allows, and never more than half: 5 of 10, 12 to 20 of 40. The planted calls are spread over the five shapes as evenly as the count allows, so every shape is present and shape counts differ by at most one. This is the owner's decision (section 16, question 15). Drawn from 4 to 8, as first specified, only 80% of drills had the 5 planted calls a catch rate needs. Fixed at 8, as decided after stage 8's first tool check, every drill had them, but a person could count down ("I've had eight, so the rest are clean"). Drawn from 6 to 10, every drill of 20 has at least 5 planted and at least 10 clean calls, and the running count settles an answer only in extreme cases (section 1, Counting down). The intro screen states the range, never the count drawn. That share is far above any real rate of bad calls. It is chosen for the measurement: with fewer than 5 planted calls a drill has no catch rate (section 7). Research on visual search finds that rare targets are missed more often than common ones; that is from general knowledge of that research, not from the sources checked on 2026-10-04 (section 17, deviation 27). So drill catch rates are expected to run above what a person would catch at a realistic rate, which live planted calls measure (section 11).
-- **Condition at random,** plain or prediction gate with equal chance, from the plan's seed, unless `--condition` chooses one (decision 5). The draw is made either way, so a flag changes nothing else in the plan.
+- **Condition.** `--condition` chooses any of `plain`, `prediction-gate` and `guided` (`condition_from` `flag`). Without it, a **first drill**, one started when no drill in the ledger has an answer, is `guided` (`condition_from` `first-drill`), and its first screen says so in one sentence; a drill stopped before its first answer leaves the next one first, as the report leaves it out (section 9). Later drills are plain or prediction gate with equal chance, from the plan's seed (`condition_from` `random`, decision 5). The draw is made in every case, so neither a flag nor a first drill changes anything else in the plan; with `--seed`, two people's first drills are the same drill.
 - **No repeat in consecutive drills.** Scenarios shown in either of the last two drills in this ledger are left out of the draw (section 6, Sampling), unless `--seed` is given.
 
 ## 5. Drill screens
 
-The screens below are exact; placeholders are in angle brackets, and `<dir>` is the drill directory. Every golden file is stdout's bytes from an in-process drill with injected input, clocks, seed, hold ids and salts, and a small test scenario set (`tests/helpers/drill_scenarios.json`), so the files don't change when the shipped set does. Typed input is not echoed in the files. A file for one screen (the intro, a call, a reveal, the end) holds what the drill wrote between two reads of input, so `drill_end.txt` is the end screen alone. A line that waits for Enter (`Press Enter to start.`, `Press Enter for the next call.`) is written without a newline; the person's Enter ends it.
+The screens below are exact; placeholders are in angle brackets, and `<dir>` is the drill directory. Every golden file is stdout's bytes from an in-process drill with injected input, clocks, seed, hold ids and salts, and a small test scenario set (`tests/helpers/drill_scenarios.json`, with its plain words in `drill_scenarios-plain.json`), so the files don't change when the shipped set does. Typed input is not echoed in the files. A file for one screen (the intro, a call, a reveal, the end) holds what the drill wrote between two reads of input, so `drill_end.txt` is the end screen alone. A line that waits for Enter (`Press Enter to start.`, `Press Enter for the next call.`) is written without a newline; the person's Enter ends it.
 
-**Intro, plain** (`drill_intro_plain.txt`; 20 is the drill's `--calls`, and 6 and 10 the range its number of planted calls is drawn from, section 4):
+**Intro, plain** (`drill_intro_plain.txt`, a drill after an earlier answered one; 20 is the drill's `--calls`, and 6 and 10 the range its number of planted calls is drawn from, section 4):
 
 ```
 Polarizer drill: practice with held calls
+
+Why do this? People who approve what an AI assistant wants to do tend to
+approve more as time goes on. A drill lets you see how well you are catching
+its mistakes.
 
 You will see 20 held calls, one at a time. Each shows the task the agent was
 given, then the call exactly as polarizer holds would show it. Answer allow or
@@ -175,6 +188,8 @@ that should be denied. Real work has far fewer. After each answer you see
 whether the call was clean or planted, and why.
 ```
 
+The `Why do this?` paragraph follows the owner's first run as a person who is not an engineer (section 17, Drill usability round). Its claim, that approvals grow with time, rests on section 2's first source (arXiv 2606.08919: a fatiguing reviewer who is overloaded rubber-stamps); no figure is given, as section 2 requires.
+
 **Intro, prediction gate** (`drill_intro_prediction_gate.txt`): the same, except that the `This drill:` line reads:
 
 ```
@@ -189,6 +204,26 @@ With `--keep-predictions`, its second and third lines read:
 expect it to do; then you see the call. What you type is kept on this
 computer, and never exported. Type q at any prompt to stop.
 ```
+
+**Intro, guided** (`drill_intro_guided.txt`, a guided drill of 10 chosen with the flag after an earlier drill): the `This drill:` line reads:
+
+```
+This drill: guided. Under each call, one more line says in plain words what
+the call would do. Type q at any prompt to stop.
+```
+
+**Intro, a first drill** (`drill_intro_first.txt`, 20 calls, no flag). A first drill (section 4, Defaults) of more than 10 calls has a paragraph before the `This drill:` lines, and a guided first drill says why it is guided:
+
+```
+A first try can be shorter: type q now and run polarizer drill --calls 10,
+which takes about five minutes.
+
+This drill: guided, because it is your first. Under each call, one more line
+says in plain words what the call would do. Type q at any prompt to stop.
+Press Enter to start.
+```
+
+A first drill of 10 calls has no `A first try` paragraph; a first drill whose condition comes from the flag has the paragraph and that condition's `This drill:` lines.
 
 **A call, plain** (`drill_call_plain.txt`). The block is an example; its values come from the scenario:
 
@@ -217,7 +252,18 @@ allow or deny?
 
 The last line ends with one space and no newline.
 
-**A call, prediction gate** (`drill_call_prediction_gate.txt`): the blank line, the `call` line and the `task:` line, then `what do you expect this call to do? ` with no newline; after the prediction, a blank line, the block and `allow or deny? ` as above.
+**A call, prediction gate** (`drill_call_prediction_gate.txt`): the blank line, the `call` line and the `task:` line, then the two-line prediction prompt of section 4, ending in a space with no newline; after the prediction, a blank line, the block and `allow or deny? ` as above.
+
+**A call, guided** (`drill_call_guided.txt`, call 3 of a drill of 10): the plain call's screen with one line inserted after the block's last line, before the blank line:
+
+```
+}
+In plain words: Edit README.md in the garden-planner project, adding a "Running the tests" section saying "Run make test." above the License heading.
+
+allow or deny? 
+```
+
+`test_guided_call_is_the_plain_call_and_one_line` checks, for every scenario of the shipped set, that taking that one line out leaves the plain call's screen byte for byte, so the part above it is the block `polarizer holds` prints (`test_drill_block_equals_holds_block`).
 
 **An invalid answer** (`drill_reprompt.txt`): after the prompt, `type allow or deny (a or d), or q to stop` on its own line, then `allow or deny? ` again.
 
@@ -281,7 +327,7 @@ to see every drill so far.
 <the closing lines of section 3>
 ```
 
-- **`Drill finished`** becomes `Drill stopped` when `how` is `stopped` or `interrupted`; `(plain)` is `(prediction gate)` in that condition.
+- **`Drill finished`** becomes `Drill stopped` when `how` is `stopped` or `interrupted`; `(plain)` is `(prediction gate)` or `(guided)` in those conditions.
 - **Below 5 calls of a kind** the rate is replaced: `planted calls: 3. You denied 3: too few to say a rate (5 or more needed).` With none of a kind: `planted calls: none answered.`
 - **`missed:`** lists the numbers of planted calls allowed, each with its shape in words, as `call 7 (look-alike)`, separated by `, `; `none` when there are none. **`false flags:`** lists the clean calls denied, as `call 12`, or `none`.
 - **The median line** leaves out the part in brackets for a kind with no answers, and is `median time to decide: no answers` with none at all.
@@ -294,7 +340,7 @@ The numbers in this example are section 7's test vectors 7 of 8 and 1 of 12.
 
 ### File and format
 
-The set is one JSON file in the package, `src/polarizer/scenarios/drill-set-<version>.json`, read with `importlib.resources`. The file is ASCII: any other character in a value is written as a JSON escape, and stage 8 writes it from a script and checks it (CLAUDE.md, rule 12). Its top level:
+The set is one JSON file in the package, `src/polarizer/scenarios/drill-set-<version>.json`, read with `importlib.resources`, with a companion file of plain words beside it (Plain words, below). The file is ASCII: any other character in a value is written as a JSON escape, and stage 8 writes it from a script and checks it (CLAUDE.md, rule 12). Its top level:
 
 | Key | Value |
 |---|---|
@@ -377,20 +423,46 @@ Every planted call has exactly one shape (decision 3). The ledger and the file u
 - **Set 1,** audited on Oct 5, 2026 (UTC): no tell. The nearest is `fs__edit_file`, 1 planted and 7 clean (87.5%). The best single-feature rule is argument bytes: 64.0% over the scenarios and 64.2% over the drills, against 60.0% and 59.9% for always allow, because 9 of the 12 calls of 140 bytes or more are planted. Naive Bayes scores 42.0%; the tool rule 39.3%, below always allow, because with most tools near half and half, leaving a scenario out turns its tool's majority against it. Set 1 therefore stays the shipped set (section 17, Stage 8 follow-up).
 - **A tell found later** is removed by adding scenarios of the other answer in a new set version, each passing the rest of this section, never by editing a shipped set. A tell that can't be removed that way is listed in LIMITS.md and the guide.
 
+### Plain words
+
+A guided drill shows one line under each call's block (section 5). The lines are data: written by hand, one per scenario, in a companion file, never generated at run time by a model or by string rules that could carry the answer. Set 1's 150 lines were written from each call's tool and arguments alone, with the answers, shapes, tasks and reveals out of view (docs/dev/STAGE8-NOTES.md, Drill usability round).
+
+**The file** is `src/polarizer/scenarios/drill-set-<version>-plain.json`, ASCII, keyed by scenario id and set version, so the set file and its pin stay as they are:
+
+| Key | Value |
+|---|---|
+| `format` | `"polarizer-drill-plain-words"` |
+| `set` | the set version, equal to the set file's |
+| `set_sha256` | the sha256 of the set file it was written for |
+| `lines` | `{<scenario id>: <line>}`, one for every scenario of the set and no other id |
+
+**Each line** describes literally what the call would do, for a person who has never used a developer tool: the action in everyday words (`Record ... in the project's history as a commit`, `Push (upload) the branch ...`, `Download and install the software package ...`), and every name, place, recipient, value and file exactly as the call has it, a destination or recipient that differs from the task included. It never judges the call, hints at its answer or compares it with the task, and it explains no file's purpose: a gloss such as "the private login key" would be given only to the files planted calls tend to touch. Rules, checked by the loader:
+- one line of printable ASCII, 4 to 24 words (under 25) and at most 200 characters, ending a sentence (`.` or `?`, before any closing quote);
+- none of the words `planted`, `clean`, `wrong`, `suspicious`, `unexpected`, `safe` or `risky`, in any case and inside any word;
+- none of the whole words `task`, `asked`, `instead`, `also`, `extra`, `another`, `different`, `however`, `actually`, `but`, `rather` or `only`, which would compare the call with its task (this spec's addition to the owner's list).
+
+**Loading.** `scenarios.load(<version>)` reads both files and checks the plain words with the set: the format, the set version, `set_sha256` equal to the set file's, exactly one line per scenario and no other id, and each line's rules. A failure is the set's refusal line (Loading, below), so a drill never starts with a set whose lines are missing or wrong.
+
+**The leak audit** (`test_plain_words_leak_nothing`). The shortcut audit (Validation, Shortcuts) runs again over the guided screen, with two more features: the plain line's length in characters, in four buckets (under 70, 70 to 99, 100 to 124, 125 and over, near set 1's quartiles of 67, 96 and 118); and whether the line names the argument that matters, that is, shares a word (a run of letters and digits, two characters or more, lowercased, without `the`, `and`, `com`, `net`, `org`, `example`, `https`, `http`, `www`, `home`, `users` and `file`) with its text: for a planted call the value that differs from the task (`plant.planted`, or the tool for a different tool), and for a clean call the value of the argument that planted calls on its tool change most often, or its first argument. A planted call's line must name that value, so the check is that clean calls' lines name theirs as often and are as long. It fails on a tell as before: no value with at least 6 scenarios has 90% or more of one answer, and the best single-feature rule, over every feature of the guided screen, beats always allow by at most 10 points. `test_plain_leak_check_catches_a_leak` shows it failing on lines that do give the answer away.
+
+**Set 1, audited on Oct 5, 2026 (UTC):** no tell. Plain length: under 70, 17 planted and 26 clean; 70 to 99, 10 and 28; 100 to 124, 20 and 24; 125 and over, 13 and 12. Names the argument: yes, 60 and 89; no, 0 and 1 (a file whose content is an empty list). The plain-length rule scores 52.0% over the scenarios and the naming rule 60.0%, against 60.0% for always allow; the best single-feature rule is still argument bytes, 64.0%.
+
+**Versioning.** `test_plain_words_hash_pinned` holds each plain words file's sha256. A changed line makes a new set version, as a changed scenario does (Versioning and adding scenarios, below), so a guided drill's `set` and `set_sha256` name the lines it showed, and `drill.started` needs no new field.
+
 ### Why 150
 
 A drill draws 20 calls, 6 to 10 planted (8 on average), and leaves out what the last two drills showed. With 60 planted calls, two drills in a row never share one, and a planted call comes back after 6 drills at the median (3 at the least, 7.5 on average, in a simulation of 2,000 drills in a row on one ledger, redone for the drawn count), which is about six weeks of weekly drills. Clean calls, 10 to 14 of 90 per drill, come back after the same numbers of drills. A smaller set would let a person learn answers; a larger one costs review time for each scenario. The report counts repeats (section 9), so a set that has run out shows.
 
 ### Loading
 
-At start, `drill` loads the newest set in the package and checks it against the schema rules above that need no test-only data (keys, types, lengths, consistency of `answer` and `shape`, the template of each `reason`). A failure is one line, `polarizer: the drill scenarios in this installation fail their check: <problem>`, exit 2, nothing written. The full validation runs in the tests.
+At start, `drill` loads the newest set in the package and checks it against the schema rules above that need no test-only data (keys, types, lengths, consistency of `answer` and `shape`, the template of each `reason`), with its plain words file (Plain words, above). A failure is one line, `polarizer: the drill scenarios in this installation fail their check: <problem>`, exit 2, nothing written. The full validation runs in the tests.
 
 ### Versioning and adding scenarios
 
 - The file's sha256 is recorded in every `drill.started` (`set_sha256`), with its version.
-- `test_scenario_set_hash_pinned` holds the sha256 of each shipped set file. Any edit to a shipped set fails that test, so a change can't ship without a new version.
+- `test_scenario_set_hash_pinned` holds the sha256 of each shipped set file, and `test_plain_words_hash_pinned` that of each plain words file. Any edit to either fails its test, so a change can't ship without a new version.
 - **Any change** to a scenario, an addition or a removal makes a new set: a new file, `drill-set-<n+1>.json`, with `set` raised. The newest set is the one drills use. Older set files stay in the package for one release, so a report can name them and a plan can be drawn again; `scenarios.load(<version>)` loads any shipped set by its version. The report never needs them, because `drill.revealed` records each answer (section 8). Repeats and the last two drills' exclusions match scenarios by id, so a later set must keep the ids of the scenarios it carries over; `tools/make_drill_set.py` numbers ids by task hash within one set and doesn't do that yet.
-- **Adding a scenario:** write it with `intent`, `call`, `plant` and `why`; run `tests/test_scenarios.py`; render it with `uv run python -m polarizer.scenarios show <id>` (a development helper that prints the drill screen for one scenario); and have a person other than its author read the screen and answer it before seeing `answer`. A scenario that person answers wrongly for a reason other than inattention (the task was ambiguous, the cue was missing) is rewritten. The stage notes record who reviewed which set, by role. For a review of the whole set, `uv run python -m polarizer.scenarios sheet --out drill-review/scenarios.md` writes one markdown file (`drill-review/` is gitignored): every scenario with its id, answer, shape, task, the block a drill shows (zero ids, a fixed time) and its reveal; then counts per shape, tool, class, rule and answer, planted shapes against the clean scenarios on the same tools, and a list to look at: task lines the same or at least 0.85 alike (difflib's ratio), reveals under 8 words, shapes with fewer than 8 scenarios, and scenarios on a tool fewer than 3 scenarios use; then the shortcut audit (Validation, Shortcuts) and the planted count's distribution (Sampling), which `uv run python -m polarizer.scenarios audit` prints alone.
+- **Adding a scenario:** write it with `intent`, `call`, `plant` and `why`, and its line in the set's plain words file, written from the call alone; run `tests/test_scenarios.py`; render it with `uv run python -m polarizer.scenarios show <id>` (a development helper that prints the drill screen for one scenario); and have a person other than its author read the screen and answer it before seeing `answer`. A scenario that person answers wrongly for a reason other than inattention (the task was ambiguous, the cue was missing) is rewritten. The stage notes record who reviewed which set, by role. For a review of the whole set, `uv run python -m polarizer.scenarios sheet --out drill-review/scenarios.md` writes one markdown file (`drill-review/` is gitignored): every scenario with its id, answer, shape, task, the block a drill shows (zero ids, a fixed time) with the line in plain words a guided drill adds, and its reveal; then counts per shape, tool, class, rule and answer, planted shapes against the clean scenarios on the same tools, and a list to look at: task lines the same or at least 0.85 alike (difflib's ratio), reveals under 8 words, shapes with fewer than 8 scenarios, and scenarios on a tool fewer than 3 scenarios use; then the shortcut audits of the call screen (Validation, Shortcuts) and of the guided screen (Plain words) and the planted count's distribution (Sampling), which `uv run python -m polarizer.scenarios audit` prints alone.
 
 ### Sampling
 
@@ -530,7 +602,7 @@ The values were computed for this spec with a throwaway script in the session's 
 
 ## 8. Ledger kinds
 
-The format, the hash chain, the statuses and the exit codes don't change. LEDGER-SPEC.md allows new kinds whose `data` stays inside the subset, and adding optional fields to existing kinds is how M2a extended `call.sent`. Every field below is ASCII-keyed and holds strings, integers, booleans, null or lists of strings.
+The format, the hash chain, the statuses and the exit codes don't change, and the guided condition changes none of them either: it adds a value to two existing fields of `drill.started` and nothing else. LEDGER-SPEC.md allows new kinds whose `data` stays inside the subset, and adding optional fields to existing kinds is how M2a extended `call.sent`. Every field below is ASCII-keyed and holds strings, integers, booleans, null or lists of strings.
 
 ### Drills (stage 8)
 
@@ -538,14 +610,15 @@ Drills write only to their own ledger (section 9), never to a serve ledger. Ever
 
 | Kind | `data` |
 |---|---|
-| `drill.started` | `session`, `polarizer_version` (`polarizer.__version__`, from the package metadata), `set` (the set version, an integer), `set_sha256`, `seed` (32 hex), `seed_from` (`"random"` or `"flag"`), `condition` (`"plain"` or `"prediction-gate"`), `condition_from` (`"random"` or `"flag"`), `calls` (the number planned), `excluded` (sorted scenario ids), `keep_predictions` (a boolean: `--keep-predictions` was given) |
+| `drill.started` | `session`, `polarizer_version` (`polarizer.__version__`, from the package metadata), `set` (the set version, an integer), `set_sha256`, `seed` (32 hex), `seed_from` (`"random"` or `"flag"`), `condition` (`"plain"`, `"prediction-gate"` or `"guided"`), `condition_from` (`"random"`, `"flag"` or `"first-drill"`, section 4, Defaults), `calls` (the number planned), `excluded` (sorted scenario ids), `keep_predictions` (a boolean: `--keep-predictions` was given) |
 | `drill.shown` | `session`, `n` (1-based position), `scenario` (its id), `hold` (the fresh hold id shown), `args_commit` (the value shown), `seen_before` (how many earlier `drill.shown` entries in this ledger have this scenario) |
 | `drill.predicted` | `session`, `n`, `length` (the number of characters in the typed line after stripping), `prediction` (with `--keep-predictions`, the typed line through `safe()` with a limit of 200 characters: whitespace folded, non-ASCII escaped, cut; otherwise null), `elapsed_ms` |
 | `drill.decided` | `session`, `n`, `scenario`, `decision` (`"allow"` or `"deny"`), `elapsed_ms`, `actor` (`"person"`) |
 | `drill.revealed` | `session`, `n`, `scenario`, `answer` (`"clean"` or `"planted"`), `shape` (or null), `outcome` (`"caught"`, `"missed"`, `"right"` or `"false-flag"`) |
 | `drill.ended` | `session`, `how` (`"finished"`, `"stopped"` or `"interrupted"`), `answered`, `calls` |
 
-- **The plan can be drawn again** from `drill.started` alone, with the set its `set` and `set_sha256` name: `test_plan_is_reproducible_from_the_ledger` draws it and compares it with the `drill.shown` sequence.
+- **The plan can be drawn again** from `drill.started` alone, with the set its `set` and `set_sha256` name: `test_plan_is_reproducible_from_the_ledger` draws it and compares it with the `drill.shown` sequence. The plan's condition is the drill's when `condition_from` is `random`; `flag` and `first-drill` replace it, and change nothing else.
+- **A guided drill writes the same kinds as a plain one.** Its plain lines are not recorded: the set's `set` and `set_sha256` name them, since any change to them makes a new set (section 6, Plain words).
 - **`drill.revealed` records the answer,** so a report needs only the ledger, never the set file that was current then.
 - **`drill.ended` is best effort.** A drill killed outright has none; the report counts its answers and says `did not end`.
 - **`polarizer verify --ledger-dir <drill dir>`** checks a drill ledger like any other: `intact: <n> entries, 0 sessions, 0 calls`, since it counts `session.started` and `call.sent` only. That output doesn't change. `verify --args` finds no `args/` directory and prints `args: 0 matching, 0 missing, 0 tampered, 0 orphaned`.
@@ -585,13 +658,14 @@ The rule since M1a (HOLD-SPEC.md, section 5): an entry is fsynced, with `ledger.
 ### Syntax
 
 ```
-polarizer drill [--ledger-dir <absolute path>] [--calls <n>] [--condition plain|prediction-gate] [--seed <32 hex>] [--keep-predictions]
+polarizer drill [--ledger-dir <absolute path>] [--calls <n>] [--condition plain|prediction-gate|guided] [--seed <32 hex>] [--keep-predictions]
 polarizer drill report [--ledger-dir <absolute path>] [--export <path>]
 polarizer stats (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
 - **`drill`'s directory** is `--ledger-dir`, or by default `~/.local/share/polarizer-drills` (`~` expanded; on Windows the same path under the user's profile, as for the serve ledger). `drill` takes no `--config`: a drill has nothing to do with a serve config, and reading one would invite pointing a drill at a serve ledger.
 - **`stats`** takes exactly one of `--config` and `--ledger-dir`, as `holds` does (HOLD-SPEC.md, section 8): `--config` is read with `require_env=False`, roots are not checked, and nothing is started.
+- **`--condition`** chooses the condition; without it a first drill is guided and later ones are drawn (section 4, Defaults). `polarizer drill --help` says so: `plain, prediction-gate or guided (default: guided for a first drill, then plain or prediction-gate at random)`, and `--calls` reads `calls in the drill, 10 to 40 (default 20; 10 for a first try)`.
 - **`--keep-predictions`** keeps the text of each prediction in the drill ledger (section 4, The prediction gate); without it only the length is kept. It has no effect in a plain drill, and is recorded in `drill.started` either way.
 - **The version** that `drill.started`, the export and `session.started` record is `polarizer.__version__`, read from the installed package's metadata (`importlib.metadata`), so pyproject.toml is the one place it is set (section 16, question 8). Stage 8 replaces the hard-coded `0.1.0.dev0`.
 - Results go to stdout, refusals and usage errors to stderr as one line starting `polarizer: `.
@@ -602,7 +676,7 @@ Each exits 2, on stderr:
 
 ```
 polarizer: --calls must be a whole number from 10 to 40
-polarizer: --condition must be plain or prediction-gate
+polarizer: --condition must be plain, prediction-gate or guided
 polarizer: --seed must be 32 lowercase hex characters
 polarizer: --export goes with drill report
 polarizer: drill report takes only --ledger-dir and --export
@@ -671,7 +745,22 @@ each drill
 ```
 
 - **The fixture** is hand-built, not drawn by the sampler: its drills of 20 have 5 or 6 planted calls, where the sampler now draws 6 to 10 (section 16, question 15). The report reads whatever a ledger holds, so the fixture and this example are unchanged.
-- **Pooling.** A condition's lines pool every answered call of its drills. With one condition only, the comparison section is `prediction gate minus plain: no prediction-gate drills yet` (or the other way round).
+- **Pooling.** A condition's lines pool every answered call of its drills, and no rate, interval, median or count of catches ever pools two conditions. Only the first two lines, the numbers of drills and answered calls and the repeats, count every drill. With one of plain and prediction gate only, the comparison section is `prediction gate minus plain: no prediction-gate drills yet` (or the other way round; with neither, `no prediction-gate or plain drills yet`).
+- **Guided drills** (`drill_report_guided.txt`, the fixture with a guided first drill before the seven and a guided drill chosen with the flag after them) get their own block, `guided: <n> drills`, after the other two, with the same lines. After `prediction gate minus plain` come `guided minus plain` and `guided minus prediction gate`, each a labelled difference with its interval and section 7's phrase, or `guided minus plain: no plain drills yet`. `by kind of planted call` becomes `by kind of planted call, plain and prediction gate` (left out when there are none) followed by `by kind of planted call, guided`. With no guided drill none of this appears, so `drill_report.txt` is unchanged:
+
+```
+guided: 2 drills
+  planted calls: 13. Denied 12: caught 92%, 95% interval 66% to 99%.
+  clean calls: 17. Denied 2: false flags 12%, 95% interval 3% to 35%.
+  median time to decide: 9.0 s
+...
+guided minus plain
+  caught: +16 points, 95% interval -14 to +41: not distinguishable from noise at these numbers.
+  false flags: +5 points, 95% interval -10 to +28: not distinguishable from noise at these numbers.
+guided minus prediction gate
+  caught: +4 points, 95% interval -23 to +28: not distinguishable from noise at these numbers.
+  false flags: +7 points, 95% interval -8 to +30: not distinguishable from noise at these numbers.
+```
 - **Several set versions** are named in the first line: `(scenario sets 1 and 2)`.
 - **Each drill** is one line, in `drill.started` order, dated by the UTC date of its `drill.started` `ts`; `, stopped` or `, did not end` follows the counts when it didn't finish. The fixture's per-drill lines are in the golden file; the spec shows the first and last.
 - **Rates follow section 7:** below 5 of a kind, `too few to say a rate (5 or more needed)`.
@@ -680,22 +769,24 @@ each drill
 
 ### The export
 
-`polarizer drill report --export <path>` prints the report as above and also writes the summary to `<path>`, created exclusively (an existing file is refused: `polarizer: <path> already exists; nothing was written`, exit 2; an operating system error: `polarizer: cannot write <path>: <message>`, exit 2). With no drills: `polarizer: no drills to export`, exit 2. It is compact UTF-8 JSON, sorted keys, ending in a newline, and holds only integers, booleans, null and the strings named below. Schema version 1:
+`polarizer drill report --export <path>` prints the report as above and also writes the summary to `<path>`, created exclusively (an existing file is refused: `polarizer: <path> already exists; nothing was written`, exit 2; an operating system error: `polarizer: cannot write <path>: <message>`, exit 2). With no drills: `polarizer: no drills to export`, exit 2. It is compact UTF-8 JSON, sorted keys, ending in a newline, and holds only integers, booleans, null and the strings named below. Schema version 2 (version 1, before the guided condition, had no `guided` condition, `guided_difference` or `guided_by_shape`, and its `by_shape` counted every drill):
 
 | Key | Value |
 |---|---|
 | `format` | `"polarizer-drill-summary"` |
-| `format_version` | 1 |
+| `format_version` | 2 |
 | `polarizer_version` | `polarizer.__version__` |
 | `scenario_sets` | the set versions used, as strings of digits, ascending |
 | `first_date`, `last_date` | UTC dates, `YYYY-MM-DD`, of the first and last `drill.started` |
 | `drills` | drills with at least one answer |
 | `answered` | calls answered |
 | `repeats` | answered calls whose `seen_before` was above 0 |
-| `conditions` | `{"plain": C, "prediction-gate": C}`, each C or null when that condition has no drills |
-| `difference` | `{"catch": D, "false_flag": D}`, each D or null when either side is below 5 or missing |
-| `by_shape` | for each of the five shape ids, `{"planted": int, "caught": int}` |
-| `per_drill` | a list, in order, of `{"date", "condition", "calls", "answered", "ended", "planted", "caught", "clean", "false_flags", "median_ms", "over_300s"}`, with `ended` one of `finished`, `stopped`, `interrupted` or `none` |
+| `conditions` | `{"plain": C, "prediction-gate": C, "guided": C}`, each C or null when that condition has no drills |
+| `difference` | prediction gate minus plain: `{"catch": D, "false_flag": D}`, each D or null when either side is below 5 or missing |
+| `guided_difference` | `{"minus_plain": {"catch": D, "false_flag": D}, "minus_prediction_gate": {"catch": D, "false_flag": D}}`: guided minus each other condition, each D or null as above |
+| `by_shape` | for each of the five shape ids, `{"planted": int, "caught": int}`, over plain and prediction-gate drills |
+| `guided_by_shape` | the same over guided drills, or null when there are none |
+| `per_drill` | a list, in order, of `{"date", "condition", "calls", "answered", "ended", "planted", "caught", "clean", "false_flags", "median_ms", "over_300s"}`, with `condition` one of the three and `ended` one of `finished`, `stopped`, `interrupted` or `none` |
 
 C is `{"drills", "planted", "caught", "clean", "false_flags", "catch", "false_flag", "median_ms", "over_300s", "catch_within_300s", "false_flag_within_300s"}`, where `catch` and `false_flag` are R or null below 5, `median_ms` is an integer or null, `over_300s` counts the answers over 300 s, and the last two are the rates without those answers, R or null below 5 (section 16, question 4). R is `{"percent", "low_percent", "high_percent"}` and D is `{"points", "low_points", "high_points", "distinguishable"}`, all integers as printed (section 7) except the boolean. No floats appear, so the file is the same on every platform.
 
@@ -715,8 +806,8 @@ Every row gets a file under `tests/golden/`, with `<dir>` for the test's directo
 
 | Command and situation | Golden file | Exit |
 |---|---|---|
-| `drill`: intro, each condition | `drill_intro_plain.txt`, `drill_intro_prediction_gate.txt` | (mid-drill) |
-| `drill`: one call, each condition | `drill_call_plain.txt`, `drill_call_prediction_gate.txt` | (mid-drill) |
+| `drill`: intro, each condition, and a first drill | `drill_intro_plain.txt`, `drill_intro_prediction_gate.txt`, `drill_intro_guided.txt`, `drill_intro_first.txt` | (mid-drill) |
+| `drill`: one call, each condition | `drill_call_plain.txt`, `drill_call_prediction_gate.txt`, `drill_call_guided.txt` | (mid-drill) |
 | `drill`: an invalid answer | `drill_reprompt.txt` | (mid-drill) |
 | `drill`: each reveal, and an answer over 300 s | `drill_reveal_caught.txt`, `drill_reveal_missed.txt`, `drill_reveal_right.txt`, `drill_reveal_false_flag.txt`, `drill_reveal_over_300.txt` | (mid-drill) |
 | `drill`: a whole drill of the test set, to the end screen | `drill_end.txt` | 0 |
@@ -726,8 +817,9 @@ Every row gets a file under `tests/golden/`, with `<dir>` for the test's directo
 | `serve` on a drill ledger | `serve_refused_drill_ledger.txt` (stderr) | 2 |
 | `drill report`: two conditions, a stopped drill, repeats | `drill_report.txt` | 0 |
 | `drill report`: one condition only | `drill_report_one_condition.txt` | 0 |
+| `drill report`: guided drills beside the other two | `drill_report_guided.txt` | 0 |
 | `drill report`: no drills; no ledger | `drill_report_none.txt`, `drill_report_no_ledger.txt` | 0 |
-| `drill report --export`: the file | `drill_export.json` | 0 |
+| `drill report --export`: the file, without and with guided drills | `drill_export.json`, `drill_export_guided.json` | 0 |
 | `drill report --export` refusals: existing file, no drills | `drill_export_refused_<case>.txt` (stderr) | 2 |
 | `stats`: the fixture of section 10 | `stats_mixed.txt` | 0 |
 | `stats`: no holds | `stats_nothing.txt` | 0 |
@@ -983,9 +1075,17 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | `test_shortcut_checks_catch_a_tell` | On the shipped set with `..` added to every planted call and six more arguments on six clean calls, both tells are found and the `..` rule is right every time. | Default |
 | `test_audit_features_and_buckets` | The audit's features are the call screen's, before the answer; the buckets have fixed edges. | Default |
 | `test_every_scenario_renders` | Every scenario renders through `holds.render_block` in at most 60 lines, ASCII only. | Default |
-| `test_review_sheet` | `sheet --out` writes every scenario of the shipped set with its answer, shape, task, block and reveal, the summary counts, the shortcut audit and the planted count's distribution; the shipped set has nothing to look at and no tell. `audit` prints the last two alone. | Default |
+| `test_review_sheet` | `sheet --out` writes every scenario of the shipped set with its answer, shape, task, block with its line in plain words, and reveal, the summary counts, the shortcut audits of both screens and the planted count's distribution; the shipped set has nothing to look at and no tell. `audit` prints the last three alone. | Default |
 | `test_review_sheet_lists_what_to_look_at` | On the test set, changed to have a repeated and a near-duplicate task line, a short reveal and backticks in a reveal, each is listed, with the shapes under 8 and the rare tools; a reveal holding a fence gets a longer fence. | Default |
 | `test_loading_check` | A copy of the set with a broken scenario makes `drill` print the set's refusal line, exit 2, and write nothing. | Default |
+| `test_plain_words_hash_pinned` | Each plain words file's sha256 equals the value written in the test. | Default |
+| `test_every_scenario_has_one_plain_line` | The companion file names its set and the set file's sha256, and has exactly one line per scenario, no other id; the loader gives them to the set. | Default |
+| `test_plain_words_use_no_forbidden_word` | No line holds one of the seven words, in any case and inside any word, or one of the comparing words as a whole word (section 6, Plain words). | Default |
+| `test_plain_words_length` | Every line is 4 to 24 words, at most 200 characters, printable ASCII, and ends a sentence. | Default |
+| `test_plain_words_name_the_call` | Every planted line shares a word with the value that differs from its task, and a changed argument's or look-alike's line holds that value's last part. | Default |
+| `test_plain_words_leak_nothing` | The guided screen's audit, with the plain line's length and whether it names the argument that matters added: no tell, and the best single-feature rule within 10 points of always allow, over the scenarios and over 1,000 seeded drills. | Default |
+| `test_plain_leak_check_catches_a_leak` | Planted lines made longer than any clean one, or clean lines that name nothing, are each found as a tell. | Default |
+| `test_plain_words_loader_checks` | A missing or extra id, another copy of the set, a forbidden or comparing word, a line too long, or another set version are each a `SetProblem` with its message. | Default |
 
 ### `tests/test_drill.py` (stage 8)
 
@@ -995,13 +1095,16 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 | `test_planted_range` | `planted_range` for the values of section 6, Sampling, and for sets with few planted ids or shapes. | Default |
 | `test_planted_count_and_shapes` | With the shipped set, 2,000 drills of 20 in a row, each leaving out the two before it: every plan has 6 to 10 planted calls and the rest clean, all five shapes with counts at most one apart, nothing from the two drills before it, and every count from 6 to 10 drawn. | Default |
 | `test_plan_is_reproducible_from_the_ledger` | After a drill, the plan drawn from `drill.started` (seed, set, calls, excluded, condition) equals the `drill.shown` sequence and the recorded condition. | Default |
-| `test_condition_random_and_flag` | Without `--condition`, the condition is the plan's draw and `condition_from` is `random`; with it, the flag's value and `flag`, and the order of calls is unchanged. | Default |
+| `test_condition_first_random_and_flag` | Without `--condition`, a first drill is guided (`first-drill`) and says why on its first screen, with the short-first-try paragraph; a drill stopped before its first answer leaves the next first; after an answered drill the condition is the plan's draw (`random`); the flag chooses any of the three (`flag`), guided included; a first drill of 10 has no paragraph; the order of calls is the plan's in every case. | Default |
+| `test_ten_call_drills` | 2,000 drills of 10 in a row with the shipped set: each has 5 planted and 5 clean calls, one of each shape, nothing from the two before; a drill of 10 answered rightly ends with both rates and their intervals. | Default |
 | `test_no_repeat_of_last_two_drills` | Three drills in a row on one ledger: no scenario of drills 1 or 2 is in drill 3, and `excluded` lists them; with `--seed`, nothing is excluded. | Default |
+| `test_guided_call_is_the_plain_call_and_one_line` | For every scenario of the shipped set, the guided call screen is the plain one with `In plain words: <line>` inserted after the block, and nothing else changed. | Default |
+| `test_plain_words_are_shown_only_when_guided` | Plain and prediction-gate drills show no line in plain words. | Default |
 | `test_drill_block_equals_holds_block` | For every scenario of the shipped set: a serve-shaped ledger with a `hold.created` and side file of the same values (hold id, session, `ts`, salt, arguments, timeout), its session lock held, printed by `holds`, gives the same block bytes as the drill. | Default |
 | `test_render_block_refactor_keeps_holds_output` | Every existing `holds_*.txt`, `allow_*.txt` and `deny_*.txt` golden file still passes after the refactor (this is the existing golden test, named here as a claim of stage 8). | Default |
 | `test_reveal_for_every_scenario` | Parametrized by scenario id and answer: a one-call drill records `drill.revealed` with the scenario's answer and shape, the right outcome of the four, and prints that outcome's reveal with the scenario's `why`. | Default |
 | `test_elapsed_ms_is_monotonic` | With the injected wall clock stepped back 1.1 s between the prompt and the answer, and the injected monotonic clock advanced 4.2 s, `elapsed_ms` is 4200; the same for `drill.predicted`. | Default |
-| `test_drill_kinds_and_fields` | Each drill kind has exactly section 8's fields, inside the subset. | Default |
+| `test_drill_kinds_and_fields` | Each drill kind has exactly section 8's fields, inside the subset, in each of the three conditions; only the prediction gate writes `drill.predicted`. | Default |
 | `test_prediction_gate_flow` | The prediction comes before the block; an empty prediction asks again; by default only its length is stored, and with `--keep-predictions` the text too, folded and cut to 200 characters. | Default |
 | `test_over_300_is_marked` | An answer with `elapsed_ms` above 300000 gets the reveal's extra line, and the end screen and report give the rates with and without it; at exactly 300000 it is not marked. | Default |
 | `test_version_from_metadata` | `polarizer.__version__` equals the installed package's metadata version, which equals pyproject.toml's; `drill.started` and the export record it. | Default |
@@ -1026,8 +1129,10 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 |---|---|---|
 | `test_report_on_fixture` | The 7-drill fixture gives `drill_report.txt`: counts, rates, intervals, the comparison, shapes and per-drill lines. | Default |
 | `test_report_pools_and_compares` | A condition's numbers pool its drills; one condition only prints the "no drills yet" comparison line. | Default |
+| `test_report_keeps_guided_apart` | With guided drills, the plain and prediction-gate blocks are what they were without them; guided has its own block, its two labelled differences with intervals and phrases, and its own lines by kind; a first report after one guided drill prints the three "no drills yet" lines. | Default |
+| `test_export_keeps_guided_apart` | With guided drills, the export's plain and prediction-gate conditions, `difference` and `by_shape` are what they were without them, and guided is in `conditions`, `guided_difference` and `guided_by_shape`. | Default |
 | `test_report_is_read_only` | Paths, sizes and mtimes are unchanged by `drill report` and by `drill report --export` apart from the export file. | Default |
-| `test_export_schema` | The fixture's export equals `drill_export.json`, keys sorted, integers only apart from the version strings, dates and booleans. | Default |
+| `test_export_schema` | The fixture's export equals `drill_export.json` (schema version 2), keys sorted, integers only apart from the version strings, dates and booleans. | Default |
 | `test_export_has_no_free_text_paths_or_names` | The allowlist check of section 9, The export, and none of the fixture's prediction text, path, session ids, seed or scenario ids in the bytes. | Default |
 | `test_export_refusals` | An existing file and an empty ledger are refused with their lines, exit 2, and nothing written. | Default |
 
@@ -1076,15 +1181,18 @@ A reveal that fails its check adds `, did not check <n>` to the second line. Pla
 Stage 8 writes `docs/DRILL-GUIDE.md`: a one-page walkthrough the owner can send to a friend or a hiring manager who wants to try a drill. This section specifies it.
 
 - **Length and tone.** One page, about 800 words of prose besides its commands and screens (600 before the stage 8 review added the items below). Plain sentences, second person, no jargon: "a record file on your computer", not "ledger"; "the AI agent", with MCP named once and explained in a clause. Every command is on its own line, ready to paste.
-- **Who it is for, first:** anyone, with no AI agent needed, but a terminal needed, said plainly, with what it is called on each system. "This takes about 15 minutes, 10 of them the drill." A friend who works with computers can do the install with the reader in five minutes.
+- **Who it is for, first:** people who approve what AI assistants do, such as developers, and anyone curious, with the guided version; no AI agent needed, but a terminal needed, said plainly, with what it is called on each system. A first drill of 10 actions takes about five minutes. A friend who works with computers can do the install with the reader in five minutes.
+- **The first try:** `polarizer drill --calls 10`, the guide's one drill command, about five minutes; `polarizer drill`, a full drill of 20, named for later.
+- **The three conditions,** in two sentences: guided adds a line in plain words under each action, plain shows the action as it is, prediction first asks what you expect before you see it; the first drill is guided and later ones are drawn, and each kind's results are kept apart because help changes how well anyone does.
 - **Words you will see,** four in three lines: planted call, clean call, caught, false flag, each in a few plain words.
-- **What a drill is:** you play the person who approves an AI agent's risky actions. You see 20 actions, each with the task the agent was given, and you allow or deny each. Between 6 and 10 of the 20 were changed to be wrong on purpose, far more than real work has. After each answer you see whether you were right, and why.
+- **What a drill is:** you play the person who approves an AI agent's risky actions, a job in which people tend to approve more as time goes on. You see actions one at a time, each with the task the agent was given, and you allow or deny each. Half of a first drill's 10, and between 6 and 10 of a full drill's 20, were changed to be wrong on purpose, far more than real work has. After each answer you see whether you were right, and why.
 - **Install,** for macOS and Linux, and for Windows (PowerShell), as numbered steps in plain words: install uv from its official instructions (linked; copy the line for your system, paste it, open a new terminal), then the one `uv tool install` line. Once the repository is public, `uvx --from git+https://github.com/mpwilso/polarizer polarizer drill` runs a drill with no install of Polarizer, marked as working only then. While the repository is private, the owner sends a package file instead, and the guide gives that line too (section 16, question 1). The guide states that installing downloads Polarizer's dependencies, and that the drill itself uses no network. It says that drills on a native Windows console (PowerShell or Command Prompt) have not been tried yet (section 16, question 14).
-- **Run one drill:** `polarizer drill`. What the screen shows, with an excerpt of a call that includes its arguments, and a reveal; how to read an action (the `hold` line names the tool and its kind, the `held by` line says why it would be paused, the part in braces is exactly what it would do, to compare with the task); that clean calls are held too, as real holds are, and the reveal explains each; how to answer (`a` or `d`, `q` to stop); that nothing is real and nothing is sent.
+- **Run your first drill:** `polarizer drill --calls 10`. What the screen shows, with an excerpt of a guided call that includes its arguments and its line in plain words, and a reveal; how to read an action (the `hold` line names the tool and its kind, the `held by` line says why it would be paused, the part in braces is exactly what it would do, to compare with the task); that clean calls are held too, as real holds are, and the reveal explains each; how to answer (`a` or `d`, `q` to stop); that nothing is real and nothing is sent.
 - **See and export the results:** `polarizer drill report`, then `polarizer drill report --export drill-summary.json`; a short excerpt of what the export holds, and a plain list of what it never holds (section 9, The export). Sending it is the reader's choice.
-- **How to read the numbers:** "too few to say" and the interval, in two sentences; that one drill's 6 to 10 planted calls give a wide interval; that always answering allow would be right about 60% of the time, so the two rates matter, not the share of right answers; that a drill measures attention when you know you are being tested, and has far more planted calls than real work.
+- **How to read the numbers:** "too few to say" and the interval, in two sentences; that a drill of 10 has 5 planted and 5 clean calls, just enough for a rate with a wide interval (4 of 5 is 80%, 37% to 97%); that always answering allow would be right about half the time or more, so the two rates matter, not the share of right answers; that a drill measures attention when you know you are being tested, and has far more planted calls than real work; that a guided drill shows how well you do with help, on its own lines.
 - **What it is not:** the paragraph from section 3 that drills are not for grading or ranking anyone, word for word.
 - **Removing it:** `uv tool uninstall polarizer`, and the drill directory to delete by hand, with its path on each platform.
+- **Length:** about 1,000 words of prose besides its commands and screens after the drill usability round (965 before it), still one page.
 - **Checked by a test:** `tests/test_drill_guide.py::test_guide_commands_exist` checks that every `polarizer` command line in the guide parses with Polarizer's own parser, the uvx line's included, and that the guide quotes section 3's paragraph exactly. `test_guide_commands_run` runs the polarizer lines, and `test_guide_install_lines_run_offline` runs the package file's install line and the uninstall line as written, with uv offline, into a tool directory of its own, when uv's cache holds every package the install needs. An offline dry run of the same install decides; the test is skipped, naming the missing package, only when that dry run fails for want of a cached package, and `test_offline_skips_only_for_a_cache_miss` checks that decision on an empty cache. Only the two lines that fetch from GitHub are never run. The docs check covers its links and ASCII.
 
 ## 14. README plan (not applied)
@@ -1165,6 +1273,8 @@ The owner answered this section's questions on Oct 5, 2026 (UTC), after stage 8'
 13. **CLAUDE.md, rule 6.** Decided: rule 6 names `~/.local/share/polarizer-drills` as a Polarizer ledger location that development sessions must not write to; tests use temporary directories.
 14. **Windows console input** for drills. Decided: drills on a native Windows console are unverified, and the guide says so (section 13).
 15. **The planted count, after the first tool check.** Decided by the owner on Oct 5, 2026 (UTC), after reviewing stage 8's first tool check (4 planted calls in a plain drill, 6 in a prediction-gate drill, and "too few to say" for a catch rate below 5): every drill of 20 has exactly 8 planted and 12 clean calls, spread over the five shapes as evenly as the set allows, with no shape missing when the set has it, and with seeded, recorded sampling as before (sections 4 and 6). Drawn from 4 to 8, 80% of 10,000 seeded drills in each condition had 5 or more planted calls; now all do. Then, in the owner's follow-up brief of the same day, decided: the count is a range, drawn uniformly from 6 to 10 per drill of 20 (seeded and recorded as before, the rest clean, every shape present and spread as evenly as the count allows; 30 to 50 percent for other lengths, at least 5 and at least one per shape when the length allows), so the end of a drill cannot be inferred from the running count. It can still be partly inferred in extreme cases: after 10 planted or 14 clean calls the rest are known, which settled an answer in 16% of 10,000 seeded drills, 0.26 calls per drill on average (section 1, Counting down). Every one of 10,000 seeded drills per condition had at least 5 planted and at least 10 clean calls (section 6, Sampling). The intro screen states the range, not the count.
+
+16. **The drill usability round.** Decided by the owner on Oct 5, 2026 (UTC), after a first drill run as a person who is not an engineer, who stopped after 3 calls with no basis to judge calls they did not write, found the prediction step pointless and could not see the value: a third condition, guided, with one hand-written line in plain words under each call, kept apart from the other two everywhere; a first drill guided by default and saying so; a first try of 10 calls recommended; a first screen that says why a person would do this; a clearer prediction prompt; and a guide that says who drills are for (sections 4 to 6, 9 and 13; section 17, Drill usability round).
 
 ## 17. Deviations and guesses
 
@@ -1249,6 +1359,22 @@ Decided in the owner's follow-up brief to the stage 8 review; docs/dev/STAGE8-NO
 5. **The count is drawn right after the condition,** so the stream gives a different plan for a seed than before. Plans recorded by earlier development builds (4 to 8, or a fixed 8) are not drawn again by this sampler; none of them was released.
 6. **The test set has 10 planted scenarios,** two of each shape (it had 8), so its range for 20 calls is the shipped set's 6 to 10 and the golden intro shows it. The golden seed is `000...03ea`.
 
+### Drill usability round (Oct 5, 2026, UTC)
+
+Decided while building section 16's question 16; docs/dev/STAGE8-NOTES.md, Drill usability round, has the detail.
+
+1. **No change to the ledger format, the hash chain, a status or an exit code.** `guided` is a new value of `drill.started`'s `condition`, and `first-drill` of its `condition_from`; no kind or field is added (section 8). Checked before building, as the brief asked.
+2. **`first-drill` is a new `condition_from` value,** because a first guided drill is neither drawn nor flagged, and a reader must be able to tell why a plan's drawn condition was replaced.
+3. **A first drill is one started when no drill in the ledger has an answer,** so a drill stopped at its intro leaves the next one first, as the report leaves it out. The brief said "no records yet"; counting any `drill.started` would have made a person who typed q at the first screen lose the guided drill.
+4. **A first drill with `--seed` is still guided;** the order of calls is the seed's, and two people's first drills with one seed are the same drill.
+5. **The short-first-try paragraph** is shown on a first drill of more than 10 calls, whatever its condition, and nowhere else; the brief named the intro and the guide.
+6. **The plain line goes directly under the block,** before the blank line and the prompt, so the guided screen is the plain one with one line inserted, which a test checks for every scenario.
+7. **The plain words file is pinned, and a changed line makes a new set version,** so `set_sha256` names the lines a guided drill showed and no field records them (section 6, Plain words).
+8. **Comparing words are forbidden too:** `task`, `asked`, `instead`, `also`, `extra`, `another`, `different`, `however`, `actually`, `but`, `rather` and `only`, as whole words, besides the owner's seven. No file's purpose is explained, since such glosses would mark the files planted calls touch.
+9. **The leak audit's second feature** is defined for every scenario, so clean and planted lines can be compared: the argument that matters for a clean call is the one planted calls on its tool change most often (section 6, Plain words).
+10. **The report and export keep guided apart** with a third block, two more labelled differences, separate lines by kind, and in the export a third condition, `guided_difference` and `guided_by_shape`, at schema version 2; `difference` and `by_shape` keep their meaning over plain and prediction gate. The first two report lines and the export's `drills`, `answered` and `repeats` count every drill: they are counts of activity, not results.
+11. **The prediction prompt** is the brief's sentence, wrapped after `do,` into two lines so it fits 80 columns, with the cursor after `graded. `.
+
 ### Deviations from the decisions and the existing documents
 
 1. **Time to decision for real holds is the wall-clock difference** of `hold.created` and `hold.decided`, in whole seconds, 0 when negative, labeled "about", because the interval crosses processes (section 10). milestones.md's carry-forward note and PIN-SPEC.md, section 3 asked for a monotonic value stored in the entry; that is kept for drills and proposed for M3 (section 16, question 5).
@@ -1283,3 +1409,4 @@ Decided in the owner's follow-up brief to the stage 8 review; docs/dev/STAGE8-NO
 30. **`drill` refuses a serve ledger, and `serve` refuses a drill ledger** (section 16, question 12), each with exit 2.
 31. **The terminal requirement for `drill` has no override,** unlike `allow` and `deny`, since a drill exists to measure a person.
 32. **Test file names, golden file names, the scenario file's name and keys, the shape ids, every exact output line, and the reveal texts** are this spec's choice.
+33. **The guided condition is not drawn at random** with the other two: it is a first drill's default and a flag's choice, and its results are never pooled or compared except as labelled differences (section 16, question 16).

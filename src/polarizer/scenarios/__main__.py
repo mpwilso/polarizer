@@ -7,9 +7,10 @@ scenario):
     python -m polarizer.scenarios audit               the shortcut audit and the planted count
 
 `show` is for a reviewer to answer one scenario before reading its answer. `sheet` writes every
-scenario (id, answer, shape, task, the block a drill shows and the reveal), then a summary of the
-set, a list of things for the reviewer to look at, the shortcut audit and the planted count's
-distribution (polarizer.scenarios.audit). `audit` prints those last two alone.
+scenario (id, answer, shape, task, the block a drill shows with the line in plain words a
+guided drill adds, and the reveal), then a summary of the set, a list of things for the reviewer
+to look at, the shortcut audits of the call screen and the guided screen, and the planted
+count's distribution (polarizer.scenarios.audit). `audit` prints those last three alone.
 """
 
 import difflib
@@ -32,6 +33,12 @@ def block(the_set: scenarios.ScenarioSet, scenario: dict) -> list[str]:
     return drill.call_block(scenario, "0" * 16, "0" * 64, "1" * 16, TS, TS, the_set.timeout_seconds)
 
 
+def plain_line(the_set: scenarios.ScenarioSet, scenario: dict) -> list[str]:
+    """The line a guided drill adds under the block, when the set has one for the scenario."""
+    line = the_set.plain.get(scenario["id"])
+    return [] if line is None else [drill.PLAIN_PREFIX + line]
+
+
 def kind(scenario: dict) -> str:
     shape = scenario.get("shape")
     return f"planted ({scenarios.SHAPE_WORDS[shape]})" if shape else "clean"
@@ -44,6 +51,8 @@ def show(the_set: scenarios.ScenarioSet, scenario_id: str, answer: bool) -> int:
         return 2
     print(f"call 1 of 1\ntask: {scenario['task']}\n")
     print("\n".join(block(the_set, scenario)))
+    if scenario_id in the_set.plain:
+        print(f"(guided drills add) {drill.PLAIN_PREFIX}{the_set.plain[scenario_id]}")
     if answer:
         print(f"\nanswer: {kind(scenario)}\nwhy: {scenario['why']}")
     return 0
@@ -121,7 +130,8 @@ def sheet(the_set: scenarios.ScenarioSet) -> str:
         "",
         f"{len(items)} scenarios ({len(planted)} planted, {len(items) - len(planted)} clean), "
         f"set file sha256 `{the_set.sha256}`. Each block is what a drill shows, with zero ids "
-        "and a fixed time. The summary is at the end.",
+        "and a fixed time, and the line in plain words under it is what a guided drill adds. "
+        "The summary is at the end.",
         "",
     ]
     for s in items:
@@ -131,7 +141,7 @@ def sheet(the_set: scenarios.ScenarioSet) -> str:
             "",
             f"{s['answer']}, shape {shape}" if shape else "clean",
             "",
-            *_fenced([f"task: {s['task']}", "", *block(the_set, s)]),
+            *_fenced([f"task: {s['task']}", "", *block(the_set, s), *plain_line(the_set, s)]),
             "",
             "Reveal:",
             "",
@@ -170,7 +180,10 @@ def sheet(the_set: scenarios.ScenarioSet) -> str:
     found = look_at(the_set)
     lines += [f"- {line}" for line in found] if found else ["Nothing."]
     lines += ["", *nearest(the_set), ""]
-    lines += audit.report(the_set, level=3) + audit.count_lines(the_set, level=3)
+    lines += audit.report(the_set, level=3)
+    if the_set.plain:
+        lines += audit.report(the_set, level=3, guided=True)
+    lines += audit.count_lines(the_set, level=3)
     return "\n".join(lines[:-1]) + "\n"
 
 
@@ -209,7 +222,8 @@ def main(argv: list[str]) -> int:
         return 0
     if argv == ["audit"]:
         the_set = scenarios.newest()
-        print("\n".join(audit.report(the_set) + audit.count_lines(the_set)[:-1]))
+        report = audit.report(the_set) + audit.report(the_set, guided=True)
+        print("\n".join(report + audit.count_lines(the_set)[:-1]))
         return 0
     print(USAGE, file=sys.stderr)
     return 2
