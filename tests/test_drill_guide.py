@@ -6,10 +6,15 @@ Polarizer's own parser and are run in the guide's order on a temporary home: the
 pseudo-terminal, answered by the test (POSIX; Windows has no pty module), then the report and
 the export in a working directory of their own. The two uv lines that need no network, the
 package file's install line and the uninstall line, are run as written, with uv offline, into
-a tool directory of the test's own. The two lines that fetch the project from GitHub are not
-run; the polarizer command in the uvx line parses. The screen excerpts are compared with what
+a tool directory of the test's own, when uv's cache holds every package the install needs; an
+offline dry run of the same install decides, and the test is skipped, naming the package,
+only when that dry run fails for want of a cached package. A fresh machine's cache is empty
+(CI run 37361705150). The two lines that fetch the project from GitHub are not run; the
+polarizer command in the uvx line parses. The screen excerpts are compared with what
 a drill prints, and the closing lines with what Polarizer prints."""
 
+import base64
+import hashlib
 import os
 import re
 import shlex
@@ -18,6 +23,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import zipfile
 
 import pytest
 from conftest import ROOT
@@ -35,6 +41,8 @@ WHEEL = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
 # run; the others are run by test_guide_install_lines_run_offline.
 NETWORK = [f"uv tool install git+{REPOSITORY}", f"uvx --from git+{REPOSITORY} polarizer drill"]
 OFFLINE = [f"uv tool install ./{WHEEL}", "uv tool uninstall polarizer"]
+# What uv prints when an offline run needs a package its cache does not hold.
+CACHE_MISS = "Packages were unavailable because the network was disabled"
 
 
 def blocks(language: str) -> list[str]:
@@ -64,14 +72,34 @@ def test_guide_commands_exist():
     cli._parser().parse_args(uvx[4:])
 
 
+def offline(argv, cwd, env) -> str | None:
+    """Run argv with uv offline. None if it succeeded; if it failed only because uv's cache
+    lacks a package it needs, uv's line naming that package. Any other failure fails the test,
+    so a skip that follows a cache miss never hides a real failure."""
+    done = subprocess.run(argv, cwd=cwd, env={**env, "UV_OFFLINE": "1"}, capture_output=True,
+                          text=True, timeout=120)  # fmt: skip
+    if done.returncode == 0:
+        return None
+    assert CACHE_MISS in done.stderr, done.stdout + done.stderr
+    named = [line.strip() for line in done.stderr.splitlines() if "not found in the cache" in line]
+    return named[0].removeprefix("cause: ") if named else CACHE_MISS
+
+
+def dry_run(target):
+    """The guide's package file install, resolved offline and installed nowhere: it needs the
+    same packages from uv's cache as `uv tool install` does. `uv tool install` has no dry run."""
+    return ["uv", "pip", "install", "--dry-run", "--target", str(target), f"./{WHEEL}"]
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="the guide's uv lines need uv on PATH")
 def test_guide_install_lines_run_offline(tmp_path):
     """The package file's install line and the uninstall line, run as the guide writes them,
-    with UV_OFFLINE=1 so Polarizer's parts come from uv's cache (where `uv sync` left them),
-    into a tool directory and a bin directory of the test's own. The package file is built
-    offline first, as the owner builds the one a friend is sent. The installed polarizer then
-    prints the report's first-run line, and the uninstall line removes it. Each step has 120 s
-    against about a second needed here."""
+    with UV_OFFLINE=1 so Polarizer's parts come from uv's cache, into a tool directory and a bin
+    directory of the test's own. The package file is built offline first, as the owner builds
+    the one a friend is sent. The installed polarizer then prints the report's first-run line,
+    and the uninstall line removes it. Skipped, naming the missing package, when uv's cache
+    can't supply the build or the install (an offline dry run of it decides); a fresh machine's
+    cache is empty. Each step has 120 s against about a second needed here."""
     home = tmp_path / "home"
     home.mkdir()
     bin_dir = tmp_path / "bin"
@@ -84,7 +112,13 @@ def test_guide_install_lines_run_offline(tmp_path):
         assert done.returncode == 0, done.stdout + done.stderr
         return done
 
-    run(["uv", "build", "--wheel", "--offline", "--out-dir", str(home)], ROOT)
+    for step, argv, cwd in (
+        ("build the package file", ["uv", "build", "--wheel", "--out-dir", str(home)], ROOT),
+        (f"run {OFFLINE[0]}", dry_run(tmp_path / "dry-run"), home),
+    ):
+        missing = offline(argv, cwd, env)
+        if missing is not None:
+            pytest.skip(f"uv's cache can't {step} offline, as on a fresh machine: {missing}")
     assert (home / WHEEL).exists()
     run(shlex.split(OFFLINE[0]), home)
     installed = shutil.which("polarizer", path=str(bin_dir))
@@ -95,6 +129,46 @@ def test_guide_install_lines_run_offline(tmp_path):
     assert report.stdout == f"drills: none yet in {drills}; run polarizer drill\n"
     run(shlex.split(OFFLINE[1]), home)
     assert shutil.which("polarizer", path=str(bin_dir)) is None
+
+
+def wheel(where, name, requires=()):
+    """A minimal pure-Python wheel, written by hand, so making it needs nothing from a cache."""
+    info = f"{name}-1.0.dist-info"
+    files = {
+        f"{name}/__init__.py": "",
+        f"{info}/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n"
+        + "".join(f"Requires-Dist: {r}\n" for r in requires),
+        f"{info}/WHEEL": "Wheel-Version: 1.0\nGenerator: tests\nRoot-Is-Purelib: true\n"
+        "Tag: py3-none-any\n",
+    }
+    record = ""
+    for path, text in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest()).rstrip(b"=")
+        record += f"{path},sha256={digest.decode()},{len(text.encode())}\n"
+    files[f"{info}/RECORD"] = record + f"{info}/RECORD,,\n"
+    path = where / f"{name}-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as zf:
+        for name_in_zip, text in files.items():
+            zf.writestr(name_in_zip, text)
+    return path
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="the guide's uv lines need uv on PATH")
+def test_offline_skips_only_for_a_cache_miss(tmp_path):
+    """The decision behind the install test's skip, on an empty cache of the test's own, so it
+    is the same on every machine: a wheel whose packages the cache holds (none) is ready to
+    install, so the install test would run it; one that needs a package the cache lacks gives
+    uv's line naming it; and a failure for any other reason fails, never skips."""
+    env = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "cache")}
+    alone = wheel(tmp_path, "pzalone")
+    needy = wheel(tmp_path, "pzneedy", ["pz-not-in-any-cache==1.0"])
+    probe = ["uv", "pip", "install", "--dry-run", "--target", str(tmp_path / "dry-run")]
+    assert offline([*probe, str(alone)], tmp_path, env) is None
+    missing = offline([*probe, str(needy)], tmp_path, env)
+    assert missing is not None and "pz-not-in-any-cache was not found in the cache" in missing
+    with pytest.raises(AssertionError):
+        offline([*probe, str(tmp_path / "absent.whl")], tmp_path, env)
+    assert dry_run(tmp_path)[-1] == shlex.split(OFFLINE[0])[-1]
 
 
 def test_guide_quotes_the_closing_lines():

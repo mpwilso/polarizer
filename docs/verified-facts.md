@@ -767,6 +767,15 @@ Run in this session on WSL2 (Linux), Python 3.12.3, with the repo's `.venv`. Not
 - **The sampler with a drawn count:** a stdlib-only script written from docs/MEASURE-SPEC.md section 6's revised pseudocode, without Polarizer's code, and the code gave the same stream values, four plans, planted ranges and count distribution. Over 10,000 seeded drills of 20 in each drawn condition (seeds 0 to 20,200), the count was uniform on 6 to 10, and every drill had at least 5 planted and at least 10 clean calls and every shape.
 - **The shortcut audit of set 1:** no feature value a drill shows before the answer, with 6 or more scenarios, has 90% or more of one answer; the best leave-one-out single-feature rule (argument bytes) is right on 64.0% of the scenarios against 60.0% for always allow.
 
+## CI fix: the guide's install test (Oct 5, 2026, UTC)
+
+Run in this session on WSL2 (Linux), Python 3.12.3, uv 0.12.19, with the repo's `.venv`. Nothing was fetched and no model was run. Each empty cache below was a new directory in the session's scratch directory, outside the repo.
+
+- **The CI failure, reproduced:** CI run 37361705150 at b495bf3 failed only `tests/test_drill_guide.py::test_guide_install_lines_run_offline`, on all five jobs, with `error: No solution found when resolving dependencies`, although each job ran `uv sync --locked` first; so a cache filled by a locked sync does not let `uv tool install` resolve offline. Why it does not was not checked. With `UV_CACHE_DIR` and `UV_TOOL_DIR` pointing at empty directories and `UV_OFFLINE=1`, the old test failed the same way: `Because mcp was not found in the cache and polarizer==0.1.0 depends on mcp==2.2.0`, with the hint `Packages were unavailable because the network was disabled`.
+- **The build needs no cache:** with an empty cache, `uv build --wheel --offline` wrote the wheel; uv 0.12.19 builds a project whose backend is `uv_build==0.12.19` itself. A project requiring `uv_build==0.11.0` failed the same build with `uv-build was not found in the cache` and the same hint.
+- **`uv tool install` has no dry run:** in uv 0.12.19 its help lists neither `--dry-run` nor `--no-deps`. `uv pip install --dry-run --target <dir> <wheel>` with `UV_OFFLINE=1` resolves the same wheel against the cache and installs nothing (it leaves only a `.lock` file in the target): it failed on the empty cache with the same `mcp was not found in the cache` line and hint, and on the owner's cache resolved 30 packages and exited 0. Given a wheel filename with no version it fails with `The wheel filename "missing.whl" is invalid: Must have a version`, without the hint.
+- **The fixed test:** on the empty caches with `UV_OFFLINE=1`, the install test is skipped with uv's line naming mcp and the rest of the file passes; on the owner's cache it runs the install and uninstall and passes. `test_offline_skips_only_for_a_cache_miss` passes on an empty cache: a hand-written wheel with no dependencies resolves, one requiring a package no cache holds is a cache miss naming it, and an invalid wheel is a failure, not a skip.
+
 ## Unverified
 
 These are assumed or open. Nothing here has been observed.
