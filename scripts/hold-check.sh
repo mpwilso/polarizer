@@ -24,9 +24,11 @@
 # Testing only: POLARIZER_CHECK_TOML and POLARIZER_CHECK_LEDGER_DIR replace polarizer.toml and the
 # ledger directory. With POLARIZER_CHECK_TESTING=1 as well, the other files live next to that toml
 # (polarizer.manual.toml, hold-check-results.txt, and manual/ in place of /tmp/polarizer-manual),
-# the processes looked for are that directory's fs_stub.py, the long wait and the timeout are 1 s,
-# and no guard, uv or npx runs. Every command refuses either override without
-# POLARIZER_CHECK_TESTING=1.
+# the processes looked for are that directory's fs_stub.py, the long wait is 1 s, the expire
+# step's timeout is POLARIZER_CHECK_HOLD_TIMEOUT seconds (default 1), and no guard, uv or npx
+# runs. POLARIZER_CHECK_LOOKUP_DELAY (seconds, default 0) delays each step's lookup of its hold
+# after polarizer holds --wait returns, as a slow machine would. Every command refuses either
+# override without POLARIZER_CHECK_TESTING=1, and the last two apply only with it.
 set -euo pipefail
 umask 077
 
@@ -71,8 +73,13 @@ if [ "$TESTING" = 1 ]; then
   PATTERN="$BASE/fs_stub.py"
   LEDGER_LINE="$LEDGER"
   LONG_WAIT=1
-  TIMEOUT=1
+  TIMEOUT="${POLARIZER_CHECK_HOLD_TIMEOUT:-1}"
+  LOOKUP_DELAY="${POLARIZER_CHECK_LOOKUP_DELAY:-0}"
+  case "$TIMEOUT$LOOKUP_DELAY" in
+    *[!0-9]*) echo "hold-check: POLARIZER_CHECK_HOLD_TIMEOUT and POLARIZER_CHECK_LOOKUP_DELAY must be whole seconds" >&2; exit 2 ;;
+  esac
   RECONNECT_WAIT=60
+  HOLD_WAIT=60
 else
   EXAMPLE="$REPO/manual/polarizer.manual.toml"
   RESULTS=/tmp/hold-check-results.txt
@@ -82,7 +89,9 @@ else
   LEDGER_LINE='~/.local/share/polarizer-m2a-check'
   LONG_WAIT=65
   TIMEOUT=30
+  LOOKUP_DELAY=0
   RECONNECT_WAIT=300
+  HOLD_WAIT=300
 fi
 HOOKS="$MANUAL/.git/hooks"
 
@@ -245,18 +254,28 @@ write_toml() {
   mv -f "$tmp" "$TOML"
 }
 
-# wait_for_hold "<what to ask Claude>" [<hold id to skip>]: prints the request, runs polarizer
+# wait_for_hold "<what to ask Claude>": marks the ledger, prints the request, runs polarizer
 # holds --wait --bell until a call of a running session is held, shows the listing, and sets
-# HOLD to the newest open hold of a running session.
+# HOLD to the first hold created after the mark. That hold may already have ended by the
+# lookup (a short timeout on a slow machine, CI run 37259695458), and it is still the one this
+# step asked for; holds --wait may also have returned for an older open hold, so the lookup
+# waits for the new one.
 wait_for_hold() {
-  local listing code=0
+  local listing code=0 mark waited=0
+  mark="$(helper last-seq "$LEDGER")" || stop "cannot read the ledger"
   printf '\nIn terminal A, ask Claude:\n\n  %s\n\n' "$1"
   echo "If Claude Code asks whether to allow the polarizer tool, allow it there: that is Claude Code's own prompt, before the call reaches Polarizer."
   echo "Waiting for the call to be held: polarizer holds --config $TOML --wait --bell"
   listing="$("$POLARIZER" holds --config "$TOML" --wait --bell)" || code=$?
   printf '%s\n' "$listing"
   [ "$code" = 0 ] || stop "polarizer holds exited $code"
-  HOLD="$(helper open-hold "$LEDGER" ${2:+"$2"})" || stop "no open hold of a running session was found"
+  sleep "$LOOKUP_DELAY"
+  until HOLD="$(helper new-hold "$LEDGER" "$mark" 2> /dev/null)"; do
+    [ "$waited" -lt "$HOLD_WAIT" ] || stop "no call was held in the $HOLD_WAIT s after the request"
+    sleep 1
+    waited=$((waited + 1))
+  done
+  helper new-hold "$LEDGER" "$mark" > /dev/null || true  # its lines: tool, rule, any ending
   echo "the hold this step decides: $HOLD"
 }
 

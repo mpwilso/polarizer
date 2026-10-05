@@ -7,6 +7,8 @@ text for the person goes to stderr, which the script prints and records.
     hold_check.py group                          (pending's output on stdin)
     hold_check.py token <ledger dir>
     hold_check.py open-hold <ledger dir> [<hold id to skip>]
+    hold_check.py last-seq <ledger dir>
+    hold_check.py new-hold <ledger dir> <seq>
     hold_check.py trail <ledger dir> <hold id>
     hold_check.py ended <ledger dir> <hold id>
     hold_check.py returned <ledger dir> <hold id>
@@ -104,6 +106,35 @@ def open_hold(ledger_dir: Path, skip: str | None = None) -> int:
     newest = running[-1]
     say(f"{newest.tool} held by {newest.rule}: {newest.reason}")
     print(newest.hold)
+    return 0
+
+
+def last_seq(ledger_dir: Path) -> int:
+    """The seq of the ledger's last complete entry: a step's mark, taken before it asks for a
+    call, so the hold that call makes is the first hold.created after it."""
+    print(entries(ledger_dir)[-1]["seq"])
+    return 0
+
+
+def new_hold(ledger_dir: Path, after: str) -> int:
+    """The first hold created after seq `after`, whether or not it has ended yet: its id. A hold
+    with a short timeout can expire between `holds --wait` seeing it and this lookup (CI run
+    37259695458), and it is still the hold the step asked for. Silent when there is none yet."""
+    created = [
+        e for e in entries(ledger_dir) if e["kind"] == "hold.created" and e["seq"] > int(after)
+    ]
+    if not created:
+        return 1
+    first = folded(ledger_dir).get(created[0]["data"]["hold"])
+    if first is None:
+        say(f"hold.created at seq {created[0]['seq']} could not be read")
+        return 1
+    say(f"{first.tool} held by {first.rule}: {first.reason}")
+    if first.ending is not None:
+        say(f"it has already ended: {first.ending.kind} at seq {first.ending.seq}")
+    if len(created) > 1:
+        say(f"{len(created)} holds were created since this step began; this step decides the first")
+    print(first.hold)
     return 0
 
 
@@ -212,6 +243,10 @@ def main(argv: list[str]) -> int:
                 return token(Path(ledger_dir))
             case ["open-hold", ledger_dir, *skip] if len(skip) <= 1:
                 return open_hold(Path(ledger_dir), skip[0] if skip else None)
+            case ["last-seq", ledger_dir]:
+                return last_seq(Path(ledger_dir))
+            case ["new-hold", ledger_dir, after]:
+                return new_hold(Path(ledger_dir), after)
             case ["trail", ledger_dir, hold]:
                 return trail(Path(ledger_dir), hold)
             case ["ended", ledger_dir, hold]:

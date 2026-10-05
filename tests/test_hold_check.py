@@ -5,7 +5,8 @@ The script tests run it on a pseudo-terminal with scripted answers, POSIX only, 
 Code and no model: a raw MCP client running `polarizer serve` stands in for Claude Code, and
 makes each call the script asks the person to request; tests/helpers/fs_stub.py stands in for
 the Filesystem server. Everything the script writes is in the test's own directory
-(POLARIZER_CHECK_TESTING=1), where the long wait and the hold timeout are 1 s."""
+(POLARIZER_CHECK_TESTING=1), where the long wait is 1 s and the expire step's hold timeout is
+EXPIRE_TIMEOUT seconds."""
 
 import json
 import os
@@ -36,6 +37,11 @@ START = (
     " Then run: scripts/hold-check.sh deny"
 )
 NOT_ALLOWED = "polarizer: fs__write_file was not allowed"
+# The expire step's hold timeout: a margin chosen at more than five times the 1 s the step used
+# to have, not a measurement. The step needs `holds --wait` to see the hold open once (one 0.25 s
+# poll plus one locked read of the ledger); the lookup after it no longer needs the hold to be
+# open (test_expire_step_finds_a_hold_that_already_ended, CI run 37259695458).
+EXPIRE_TIMEOUT = 8
 IGNORED = "more bytes typed or pasted after the answer"
 
 
@@ -161,6 +167,7 @@ def check(tmp_path, fake_home):
         "POLARIZER_CHECK_TESTING": "1",
         "POLARIZER_CHECK_TOML": str(base / "polarizer.toml"),
         "POLARIZER_CHECK_LEDGER_DIR": str(base / "ledgers" / "polarizer-m2a-check"),
+        "POLARIZER_CHECK_HOLD_TIMEOUT": str(EXPIRE_TIMEOUT),
     }
     yield base, env
     found = subprocess.run(["pgrep", "-f", str(base)], capture_output=True, text=True).stdout
@@ -256,7 +263,7 @@ def test_whole_check(check):
             ("About how long", b"1\n"),
         ])  # fmt: skip
         assert code == 0, out
-        assert "polarizer started again with hold_timeout_seconds = 1" in out
+        assert f"polarizer started again with hold_timeout_seconds = {EXPIRE_TIMEOUT}" in out
         assert "the hold ended: hold.expired at seq " in out
         assert "is still there, as expected" in out and "does not exist, as expected" in out
         assert claude.last_text(4) == "polarizer: fs__move_file was not allowed"
@@ -283,6 +290,34 @@ def test_whole_check(check):
     assert "answer: It said the call was not allowed.\n" in text
     assert "not-a-command" not in text
     assert "answer: a spinner\n" in text and "(y/n/not tried) answer: y\n" in text
+
+
+@POSIX
+def test_expire_step_finds_a_hold_that_already_ended(check):
+    """CI run 37259695458: the hold expired between `holds --wait` printing it and the script's
+    own lookup, and the step stopped with "no open hold of a running session was found". With
+    the lookup delayed past the hold's timeout, the step still finds its hold, reports that it
+    has already ended, and completes."""
+    base, env = check
+    env = {**env, "POLARIZER_CHECK_HOLD_TIMEOUT": "4", "POLARIZER_CHECK_LOOKUP_DELAY": "6"}
+    assert drive(env, "reset", [("Type yes", b"yes\n")])[0] == 0
+    claude = Claude(base / "polarizer.toml")
+    try:
+        manual = base / "manual"
+        move = {"source": str(manual / "note.txt"), "destination": str(manual / "moved.txt")}
+        code, out = drive(env, "expire", [
+            ("choose polarizer and reconnect it", claude.reconnect),
+            ("In terminal A, ask Claude:", lambda: claude.call("fs__move_file", move)),
+            ("Is hold", b"y\n"),
+            ("What did Claude Code show", b"not allowed\n"),
+            ("About how long", b"4\n"),
+        ])  # fmt: skip
+        assert code == 0, out
+        assert "it has already ended: hold.expired at seq " in out
+        assert "the hold ended: hold.expired at seq " in out
+        assert "-- expire: complete" in out
+    finally:
+        claude.exit()
 
 
 @POSIX
@@ -343,6 +378,33 @@ def test_output_is_written_before_exit_on_bash_3_2(check):
 
 
 # --- scripts/hold_check.py, on every platform
+
+
+def test_new_hold_is_the_first_created_after_the_mark(tmp_path, capsys):
+    """new-hold names the first hold created after the mark, ended or not, and nothing before
+    the mark; last-seq prints the mark."""
+    from conftest import build_chain
+
+    def created(hold):
+        return ("hold.created", {"session": "a" * 16, "hold": hold, "tool": "fs__move_file",
+                                 "args_commit": "0" * 64, "class": "destructive",
+                                 "class_from": "config", "rule": "destructive",
+                                 "reason": "class destructive is held on every call",
+                                 "timeout_seconds": 1})  # fmt: skip
+
+    expired = (
+        "hold.expired",
+        {"session": "a" * 16, "hold": "2" * 16, "reason": "timeout after 1 s"},
+    )
+    build_chain(tmp_path, [created("1" * 16), created("2" * 16), expired, created("3" * 16)])
+    assert hold_check.main(["last-seq", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "4\n"
+    assert hold_check.main(["new-hold", str(tmp_path), "4"]) == 1
+    assert hold_check.main(["new-hold", str(tmp_path), "1"]) == 0
+    out, err = capsys.readouterr()
+    assert out == "2" * 16 + "\n"
+    assert "it has already ended: hold.expired at seq 3" in err
+    assert "2 holds were created since this step began; this step decides the first" in err
 
 
 def test_group_reads_a_fresh_first_run(capsys):
