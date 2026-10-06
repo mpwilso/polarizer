@@ -18,7 +18,7 @@ from mcp.shared.subscriptions import ToolsListChanged
 
 from polarizer import cli, defhash
 from polarizer.ledger import verify_bytes
-from polarizer.pins import CAP, CAP_PROBLEM, PinState, ToolPins, state
+from polarizer.pins import CAP, CAP_PROBLEM, PinState, ToolPins, blocks, state
 from polarizer.sidefiles import ARGS
 
 
@@ -289,6 +289,36 @@ def test_drift_once_per_pair_and_sticky(tmp_path):
     assert drift["data"]["approved_hash"] == v1 and drift["data"]["live_hash"] != v1
     after = [e["kind"] for e in rig.entries(ledger_dir)[count:]]
     assert after == ["call.refused"]  # the revert recorded nothing
+
+
+def test_tool_added_to_approved_server_is_pending(tmp_path):
+    """A tool that appears on a server whose tools are all approved is new, not drift: it is
+    pending, hidden and refused by name until approved, and the approved tools stay exposed
+    (docs/PIN-SPEC.md, sections 3 and 4)."""
+    fake = FakeUpstream(names=["create_issue"])
+    ledger_dir = tmp_path / "ledger"
+
+    async def scenario():
+        async with rig.proxied(ledger_dir, [rig.spec("t", fake.server)]) as (c, gw):
+            before = names((await c.list_tools()).tools)
+            fake.names.append("update_issue")
+            during = names((await c.list_tools()).tools)
+            refused = (await c.call_tool("t__update_issue", {"id": 7})).content[0].text
+            found = blocks(gw.pins, ledger_dir)
+            await approve(ledger_dir, "t", "update_issue", hash_now(fake, "update_issue"))
+            await gw.catch_up()
+            after = names((await c.list_tools()).tools)
+            return before, during, refused, found, after
+
+    before, during, refused, found, after = anyio.run(scenario)
+    assert before == during == ["t__create_issue"]
+    assert refused == "polarizer: t__update_issue is not available: waiting for approval"
+    assert [(b.kind, b.tool) for b in found] == [("new", "update_issue")]
+    assert after == ["t__create_issue", "t__update_issue"]
+    assert rig.kinds(ledger_dir, "tool.drift") == []
+    (entry,) = rig.kinds(ledger_dir, "call.refused")
+    assert entry["data"]["reason"] == 'upstream t tool "update_issue" is pending approval'
+    assert [name for name, _, _ in fake.calls] == []
 
 
 MODERN_META = {

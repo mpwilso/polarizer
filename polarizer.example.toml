@@ -49,3 +49,17 @@ write_file = { class = "local-write", path_args = ["path"] }
 edit_file = { class = "local-write", path_args = ["path"] }
 create_directory = { class = "local-write", path_args = ["path"] }
 move_file = { class = "destructive", path_args = ["source", "destination"] }
+
+# Another kind of server, sketched: an issue tracker. Reading tickets runs; filing or closing one
+# is held on every call, so the agent can draft a ticket and wait while `polarizer holds` shows
+# you its exact arguments. `polarizer allow <hold id>` forwards exactly those, and `deny` drops
+# them. A tool the tracker adds later, such as update_issue, is new, not a changed definition:
+# it stays hidden and is refused until `polarizer pending` and `approve` let it in. Give it a
+# class here too, or every call to it is held.
+# [upstream.tracker]
+# command = "your-tracker-server"
+#
+# [upstream.tracker.tools]
+# get_issue = { class = "open-world" }
+# create_issue = { class = "egress" }
+# close_issue = { class = "destructive" }

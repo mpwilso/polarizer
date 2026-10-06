@@ -171,6 +171,31 @@ def test_example_config_for_users(tmp_path, fake_home):
     assert example_fs["args"][:2] == manual_fs["args"][:2]
 
 
+def test_example_tracker_sketch(tmp_path, fake_home):
+    """The issue tracker sketched in comments at the end of polarizer.example.toml, uncommented,
+    parses and does what its comment says: reads run, create_issue and close_issue are held on
+    every call, and a tool it adds later with no class is held too."""
+    from polarizer import policy
+
+    text = EXAMPLE_TOML.read_text(encoding="utf-8")
+    sketch = text[text.index("# [upstream.tracker]") :].splitlines()
+    assert all(line.startswith("#") for line in sketch)
+    text += "\n".join(line[2:] for line in sketch) + "\n"
+    (fake_home / "projects" / "demo").mkdir(parents=True)
+    cfg = load(write(tmp_path, text.replace("/home/you", fake_home.as_posix())))
+    pol = policy.build(cfg)
+    verdicts = {
+        tool: policy.evaluate(pol, "tracker", tool, {"title": "t"}, {})
+        for tool in ("get_issue", "create_issue", "close_issue", "update_issue")
+    }
+    assert {tool: (v.action, v.rule) for tool, v in verdicts.items()} == {
+        "get_issue": ("allow", "open-world"),
+        "create_issue": ("hold", "egress"),
+        "close_issue": ("hold", "destructive"),
+        "update_issue": ("hold", "unclassified"),
+    }
+
+
 def test_verify_and_repair_do_not_need_upstream_secrets(tmp_path, fake_home):
     cfg = load(good(tmp_path), require_env=False, environ={})
     assert cfg.upstreams[1].env["NOTES_TOKEN"] == "${NOTES_TOKEN}"

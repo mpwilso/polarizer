@@ -201,7 +201,7 @@ create_directory = { class = "local-write", path_args = ["path"] }
 move_file = { class = "destructive", path_args = ["source", "destination"] }
 ```
 
-Each tool gets a class. `local-read` and `open-world` run unless a path matches a read hold pattern such as `~/.ssh/**`; `local-write` runs only when every path in `path_args` resolves inside a workspace root and matches no write hold pattern, such as `.git/hooks/**`; `destructive` and `egress` are held on every call, and so is a tool with no class. [docs/HOLD-SPEC.md](docs/HOLD-SPEC.md#2-classes-and-the-policy-in-polarizertoml) has every key. Run the server once by hand first, since its first `npx` fetch can miss Polarizer's connect timeout:
+Each tool gets a class. `local-read` and `open-world` run unless a path matches a read hold pattern such as `~/.ssh/**`; `local-write` runs only when every path in `path_args` resolves inside a workspace root and matches no write hold pattern, such as `.git/hooks/**`; `destructive` and `egress` are held on every call, and so is a tool with no class. [docs/HOLD-SPEC.md](docs/HOLD-SPEC.md#2-classes-and-the-policy-in-polarizertoml) has every key. The end of [polarizer.example.toml](polarizer.example.toml) sketches an issue tracker whose `create_issue` is held, so you see each ticket before it is filed. Run the server once by hand first, since its first `npx` fetch can miss Polarizer's connect timeout:
 
 ```sh
 npx -y @modelcontextprotocol/server-filesystem@2026.8.31 "$HOME/projects/demo" < /dev/null
