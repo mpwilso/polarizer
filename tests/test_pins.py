@@ -316,6 +316,8 @@ def test_tool_added_to_approved_server_is_pending(tmp_path):
     assert [(b.kind, b.tool) for b in found] == [("new", "update_issue")]
     assert after == ["t__create_issue", "t__update_issue"]
     assert rig.kinds(ledger_dir, "tool.drift") == []
+    seen = [e["data"]["tool"] for e in rig.kinds(ledger_dir, "tool.seen")]
+    assert seen == ["create_issue", "update_issue"]
     (entry,) = rig.kinds(ledger_dir, "call.refused")
     assert entry["data"]["reason"] == 'upstream t tool "update_issue" is pending approval'
     assert [name for name, _, _ in fake.calls] == []

@@ -489,6 +489,7 @@ A second signal during shutdown skips the rest of step 2 and goes straight to st
 | `test_drift_mid_session_modern` | A 2026-07-28 upstream's `rug_pull()` hides the tool through a listen event, records one `tool.drift`, and publishes a change to the client. | Default |
 | `test_drift_mid_session_handshake` | The same through a 2025-11-25 upstream's `tools/list_changed`, in memory and with the probe's `change` tool over stdio. | Default |
 | `test_drift_once_per_pair_and_sticky` | Repeated lists of a changed definition record one drift; returning to the approved definition keeps the tool hidden and records nothing. | Default |
+| `test_tool_added_to_approved_server_is_pending` | A tool that appears on a server whose tools are approved records `tool.seen`, not `tool.drift`: it is pending, hidden and refused by name until approved, and the approved tools stay exposed. | Default |
 | `test_served_copy_is_stored_copy` | The definition a raw client receives, in both client eras, equals the stored copy, renamed. | Default |
 | `test_tampered_stored_copy_hides` | One changed byte in an approved copy hides the tool, records `stored copy does not match its hash` once, and refuses calls. Deleting the file lets the next refresh store it again and expose the tool. | Default |
 | `test_unwritable_stored_copy_hides` | With `defs/` read-only, a new definition records `stored copy could not be written` and stays hidden. | POSIX: Windows has no read-only directories in this sense |
