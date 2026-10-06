@@ -517,3 +517,38 @@ Six subagents, each started fresh with Claude Code's built-in subagent tool and 
 
 - **`scripts/test.sh`** with `set -o pipefail`, before this section and the review were written: ruff check and format clean, `check_docs: 28 files, 0 findings`, `1288 passed, 13 skipped in 276.71s (0:04:36)`, exit 0, 279 s wall (1283 before, plus the 5 new brand tests). After this section, `scripts/check_docs.py` and `tests/test_brand.py` ran again.
 - **Not run:** CI; GitHub's rendering of the animated lockups, which only a push can show; anything on Windows or macOS.
+
+## Lockups: the full mark with or without animation (Oct 6, 2026, UTC)
+
+The owner reported that GitHub, in Chrome 154 on Windows with reduced motion off and the dark theme, showed both animated lockups as an empty circle, with no parallel lines and no turned line, in the README and in GitHub's file preview, still 10 s after load; `mark-small.svg` showed the right mark. Guard snapshot `snapshot-20261006T144703Z.txt` taken first. Nothing was fetched, no model was run and no subagent was used.
+
+### Reproduction
+
+A stdlib DevTools client over a pipe (`tests/helpers/chromium.py`) drove the headless Chromium already in the Playwright cache (build 1243, Chrome for Testing 153.0.8010.12) with real waits, not virtual time. Throwaway scripts and screenshots are in the gitignored `brand-preview/repro/`.
+
+- **Real time, normal motion:** each lockup at 430 by 100, device scale 2, on a white page and on `#0d1117`, screenshot at 0.3, 1.0, 2.0 and 6.0 s after the load event, in three contexts: an `<img>`, the SVG as the top-level document, and a CSS `background-image`. All 48 shots showed the lines drawing in and, from 2.0 s, the finished mark; none showed the empty circle. So did the README's own `<picture>` markup with `prefers-color-scheme` emulated as dark and as light, and the full Chromium binary with `--headless=new`. None of the three contexts reproduced the report here.
+- **The source:** nothing was hidden outside `@keyframes`. The only hidden state was `@keyframes draw{from{transform:scaleY(0)}}`, with fill-mode `backwards` and delays, on every line and on both of the band's strokes. So the file's frame at animation time zero is the face, the rim and the word with no lines: the reported empty circle.
+- **Time zero in an `<img>`:** the same `<img>` page shot with `--virtual-time-budget=1`, so the image's clock hardly moves, showed exactly that empty circle in both themes (0 line or band pixels for the light lockup). The animated-logo round above met the same frame ("showed its first frame") and took it for a limit of virtual time.
+
+**The cause:** the empty circle is the lockups' first frame. A renderer that paints the image once and never moves its clock on shows the first frame for good. Why GitHub's Chrome 154 did that wasn't found here and needs Windows to check. With a hidden `from` and fill-mode `backwards`, the first frame is hidden by construction. In CSS, a frozen first frame and the first frame of a running animation are the same frame, so a rule of "start from a hidden `from` with `backwards`" can't fix it. The owner chose, when asked, that the first frame be the finished mark.
+
+### The fix
+
+`scripts/brand.py`: each of the nine line classes has its own `@keyframes` over the whole 1.6 s, with no delays and no fill-mode. 0% and 100% are left out, so both are the element's own style: the finished mark. The lines and the band fade out by 0.15 s; at 0.16 s, out of sight, each line is folded to its top (`scaleY(0)`) and the band's outer group set back in line (`rotate(-28deg)`); from 0.18 s the lines draw in from the top, 0.36 s each, `ease-out`, 0.06 s apart, left to right, the band sixth; at 1.02 s the band swings out to its turn in 0.58 s, `ease-in-out`. Total 1.6 s (`TOTAL_SECONDS`). The reduced-motion rule, the lack of script, the sizes, the palette and the geometry are unchanged (`OLD_GEOMETRY` still matches). The band's final angle and position are the inner group's SVG `transform`, as before. The lockups are 3,428 bytes each (1,934 before). `mark-small.svg` has no animation and is unchanged. docs/brand/README.md now describes the new opening.
+
+### Tests, written first
+
+- `tests/test_brand.py`: no base rule and no attribute hides anything (opacity 0, `visibility:hidden`, `display:none`, a dash offset, a zero scale), and no fill-mode `forwards` or `both`; each `@keyframes`' `from`/0% and `to`/100% hide nothing; and a check of the hiding patterns themselves.
+- `tests/test_brand_render.py`: both lockups as `<img>`s in one page in the headless Chromium. Each render is compared with the reduced-motion render (`--force-prefers-reduced-motion`): line and band pixels in each disc at least 90% of the reference, and at most 1% of the disc's pixels different. The renders: after 6.0 s of real time, with `*{animation:none!important}` added to a copy of each file, and with `*{animation-play-state:paused!important}` added (the clock stopped at the start). The tests skip, with the reason, when no Chromium is found.
+- Against the files at 29184e8: 2 failed, 13 passed. Failed: the first-frame check (`from{transform:scaleY(0)}`) and the stopped-clock render (0 line and 0 band pixels in the light lockup's disc). The base-style check, the 6.0 s render and the animation-off render passed on the old files, since nothing there was hidden outside keyframes and this Chromium does advance the clock. After the fix: 15 passed.
+
+### Lockups looked at
+
+The fixed lockups in the same 48 real-time shots: the face empty and the first lines drawing at 0.3 s, the band upright among the drawn lines at 1.0 s, and the finished mark at 2.0 and 6.0 s. The 6.0 s pixel counts equal those of the files at 29184e8. The time-zero `<img>` shot shows the finished mark in both themes. Inline frames at 0, 0.08, 0.15, 0.17, 0.3, 0.6, 1.0, 1.3 and 1.6 s: whole, half faded, empty, empty, first lines, most lines with the band part drawn, all drawn with the band upright, the band turning, and finished; no line shows while it is folded. `mark-small.svg` at 32 and 16 px on white and on `#0d1117` reads at both sizes.
+
+### Lockup fix runs
+
+- **`scripts/test.sh`** with `set -o pipefail`: ruff check and format clean, `check_docs: 28 files, 0 findings`, `1300 passed, 13 skipped in 286.60s (0:04:46)`, exit 0, 287 s wall. The render tests ran, not skipped, with the cached Chromium.
+- **Not run:** CI; GitHub's rendering of the fixed lockups, which only a push can show; anything on Windows or macOS, so the reported Chrome 154 behavior itself was not reproduced here.
+- **The pre-push scan** of the working tree's tracked and new files, case-insensitive: 0 for each of the brief's eight words.
+- **`scripts/dev/guard.sh check`** against `snapshot-20261006T144703Z.txt`, before the commit: exit 0. No changes in any guarded repository, `~/.local/share/parallax`, `~/.config/parallax`, `~/isr-notes` or `~/.claude/settings.json`; the MCP config hashes in `~/.claude.json` unchanged (6 locations); its size and mtime changed (100,083 to 101,323 bytes), which is Claude Code's own bookkeeping.

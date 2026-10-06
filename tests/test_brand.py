@@ -118,6 +118,77 @@ def test_reduced_motion_and_static_mark():
         assert f'transform="rotate({brand.TURN} {brand.BAND_X} 50)"' in text
 
 
+# What hides an element: no opacity, no visibility, no display, a dash offset, or a scale of 0
+# on either axis.
+HIDING = re.compile(
+    r"opacity\s*:\s*0*\.?0*\s*(?:!important\s*)?(?:;|}|$)"
+    r"|visibility\s*:\s*hidden|display\s*:\s*none|stroke-dashoffset"
+    r"|scale[XY]?\(\s*0*\.?0*\s*[,)]|scale\([^)]*,\s*0*\.?0*\s*\)"
+)
+HIDING_ATTRIBUTE = re.compile(
+    r'\s(?:opacity|fill-opacity|stroke-opacity)="0*\.?0*"|\svisibility="hidden"'
+    r'|\sdisplay="none"|\sstroke-dashoffset=|\stransform="[^"]*scale\(\s*0'
+)
+
+
+def test_hiding_patterns():
+    for hidden in ("opacity:0", "opacity: 0.0;", "visibility:hidden", "display:none",
+                   "stroke-dashoffset:40", "transform:scaleY(0)", "transform:scale(0)",
+                   "transform:scale(1, 0)", "transform:scaleX(0.0)"):  # fmt: skip
+        assert HIDING.search(hidden), hidden
+    for shown in ("opacity:1", "opacity:.5", "transform:none", "transform:scaleY(1)",
+                  "transform:scale(0.5)", "transform:rotate(-28deg)", "animation:none"):  # fmt: skip
+        assert not HIDING.search(shown), shown
+    for hidden in (' opacity="0"', ' visibility="hidden"', ' transform="scale(0)"'):
+        assert HIDING_ATTRIBUTE.search(hidden), hidden
+    assert not HIDING_ATTRIBUTE.search(' transform="rotate(28 58 50)" opacity="1"')
+
+
+def keyframes(style: str) -> tuple[str, dict[str, list[tuple[str, str]]]]:
+    """(style less its @keyframes blocks, {name: [(selector, declarations), ...]})."""
+    rest, found, pos = "", {}, 0
+    for m in re.finditer(r"@keyframes\s+([\w-]+)\s*{", style):
+        if m.start() < pos:
+            continue
+        depth, end = 1, m.end()
+        while depth:
+            depth += {"{": 1, "}": -1}.get(style[end], 0)
+            end += 1
+        body = style[m.end() : end - 1]
+        found[m.group(1)] = re.findall(r"([^{}]+){([^{}]*)}", body)
+        rest += style[pos : m.start()]
+        pos = end
+    return rest + style[pos:], found
+
+
+def test_nothing_is_hidden_outside_keyframes():
+    """No base rule and no attribute hides anything: the mark with no animation at all is the
+    whole mark. Hiding is only ever a keyframe's."""
+    for path in ANIMATED:
+        text = path.read_text(encoding="utf-8")
+        style = re.search(r"<style>(.*?)</style>", text).group(1)
+        base, _ = keyframes(style)
+        assert not HIDING.search(base), (path, HIDING.search(base).group(0))
+        assert not HIDING_ATTRIBUTE.search(text), (path, HIDING_ATTRIBUTE.search(text).group(0))
+        assert not re.search(r"\b(?:forwards|both)\b", style), path
+
+
+def test_first_and_last_frames_hide_nothing():
+    """Every animation's first keyframe and last keyframe show the whole mark. A renderer that
+    paints the image once and never moves its clock on shows the first frame for good (GitHub,
+    Chrome 154 on Windows, Oct 2026: an empty circle when the lines started at scaleY(0)), and a
+    finished animation shows the last. Hiding may sit only between them."""
+    for path in ANIMATED:
+        style = re.search(r"<style>(.*?)</style>", path.read_text(encoding="utf-8")).group(1)
+        _, found = keyframes(style)
+        assert found, path
+        for name, frames in found.items():
+            for selector, declarations in frames:
+                stops = {s.strip() for s in selector.split(",")}
+                if stops & {"from", "0%", "to", "100%"}:
+                    assert not HIDING.search(declarations), (path, name, selector, declarations)
+
+
 def test_small_mark_is_still_close_cropped_and_thick():
     """mark-small.svg, for 32 px and under: no animation, a viewBox cropped to the filter, and
     every stroke at least 1.5 px wide at 32 px."""

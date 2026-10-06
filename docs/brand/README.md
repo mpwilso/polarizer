@@ -8,9 +8,9 @@ A polarizing filter: a round face of parallel lines, and one line turned out of 
 
 ### The animation
 
-The lockups play once when the image loads, in 1.6 s, and hold. The parallel lines draw in from the top, one after another from the left, the held call's line in its place among them, still in line; then that line swings out of line to its final angle, easing in and out; then nothing moves. It is CSS keyframes in the file's own `<style>`, with no script, so GitHub runs it in an `<img>`.
+The lockups play once when the image loads, in 1.6 s, and hold. They open on the finished mark; the lines and the held call's line fade out in 0.15 s; the parallel lines draw in from the top, one after another from the left, the held call's line in its place among them, still in line; then that line swings out of line to its final angle, easing in and out; then nothing moves. It is CSS keyframes in the file's own `<style>`, with no script, so GitHub runs it in an `<img>`.
 
-Viewers who ask for reduced motion (`prefers-reduced-motion: reduce`) see the finished mark at once, and so do renderers without CSS animation: every element's own attributes are the finished mark, and the animation only starts things elsewhere and lets them settle there. The finished frame is the static mark this replaced, element for element (`tests/test_brand.py`).
+The first frame and the last are the finished mark, and so is every element's own style, so the whole mark shows whenever the animation doesn't play: for viewers who ask for reduced motion (`prefers-reduced-motion: reduce`), in renderers without CSS animation, and in a renderer that paints the image once and never moves its clock on. That last case is why the mark opens whole. Until Oct 6, 2026 the lines started at `scaleY(0)`, and GitHub, in Chrome 154 on Windows, showed an empty circle, which is that old first frame. Hiding happens only in keyframes between the first and the last. The finished frame is the static mark this replaced, element for element (`tests/test_brand.py`), and `tests/test_brand_render.py` checks in a headless Chromium that an `<img>` of each lockup shows it after the animation, with the animation off and with its clock stopped at the start.
 
 ### Files
 
