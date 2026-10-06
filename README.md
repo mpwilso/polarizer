@@ -172,7 +172,7 @@ mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-`uv tool install` works once the repository is public; it doesn't read `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
+`uv tool install` installs from the repository's default branch and doesn't read `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 
 ```toml
 [policy]
