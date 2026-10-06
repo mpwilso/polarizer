@@ -1,14 +1,14 @@
 """A headless Chromium driven over the DevTools protocol on a pipe, with the standard library
 only, for tests that need to see what a browser draws. Nothing is installed or fetched: it uses
 the Chromium that Playwright left in ~/.cache/ms-playwright, or $POLARIZER_CHROMIUM, and
-find() returns None when there is neither, so a test can skip.
+find() returns None when there is neither, or on Windows, where the pipe can't be handed over
+this way, so a test can skip.
 
 Pages are timed in real time (time.sleep), never virtual time, so an animation runs as it does
 for a person looking at the page.
 """
 
 import base64
-import fcntl
 import json
 import os
 import subprocess
@@ -24,6 +24,8 @@ CANDIDATES = (
 
 
 def find() -> Path | None:
+    if os.name != "posix":
+        return None
     named = os.environ.get("POLARIZER_CHROMIUM")
     if named:
         return Path(named) if Path(named).is_file() else None
@@ -43,6 +45,8 @@ class Browser:
         self.profile = tempfile.TemporaryDirectory(prefix="polarizer-chromium-")
         to_child_r, self.to_child = os.pipe()
         self.from_child, from_child_w = os.pipe()
+
+        import fcntl  # POSIX only; find() keeps Windows from getting here
 
         def fds():  # the pipe's ends as fds 3 and 4, where --remote-debugging-pipe looks
             high = [fcntl.fcntl(fd, fcntl.F_DUPFD, 10) for fd in (to_child_r, from_child_w)]

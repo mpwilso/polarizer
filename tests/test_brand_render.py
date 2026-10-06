@@ -27,7 +27,8 @@ STOPPED = "<style>*{animation-play-state:paused!important}</style></svg>"
 BINARY = chromium.find()
 pytestmark = pytest.mark.skipif(
     BINARY is None,
-    reason="no headless Chromium: none in ~/.cache/ms-playwright and POLARIZER_CHROMIUM unset",
+    reason="no headless Chromium found in ~/.cache/ms-playwright or at $POLARIZER_CHROMIUM, "
+    "or Windows, where tests/helpers/chromium.py can't drive one",
 )
 
 
