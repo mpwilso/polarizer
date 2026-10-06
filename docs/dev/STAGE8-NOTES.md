@@ -475,3 +475,45 @@ The latest commit recorded as passing on all five CI jobs is now 0f32e11, CI run
 - **`scripts/check_docs.py`:** the first run after this section was written found one repeated heading (this round's runs heading had the release round's name), now renamed; then `check_docs: 28 files, 0 findings`. `tests/test_readme.py`: 14 passed.
 - **The pre-push scan** of the working tree's tracked files, case-insensitive: 0 for each of the brief's eight words (the owner's home path, the Windows users path, the Windows user name, a mail domain and four other names).
 - **`scripts/dev/guard.sh check`** against `snapshot-20261005T231339Z.txt`, before the commit: exit 1. No changes in any guarded repository, `~/.local/share/parallax`, `~/.config/parallax` or `~/.claude/settings.json`; the MCP config hashes in `~/.claude.json` unchanged (6 locations), and its size and mtime unchanged too. One tool directory changed: `~/isr-notes` (in `real-run-3`, a changed notes file, a screenshots folder and a new folder holding a git repository, written 23:15 to 23:21 UTC). This session ran no Parallax, ISR or Loupe command and wrote nothing there; the changes match the owner's own concurrent work, which the brief said to expect.
+
+## Animated logo (Oct 6, 2026, UTC)
+
+The lockups animate in place, with the same filenames, so README.md is unchanged; a still small mark is added. Guard snapshot `snapshot-20261006T000143Z.txt` taken first. Nothing was fetched and no model was run, apart from the README review's subagents (Cold-read review, below). The sibling projects' brand folders and READMEs were read as data for style, and not changed.
+
+### The animation rule, as found
+
+- **Polarizer, before this round** (`scripts/brand.py`, docs/brand/README.md, `tests/test_brand.py`): the band turned into place once, 1.6 s, `ease-out`, by CSS keyframes on an outer group; the inner group's SVG `transform` attribute is the finished turn, so a renderer without CSS animation shows the finished mark; `@media (prefers-reduced-motion: reduce){*{animation:none!important}}` stops it. No script. Files: the two lockups.
+- **Loupe** (`brand/README.md`): "fade in once, one after another, and hold", and reduced motion shows "the finished mark straight away". Its files use CSS keyframes in the SVG's own `<style>`, the same reduced-motion rule, and no script, but as committed they repeat (`10s`, `infinite`: a short dip in opacity, then a hold), so its README and its files disagree; noted, not touched. File set: `mark.svg` (dark pages, animated), `mark-light.svg`, `mark-small.svg` ("32px and under. Still, cropped close": a `viewBox` of 8 8 104 104 at 32 by 32, and a solid stroke of 5 where the large mark has a dashed 2.5), the two lockups, `palette.json` and PNG exports.
+- **ISR** (no brand README; `docs/brand/`): the two lockups only, CSS keyframes repeating every 6 s, the same reduced-motion rule plus a rule that hides its pings.
+- **Parallax** (no brand README; `docs/brand/`): `lockup-animated-light.svg` and `-dark.svg`, `mark.svg`, `mark-animated.svg` and others, CSS keyframes repeating every 7 s, and a reduced-motion rule naming its own classes.
+- None of the four uses SMIL or a script. Each README puts the light and dark lockups in a `<picture>` with a `prefers-color-scheme` source.
+
+**The rule used here:** plays once and holds (Loupe's stated rule, and Polarizer's own); CSS keyframes in the file's own `<style>`, no script, no SMIL; every element's own attributes are the finished frame, so reduced motion (`*{animation:none!important}`) and a renderer without CSS animation show it at once; the file set is the two animated lockups and a still `mark-small.svg` for 32 px and under, as Loupe's. The mark's drawing, palette and meaning are unchanged.
+
+### The build
+
+`scripts/brand.py`: each parallel line and the band's two strokes get a class; `.draw` scales each from its own top (`transform-box: fill-box`, origin `50% 0`) from `scaleY(0)` in 0.4 s, `ease-out`, `backwards`, with delays 0.07 s apart in left-to-right order (the band's slot, x = 58, is sixth of nine); the band's outer group holds it back in line (`rotate(-28deg)`, `backwards`) until 0.96 s, when the last line is drawn, then swings it into place in 0.64 s, `ease-in-out`. Total 1.6 s (`TOTAL_SECONDS`). No element, attribute or color of the mark changed; the animation is only the `<style>` and the class attributes. "Swings from level" in the brief was read as from in line with the other lines, where the band was before this round, since that is what the mark means (a call that lined up, turning out of line); turning it from horizontal would have been a different drawing.
+
+`small_mark()` draws `docs/brand/mark-small.svg`: 32 by 32, `viewBox` 2 2 96 96 (the rim's outer edge), the light palette, three lines at x = 26, 42 and 74 with a stroke of 6 in place of eight of 3, the band's place and 28 degree turn kept with strokes of 12 and a 20 halo, and a rim of 8. No `<style>`. The thinnest stroke is 2 px at 32 px.
+
+Sizes: `lockup-light.svg` and `lockup-dark.svg` 1,934 bytes each (1,413 before), `mark-small.svg` 673 bytes.
+
+**Tests, written first** (`tests/test_brand.py`): the files match the script and include the small mark; every file is ASCII, under 8,000 bytes and labelled; no file has a script element, a `javascript:` URL or an event attribute; each lockup has `@keyframes` and the reduced-motion rule; no animation repeats, and the latest delay plus the longest duration is under 2.5 s and equals `TOTAL_SECONDS`; the lockups' geometry (every element but `<style>` and `<title>`, attributes less class, fill, stroke, role and aria-label) equals `OLD_GEOMETRY`, taken from the files committed at 7afd4e1 before the change (identical in both themes); the small mark has no style or animation, is 32 by 32 with a cropped `viewBox`, keeps the band's turn and has no stroke under 1.5 px. Against the files at 7afd4e1, 3 failed (no small mark, no `TOTAL_SECONDS`, the script drew no small mark) and 5 passed, the geometry test among them; after the change, 8 passed.
+
+### Looked at
+
+Rendered with the headless Chromium shell already in the Playwright cache (build 1243), at device scale 2, into the gitignored `brand-preview/` with a throwaway script there.
+
+- **Frames:** each lockup inline in a page, its animations paused with the Web Animations API at 0, 0.4, 0.8, 1.2 and 2.0 s, the light lockup on white and the dark on GitHub's dark background (`#0d1117`). At 0 s the face, rim and word only; at 0.4 s the first five lines part drawn and the band's first sliver; at 0.8 s every line but the last drawn and the band upright; at 1.2 s the band partway through its turn; at 2.0 s the finished mark. Nothing clipped or misaligned.
+- **The finished frame is the old one, pixel for pixel:** the new lockups in an `<img>` with `--force-prefers-reduced-motion` gave PNGs byte-identical to the same render of the files at 7afd4e1, in both themes; so did the inline frame at 2.0 s against the 7afd4e1 files at 2.0 s.
+- **The small mark** at 32 px on white and on dark, and at 16 px on white: the lines, the band and the rim read at both sizes.
+- **Not checked this way:** the animation in an `<img>` over time. Chromium's `--virtual-time-budget` did not advance it (an `<img>` render of the 7afd4e1 file showed its first frame), so the frames come from the inline copies, which run the same CSS. How GitHub shows it can only be seen by pushing.
+
+### Cold-read review of README.md
+
+Six subagents, each started fresh with Claude Code's built-in subagent tool and run in parallel, with no tools allowed: five read README.md as pasted in their prompts (in two parts, the first 30 lines and the rest, with a note that it begins with a logo and has a text diagram under How it works), as a skeptical senior engineer, a non-technical professional, a VP, a recruiter and an applied-AI hiring manager; the sixth read docs/DRILL-GUIDE.md as the non-technical professional. None was told the project's history, its author's goals or the other readers. Each used one tool call, the hand-back of its report; none read a file or the network. Their answers are in the gitignored `readme-review/`, not committed. They are simulated readers from the same model family as the author's tools, share its blind spots, and are a proofreading aid, not evidence about real readers. The proposed README edits went to the owner in chat and were not applied; README.md is unchanged.
+
+### Runs
+
+- **`scripts/test.sh`** with `set -o pipefail`, before this section and the review were written: ruff check and format clean, `check_docs: 28 files, 0 findings`, `1288 passed, 13 skipped in 276.71s (0:04:36)`, exit 0, 279 s wall (1283 before, plus the 5 new brand tests). After this section, `scripts/check_docs.py` and `tests/test_brand.py` ran again.
+- **Not run:** CI; GitHub's rendering of the animated lockups, which only a push can show; anything on Windows or macOS.

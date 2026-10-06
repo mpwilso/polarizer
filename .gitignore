@@ -10,3 +10,5 @@ __pycache__/
 .backup/
 /manual/mcp.json
 /drill-review/
+/brand-preview/
+/readme-review/

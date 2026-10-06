@@ -6,7 +6,19 @@ Every SVG here, and the diagram in [../img/](../img/), is drawn by `scripts/bran
 
 A polarizing filter: a round face of parallel lines, and one line turned out of line with the others. Light that lines up with a filter passes; light at an angle to it is stopped. The parallel lines are calls that line up with what you approved, and pass. The turned line is the call that doesn't, and is held for you.
 
-The line turns into place once when the image loads. Viewers who ask for reduced motion, and renderers without CSS animation, see the finished mark.
+### The animation
+
+The lockups play once when the image loads, in 1.6 s, and hold. The parallel lines draw in from the top, one after another from the left, the held call's line in its place among them, still in line; then that line swings out of line to its final angle, easing in and out; then nothing moves. It is CSS keyframes in the file's own `<style>`, with no script, so GitHub runs it in an `<img>`.
+
+Viewers who ask for reduced motion (`prefers-reduced-motion: reduce`) see the finished mark at once, and so do renderers without CSS animation: every element's own attributes are the finished mark, and the animation only starts things elsewhere and lets them settle there. The finished frame is the static mark this replaced, element for element (`tests/test_brand.py`).
+
+### Files
+
+| File | Use |
+|---|---|
+| [lockup-light.svg](lockup-light.svg) | The mark and the word, on light pages. Animated. |
+| [lockup-dark.svg](lockup-dark.svg) | The same, on dark pages. Animated. |
+| [mark-small.svg](mark-small.svg) | The mark alone at 32 px and under, such as a favicon, an avatar or a list icon; nothing in this repository shows it yet (README.md uses the lockups). Still, cropped close to the filter, with three thicker lines in place of eight (eight would be a pixel each and run together) and a thicker band and rim. Its own face and rim read on light and dark pages, so there is one file. |
 
 ## The lockup
 

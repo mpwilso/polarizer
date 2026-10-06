@@ -1,4 +1,4 @@
-"""Draws Polarizer's logo lockups and the README's how-it-works diagram, light and dark.
+"""Draws Polarizer's logo lockups, its small mark and the README's how-it-works diagram.
 
     uv run python scripts/brand.py          write the files
     uv run python scripts/brand.py --check  exit 1 if a file differs from what this would write
@@ -46,21 +46,39 @@ SANS = 'ui-sans-serif,system-ui,"Segoe UI",Helvetica,Arial,sans-serif'
 MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 TURN = 28  # degrees the band is turned from the lines
 BAND_X = 58  # the line the band replaces; off center, so the mark never reads as a slash
+LINES_X = (18, 26, 34, 42, 50, 66, 74, 82)  # BAND_X's place is the band's
 LOCKUP_ALT = "Polarizer: a round filter of parallel lines, with one line turned out of line"
+SMALL_ALT = "Polarizer"
+
+# The animation, once: the lines draw in from the top, one after another from the left, the
+# band in its place among them while still in line; then the band turns out of line; then
+# everything holds. Seconds.
+DRAW = 0.4  # each line's draw
+STAGGER = 0.07  # between one line's start and the next's
+SWING_AT = round(STAGGER * len(LINES_X) + DRAW, 2)  # the last line is drawn
+SWING = 0.64
+TOTAL_SECONDS = round(SWING_AT + SWING, 2)
 
 
 def lockup(theme: str) -> str:
     c = PALETTE[theme]
-    lines = "".join(
-        f'<path d="M{x} 6 V94"/>' for x in (18, 26, 34, 42, 50, 66, 74, 82)
-    )  # BAND_X is the band's place: it starts in line with the others and turns
+    order = sorted((*LINES_X, BAND_X))  # left to right, the band among the lines
+    delays = "".join(f".d{i}{{animation-delay:{STAGGER * i:.2f}s}}" for i in range(len(order)))
+    lines = "".join(f'<path class="draw d{order.index(x)}" d="M{x} 6 V94"/>' for x in LINES_X)
+    band = f'class="draw d{order.index(BAND_X)}" d="M{BAND_X} 30 V70"'
     style = (
-        # The inner group's SVG transform is the finished mark, for renderers without CSS
-        # animation. The outer group starts it back in line with the others and turns it into
-        # place once; with no animation (or reduced motion) the outer group does nothing.
+        # Every element's own attributes are the finished mark, so a renderer without CSS
+        # animation, and a viewer who asks for reduced motion, see it at once. The animation
+        # only starts things elsewhere and lets them settle there: each line scaled to nothing
+        # from its top until its turn (fill-mode backwards), and the band's outer group turned
+        # back in line until it swings. The inner group's SVG transform is the turn itself.
+        ".draw{transform-box:fill-box;transform-origin:50% 0;"
+        f"animation:draw {DRAW}s ease-out backwards}}"
+        "@keyframes draw{from{transform:scaleY(0)}}"
+        f"{delays}"
         f".turn{{transform-box:view-box;transform-origin:{BAND_X}px 50px;"
-        "animation:turn 1.6s ease-out}"
-        f"@keyframes turn{{from{{transform:rotate(-{TURN}deg)}}to{{transform:rotate(0deg)}}}}"
+        f"animation:turn {SWING}s ease-in-out {SWING_AT}s backwards}}"
+        f"@keyframes turn{{from{{transform:rotate(-{TURN}deg)}}}}"
         "@media (prefers-reduced-motion: reduce){*{animation:none!important}}"
         f".word{{font-family:{SANS};font-weight:800;letter-spacing:3px}}"
     )
@@ -73,11 +91,32 @@ def lockup(theme: str) -> str:
         f"{lines}</g>"
         f'<g class="turn"><g transform="rotate({TURN} {BAND_X} 50)" fill="none" '
         'stroke-linecap="round">'
-        f'<path d="M{BAND_X} 30 V70" stroke="{c["tint"]}" stroke-width="13"/>'
-        f'<path d="M{BAND_X} 30 V70" stroke="{c["band"]}" stroke-width="7"/></g></g>'
+        f'<path {band} stroke="{c["tint"]}" stroke-width="13"/>'
+        f'<path {band} stroke="{c["band"]}" stroke-width="7"/></g></g>'
         f'<circle cx="50" cy="50" r="44" fill="none" stroke="{c["ring"]}" stroke-width="5"/>'
         f'<text class="word" x="112" y="67" font-size="46" textLength="300" '
         f'lengthAdjust="spacing" fill="{c["ink"]}">POLARIZER</text></svg>\n'
+    )
+
+
+def small_mark() -> str:
+    """The mark for 32 px and under: still, cropped to the filter, the light palette (its own
+    face and rim read on light and dark pages), and fewer, thicker lines, since eight lines of
+    3 units would be one pixel each and run together. The band keeps its place and its turn."""
+    c = PALETTE["light"]
+    lines = "".join(f'<path d="M{x} 6 V94"/>' for x in (BAND_X - 32, BAND_X - 16, BAND_X + 16))
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 2 96 96" width="32" height="32" '
+        f'role="img" aria-label="{SMALL_ALT}"><title>{SMALL_ALT}</title>'
+        '<defs><clipPath id="face"><circle cx="50" cy="50" r="42"/></clipPath></defs>'
+        f'<circle cx="50" cy="50" r="44" fill="{c["tint"]}"/>'
+        f'<g clip-path="url(#face)" fill="none" stroke="{c["lines"]}" stroke-width="6">'
+        f"{lines}</g>"
+        f'<g transform="rotate({TURN} {BAND_X} 50)" fill="none" stroke-linecap="round">'
+        f'<path d="M{BAND_X} 28 V72" stroke="{c["tint"]}" stroke-width="20"/>'
+        f'<path d="M{BAND_X} 28 V72" stroke="{c["band"]}" stroke-width="12"/></g>'
+        f'<circle cx="50" cy="50" r="44" fill="none" stroke="{c["ring"]}" stroke-width="8"/>'
+        "</svg>\n"
     )
 
 
@@ -187,6 +226,7 @@ def outputs() -> dict[Path, str]:
     for theme in ("light", "dark"):
         files[ROOT / "docs" / "brand" / f"lockup-{theme}.svg"] = lockup(theme)
         files[ROOT / "docs" / "img" / f"how-it-works-{theme}.svg"] = diagram(theme)
+    files[ROOT / "docs" / "brand" / "mark-small.svg"] = small_mark()
     return files
 
 
