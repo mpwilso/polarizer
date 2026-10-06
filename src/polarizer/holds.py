@@ -114,7 +114,8 @@ class HoldState:
         )
 
     def _ended(self, kind: str, seq: int, data: dict) -> None:
-        held = self._holds.get(data.get("hold"))
+        hold_id = data.get("hold")
+        held = self._holds.get(hold_id) if isinstance(hold_id, str) else None
         if held is None or held.ending is not None:
             return
         if kind == "hold.decided":

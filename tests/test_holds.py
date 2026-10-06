@@ -914,7 +914,8 @@ def test_allowed_by_records_the_rule(tmp_path):
 
 def test_fold_gives_every_ending(tmp_path):
     """The hold fold over a generated ledger: the first ending wins; a decision with another
-    args_commit, or for an unknown hold, or after the ending, changes nothing."""
+    args_commit, or for an unknown hold, or after the ending, changes nothing, and an ending
+    whose hold id isn't a string is ignored."""
     s = "5e55105e55105e55"
     a, b, c, d, e = "a" * 16, "b" * 16, "c" * 16, "d" * 16, "e" * 16
 
@@ -943,6 +944,10 @@ def test_fold_gives_every_ending(tmp_path):
         ("hold.abandoned", {"session": "f" * 16, "hold": c, "held_by": s}),
         decided(e, "5" * 64, "allow"),  # no such hold
         decided(d, "4" * 64, "maybe"),  # not a decision
+        # A hold id that isn't a string, in a rewritten ledger: ignored, not a crash.
+        decided([d], "4" * 64, "allow"),
+        ("hold.expired", {"session": s, "hold": {"id": d}, "reason": "r"}),
+        ("hold.abandoned", {"session": s, "hold": [d], "held_by": s}),
     ]
     build_chain(tmp_path, specs)
     folded = holds.HoldState()
