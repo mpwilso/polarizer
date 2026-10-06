@@ -166,13 +166,13 @@ Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
 For Linux, WSL and macOS. You need Python 3.11 or later, [uv](https://docs.astral.sh/uv/), Node.js for `npx` servers, and Claude Code.
 
 ```sh
-uv tool install git+https://github.com/mpwilso/polarizer
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.1.0/polarizer-0.1.0-py3-none-any.whl
 polarizer --help
 mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-`uv tool install` installs from the repository's default branch and doesn't read `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
+That installs the v0.1.0 release. For the latest code, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 
 ```toml
 [policy]

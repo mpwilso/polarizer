@@ -1,7 +1,8 @@
 """README.md's setup, run as written, so the README can't drift from the code.
 
 Every command in the Setup section's sh blocks is run in README order, except the ones that need
-the network or Claude Code (SKIPPED). The polarizer.toml block is written where the README says,
+the network or Claude Code (SKIPPED); the install line, which fetches the release wheel, is
+parsed instead, as is the git install line in the text after it. The polarizer.toml block is written where the README says,
 with /home/you replaced by a temporary home; only its Filesystem server's command and args are
 swapped for the stdlib probe, so nothing is fetched. Its tools are then unclassified, so every
 call is held. A raw stdio client stands in for Claude Code to make those calls, which gives the
@@ -34,12 +35,14 @@ import pytest
 from conftest import ROOT
 from helpers import rig
 from helpers.raw import RawClient
+from packaging.utils import parse_wheel_filename
 
+import polarizer
 from polarizer import cli, drill
 
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 SKIPPED = {
-    "uv tool install ": "needs the network, and a public repository",
+    "uv tool install ": "needs the network; test_install_lines_parse parses it",
     "npx ": "needs the network; the probe stands in for the Filesystem server",
     "claude ": "needs Claude Code; a raw stdio client stands in for it",
 }
@@ -283,6 +286,34 @@ def test_quickstart_runs_as_written(tmp_path):
     assert kinds.count("hold.decided") == 2 and kinds.count("call.refused") == 1
     done = python("verify", "--ledger-dir", str(ledger_dir), "--args", env=env)
     assert done.returncode == 0 and done.stdout.startswith(b"intact: ")
+
+
+def test_install_lines_parse():
+    """Setup installs the release wheel first; the text after the block gives the git line for
+    the latest code and says it needs git. Both are parsed, never run or fetched: the release
+    URL names this version's tag on the repository in pyproject.toml and the wheel `uv build`
+    makes, read by the wheel filename parser as this package and version, for any Python 3."""
+    repository = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "urls"
+    ]["Source"]
+    version = polarizer.__version__
+    wheel = f"polarizer-{version}-py3-none-any.whl"
+    installs = [c for c in commands() if c.startswith("uv tool install ")]
+    release = f"uv tool install {repository}/releases/download/v{version}/{wheel}"
+    assert installs == [release] and commands()[0] == release
+    argv = shlex.split(installs[0])
+    assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
+    url = urlsplit(argv[3])
+    assert url.scheme == "https" and not url.query and not url.fragment
+    name, parsed, build, tags = parse_wheel_filename(url.path.rsplit("/", 1)[1])
+    assert (name, str(parsed), build) == ("polarizer", version, ())
+    assert {str(tag) for tag in tags} == {"py3-none-any"}
+    git = [s for s in spans(QUICKSTART) if s.startswith("uv tool install ")]
+    assert git == [f"uv tool install git+{repository}"]
+    argv = shlex.split(git[0])
+    assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
+    assert urlsplit(argv[3].removeprefix("git+")).scheme == "https"
+    assert f"`{git[0]}`, which needs git." in QUICKSTART
 
 
 def test_quickstart_config_matches_the_example():

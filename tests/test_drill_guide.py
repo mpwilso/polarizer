@@ -9,8 +9,9 @@ package file's install line and the uninstall line, are run as written, with uv 
 a tool directory of the test's own, when uv's cache holds every package the install needs; an
 offline dry run of the same install decides, and the test is skipped, naming the package,
 only when that dry run fails for want of a cached package. A fresh machine's cache is empty
-(CI run 37361705150). The two lines that fetch the project from GitHub are not run; the
-polarizer command in the uvx line parses. The install check, `uv --version`, is run, and the
+(CI run 37361705150). The three lines that fetch the project from GitHub are not run: the
+release line's URL is parsed, and must name this version's tag and the wheel `uv build` makes,
+and the polarizer command in the uvx line parses. The install check, `uv --version`, is run, and the
 line the guide says the install ends with is checked against what uv printed. `uv tool
 update-shell` edits shell startup files (or, on Windows, the user's PATH), so only its help is
 run. The lines that delete the drill records folder, for macOS and Linux and for PowerShell,
@@ -28,10 +29,12 @@ import sys
 import time
 import tomllib
 import zipfile
+from urllib.parse import urlsplit
 
 import pytest
 from conftest import ROOT
 from helpers.ptyread import finish, read_some
+from packaging.utils import parse_wheel_filename
 
 import polarizer
 from polarizer import cli, drill
@@ -41,9 +44,11 @@ GOLDEN = ROOT / "tests" / "golden"
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 REPOSITORY = PYPROJECT["project"]["urls"]["Source"]
 WHEEL = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
+RELEASE_WHEEL = f"{REPOSITORY}/releases/download/v{polarizer.__version__}/{WHEEL}"
 # The guide's uv lines. Those that fetch the project from GitHub need the network and are not
-# run; the others are run by test_guide_install_lines_run_offline.
-NETWORK = [f"uv tool install git+{REPOSITORY}", f"uvx --from git+{REPOSITORY} polarizer drill"]
+# run; the others are run by test_guide_install_lines_run_offline. The release line is first.
+NETWORK = [f"uv tool install {RELEASE_WHEEL}", f"uv tool install git+{REPOSITORY}",
+           f"uvx --from git+{REPOSITORY} polarizer drill"]  # fmt: skip
 OFFLINE = [f"uv tool install ./{WHEEL}", "uv tool uninstall polarizer"]
 # The other lines: the install check, run; the PATH fix, whose help is run; and the delete,
 # never run, checked against the drill directory.
@@ -81,9 +86,33 @@ def test_guide_commands_exist():
     others = sorted(c for c in found if not c.startswith("polarizer "))
     assert others == sorted([*NETWORK, *OFFLINE, CHECK, PATH_FIX, DELETE])
     assert [line.strip() for line in blocks("powershell")[0].splitlines()] == [POWERSHELL_DELETE]
-    uvx = shlex.split(NETWORK[1])
+    uvx = shlex.split(NETWORK[2])
     assert uvx[:3] == ["uvx", "--from", f"git+{REPOSITORY}"] and uvx[3] == "polarizer"
     cli._parser().parse_args(uvx[4:])
+
+
+def test_guide_release_line():
+    """Step 2's first line installs the release wheel, and needs only uv. Parsed, never fetched:
+    an https URL to this version's tag on the repository's releases, ending in the wheel name
+    `uv build` makes (test_guide_install_lines_run_offline builds it), which the wheel filename
+    parser reads as this package and version, for any Python 3. The git and uvx lines come
+    after it, and the guide says both need git."""
+    installs = [c for c in commands() if c.startswith(("uv tool install ", "uvx "))]
+    assert installs[:2] == NETWORK[:2] and installs[-1] == NETWORK[2]
+    argv = shlex.split(NETWORK[0])
+    assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
+    url = urlsplit(argv[3])
+    assert url.scheme == "https" and not url.query and not url.fragment
+    assert f"https://{url.netloc}" + url.path.removesuffix(f"/{WHEEL}") == (
+        f"{REPOSITORY}/releases/download/v{polarizer.__version__}"
+    )
+    name, version, build, tags = parse_wheel_filename(url.path.rsplit("/", 1)[1])
+    assert (name, str(version), build) == ("polarizer", polarizer.__version__, ())
+    assert {str(tag) for tag in tags} == {"py3-none-any"}
+    install = GUIDE[GUIDE.index("2. Install Polarizer") : GUIDE.index("## Run your first drill")]
+    assert "This line needs only uv" in install.split("```")[0]
+    assert "If you have git and want the latest code" in install
+    assert "so it needs git too" in install
 
 
 def offline(argv, cwd, env) -> str | None:

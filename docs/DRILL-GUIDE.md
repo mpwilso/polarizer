@@ -24,15 +24,21 @@ There are three kinds of drill: guided adds a line in plain words under each act
 uv --version
 ```
 
-2. Install Polarizer:
+2. Install Polarizer. This line needs only uv, which step 1 installed:
+
+```sh
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.1.0/polarizer-0.1.0-py3-none-any.whl
+```
+
+When it worked, the list uv prints ends with `Installed 1 executable: polarizer`.
+
+If you have git and want the latest code rather than the release, run this in place of the line above:
 
 ```sh
 uv tool install git+https://github.com/mpwilso/polarizer
 ```
 
-When it worked, the list uv prints ends with `Installed 1 executable: polarizer`.
-
-If you were sent a package file instead, move it into your home folder (the folder a new terminal starts in) and run this in place of the line above:
+If you were sent a package file instead, move it into your home folder (the folder a new terminal starts in) and run this in place of the first install line:
 
 ```sh
 uv tool install ./polarizer-0.1.0-py3-none-any.whl
@@ -40,7 +46,7 @@ uv tool install ./polarizer-0.1.0-py3-none-any.whl
 
 Installing downloads Polarizer's parts from the internet; the drill itself never uses the network. Drills have not yet been tried in a Windows terminal, so say if anything looks wrong there.
 
-With uv installed, this runs a full drill with no step 2:
+With uv installed, this runs a full drill with no step 2. It fetches the latest code, so it needs git too:
 
 ```sh
 uvx --from git+https://github.com/mpwilso/polarizer polarizer drill
