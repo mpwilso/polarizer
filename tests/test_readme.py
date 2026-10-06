@@ -441,6 +441,19 @@ def test_try_a_drill_commands():
     assert "(docs/DRILL-GUIDE.md)" in text and "offline" in text
 
 
+def test_try_a_drill_excerpt_is_the_guides():
+    """The call and the answer shown are a trimmed copy of docs/DRILL-GUIDE.md's, which
+    tests/test_drill_guide.py compares with what a drill prints: the call's lines in the
+    guide's order, and the answer whole."""
+    guide = (ROOT / "docs" / "DRILL-GUIDE.md").read_text(encoding="utf-8")
+    guide_call, guide_answer = blocks("text", guide)
+    call, answer = blocks("text", section("Try a drill"))
+    lines = guide_call.splitlines()
+    positions = [lines.index(line) for line in call.splitlines()]
+    assert positions == sorted(positions) and len(positions) < len(lines)
+    assert answer == guide_answer
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="the drill needs a pseudo-terminal")
 def test_try_a_drill_runs(tmp_path):
     """The drill on a pseudo-terminal in a temporary home, every call allowed, then the report
@@ -563,10 +576,12 @@ OLD_EVIDENCE = (
 def test_readme_layout():
     """The logo, the hook, the status line, the sections in order, a short page, the text
     diagram in place of the image, and the links to the detail that moved out of it."""
-    assert README.count("\n") <= 260
+    assert README.count("\n") <= 280
     assert 'srcset="docs/brand/lockup-dark.svg"' in README
     assert "<b>Human in the loop only works if the human is still looking.</b>" in README
-    assert "\nStatus: v0.1, a preview. Built: M0 " in README
+    status = README[README.index("\nStatus: ") :].split("\n\n")[0]
+    assert status.startswith("\nStatus: v0.1, a preview. Built: the gateway and its ledger, ")
+    assert re.search(r"\bM\d", status) is None
     assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
     assert "(docs/LIMITS.md)" in section("Known limits")
     assert "(docs/EVIDENCE.md)" in section("Proof")

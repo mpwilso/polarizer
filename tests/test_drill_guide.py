@@ -10,8 +10,12 @@ a tool directory of the test's own, when uv's cache holds every package the inst
 offline dry run of the same install decides, and the test is skipped, naming the package,
 only when that dry run fails for want of a cached package. A fresh machine's cache is empty
 (CI run 37361705150). The two lines that fetch the project from GitHub are not run; the
-polarizer command in the uvx line parses. The screen excerpts are compared with what
-a drill prints, and the closing lines with what Polarizer prints."""
+polarizer command in the uvx line parses. The install check, `uv --version`, is run, and the
+line the guide says the install ends with is checked against what uv printed. `uv tool
+update-shell` edits shell startup files (or, on Windows, the user's PATH), so only its help is
+run. The lines that delete the drill records folder, for macOS and Linux and for PowerShell,
+are never run: each must name the folder drills write to. The screen excerpts are compared with
+what a drill prints, and the closing lines with what Polarizer prints."""
 
 import base64
 import hashlib
@@ -41,6 +45,14 @@ WHEEL = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
 # run; the others are run by test_guide_install_lines_run_offline.
 NETWORK = [f"uv tool install git+{REPOSITORY}", f"uvx --from git+{REPOSITORY} polarizer drill"]
 OFFLINE = [f"uv tool install ./{WHEEL}", "uv tool uninstall polarizer"]
+# The other lines: the install check, run; the PATH fix, whose help is run; and the delete,
+# never run, checked against the drill directory.
+CHECK = "uv --version"
+PATH_FIX = "uv tool update-shell"
+DELETE = "rm -r ~/.local/share/polarizer-drills"
+POWERSHELL_DELETE = r'Remove-Item -Recurse "$env:USERPROFILE\.local\share\polarizer-drills"'
+# What uv prints last when the package file's install worked; the guide quotes it.
+INSTALLED = "Installed 1 executable: polarizer"
 # What uv prints when an offline run needs a package its cache does not hold.
 CACHE_MISS = "Packages were unavailable because the network was disabled"
 
@@ -55,8 +67,8 @@ def commands() -> list[str]:
 
 def test_guide_commands_exist():
     """Every polarizer command line parses with Polarizer's own parser, as does the polarizer
-    command the uvx line runs; every other line is one of the uv lines above, so each is run by
-    a test here or needs the network."""
+    command the uvx line runs; every other line is one of the lines above, so each is run or
+    checked by a test here, or needs the network."""
     found = commands()
     assert [c for c in found if c.startswith("polarizer ")] == [
         "polarizer drill --calls 10",
@@ -66,7 +78,9 @@ def test_guide_commands_exist():
     for command in found:
         if command.startswith("polarizer "):
             cli._parser().parse_args(shlex.split(command)[1:])
-    assert sorted(c for c in found if not c.startswith("polarizer ")) == sorted(NETWORK + OFFLINE)
+    others = sorted(c for c in found if not c.startswith("polarizer "))
+    assert others == sorted([*NETWORK, *OFFLINE, CHECK, PATH_FIX, DELETE])
+    assert [line.strip() for line in blocks("powershell")[0].splitlines()] == [POWERSHELL_DELETE]
     uvx = shlex.split(NETWORK[1])
     assert uvx[:3] == ["uvx", "--from", f"git+{REPOSITORY}"] and uvx[3] == "polarizer"
     cli._parser().parse_args(uvx[4:])
@@ -120,7 +134,8 @@ def test_guide_install_lines_run_offline(tmp_path):
         if missing is not None:
             pytest.skip(f"uv's cache can't {step} offline, as on a fresh machine: {missing}")
     assert (home / WHEEL).exists()
-    run(shlex.split(OFFLINE[0]), home)
+    installed_out = run(shlex.split(OFFLINE[0]), home)
+    assert INSTALLED in installed_out.stdout + installed_out.stderr
     installed = shutil.which("polarizer", path=str(bin_dir))
     assert installed is not None
     report = run([installed, "drill", "report"], home, {"HOME": str(home),
@@ -129,6 +144,33 @@ def test_guide_install_lines_run_offline(tmp_path):
     assert report.stdout == f"drills: none yet in {drills}; run polarizer drill\n"
     run(shlex.split(OFFLINE[1]), home)
     assert shutil.which("polarizer", path=str(bin_dir)) is None
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="the guide's uv lines need uv on PATH")
+def test_guide_check_lines():
+    """Step 1's check prints uv and a version number, in the form of the guide's example; the
+    PATH fix exists (its help, since running it edits shell startup files); and the guide
+    quotes uv's last install line as the install test sees it."""
+    version = subprocess.run(shlex.split(CHECK), capture_output=True, text=True, timeout=60)
+    assert version.returncode == 0 and re.match(r"uv \d+\.\d+\.\d+", version.stdout), version
+    assert re.search(r"such as `uv \d+\.\d+\.\d+`", GUIDE)
+    fix = subprocess.run([*shlex.split(PATH_FIX), "--help"], capture_output=True, text=True,
+                         timeout=60)  # fmt: skip
+    assert fix.returncode == 0, fix.stderr
+    assert f"ends with `{INSTALLED}`" in GUIDE
+
+
+def test_guide_delete_lines_name_the_drill_directory(fake_home):
+    """The delete lines are never run. Each names, relative to the home folder, the directory
+    drills write to, and the guide says deleting it is permanent."""
+    rm = shlex.split(DELETE)
+    assert rm[:2] == ["rm", "-r"] and rm[2].startswith("~/")
+    assert fake_home / rm[2][2:] == drill.default_dir()
+    prefix = 'Remove-Item -Recurse "$env:USERPROFILE\\'
+    assert POWERSHELL_DELETE.startswith(prefix) and POWERSHELL_DELETE.endswith('"')
+    parts = POWERSHELL_DELETE[len(prefix) : -1].split("\\")
+    assert fake_home.joinpath(*parts) == drill.default_dir()
+    assert "Deleting it is permanent" in GUIDE
 
 
 def wheel(where, name, requires=()):

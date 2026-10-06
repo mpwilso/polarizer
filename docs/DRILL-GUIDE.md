@@ -18,12 +18,19 @@ There are three kinds of drill: guided adds a line in plain words under each act
 
 ## Install
 
-1. Install uv, a small tool that installs Python programs. Open [its official instructions](https://docs.astral.sh/uv/getting-started/installation/), copy the one line for your system, paste it into your terminal and press Enter. Then close the terminal and open a new one.
+1. Install uv, a small tool that installs Python programs. Open [its official instructions](https://docs.astral.sh/uv/getting-started/installation/), copy the one line for your system, paste it into your terminal and press Enter. Then close the terminal and open a new one. When it worked, this prints `uv` and a version number, such as `uv 0.12.19`:
+
+```sh
+uv --version
+```
+
 2. Install Polarizer. If you were sent a package file, move it into your home folder (the folder a new terminal starts in) and run:
 
 ```sh
 uv tool install ./polarizer-0.1.0-py3-none-any.whl
 ```
+
+When it worked, the list uv prints ends with `Installed 1 executable: polarizer`.
 
 Once the project is public, this line will work instead, with no file:
 
@@ -37,6 +44,12 @@ Once the repository is public, and with uv installed, this runs a full drill wit
 
 ```sh
 uvx --from git+https://github.com/mpwilso/polarizer polarizer drill
+```
+
+**If `polarizer` is not found** (the terminal says "command not found" or "is not recognized"), close the terminal and open a new one. If it is still not found, run this, then open a new terminal:
+
+```sh
+uv tool update-shell
 ```
 
 ## Run your first drill
@@ -101,7 +114,7 @@ It holds counts, rates, dates (the day only) and version numbers, such as `"answ
 
 Each rate comes with a range, such as "caught 88%, 95% interval 52% to 98%": the true rate is very likely somewhere in that range. A drill of 10 has 5 planted and 5 clean calls, just enough for a rate, so its range is wide: 4 of 5 caught reads "caught 80%, 95% interval 37% to 97%". Below 5 answers of a kind, as when you stop early, you see "too few to say" instead of a rate. Always answering "allow" would be right about half the time or more, so look at the two rates, not at the share of right answers.
 
-The report also counts catches by kind of planted call, such as "extra effect" or "look-alike". Those kinds are under review: a check found some actions labelled with one kind that do what another kind describes. Each drill also has only one or two actions of each kind, so read those counts across many drills, not from one.
+The report also counts catches by kind of planted call, such as "extra effect" or "look-alike". Those counts are under review: some planted calls are labelled with one kind of mistake but match the rule for another. Each drill also has only one or two actions of each kind, so read those counts across many drills, not from one.
 
 A drill measures your attention when you know you are being tested: your best, not an ordinary afternoon. It also has far more planted calls than real work, so drill rates likely run higher than real ones. A guided drill shows how well you do with help, so the report shows it on its own lines. Trends across drills mean more than any one result.
 
@@ -118,4 +131,16 @@ Your results are yours. They are for you to watch your own habits, not for anyon
 uv tool uninstall polarizer
 ```
 
-Your drill records stay until you delete their folder yourself: `~/.local/share/polarizer-drills` on macOS and Linux, and `.local\share\polarizer-drills` inside your user folder on Windows.
+Your drill records stay until you delete their folder yourself: `~/.local/share/polarizer-drills` on macOS and Linux, and `.local\share\polarizer-drills` inside your user folder on Windows. Deleting it is permanent: your drill results can't be brought back. On macOS and Linux:
+
+```sh
+rm -r ~/.local/share/polarizer-drills
+```
+
+In Windows PowerShell:
+
+```powershell
+Remove-Item -Recurse "$env:USERPROFILE\.local\share\polarizer-drills"
+```
+
+To see the folder first: in Finder, open your home folder and press Command, Shift and the full stop (.) together to show hidden folders. In File Explorer, choose View, then Show, then Hidden items (on Windows 10, tick Hidden items on the View tab).

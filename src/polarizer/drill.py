@@ -470,8 +470,9 @@ def _comparison(first: str, second: str, tallies: dict) -> list[str]:
 
 
 SHAPE_CAVEAT = (
-    "Shape labels are under review and each drill has only one or two calls per shape; "
-    "read these counts across many drills, not from one."
+    "Counts by kind of mistake are under review: some planted calls are labelled with one kind "
+    "but match the rule for another. Each drill has only one or two calls of each kind, so read "
+    "these counts across many drills, not from one."
 )
 
 

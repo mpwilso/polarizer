@@ -9,19 +9,38 @@
 
 <p align="center"><a href="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml"><img src="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg" alt="CI status"></a></p>
 
-Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools), pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a ledger anyone can verify. It also includes drills, offline practice sessions in which a person allows or denies invented calls and measures how well they catch the planted mistakes. It runs on your own machine, started by the agent's client, such as Claude Code.
+Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools), pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a hash-chained ledger that `polarizer verify` checks. It also includes drills, offline practice sessions in which a person allows or denies invented calls and measures how well they catch the planted mistakes. It runs on your own machine, started by the agent's client, such as Claude Code. It guards only the calls that pass through it, not the agent's own shell or file tools.
 
-Status: v0.1, a preview. Built: M0 (the proxy and the ledger), M1a (pins), M2a (classes and holds) and drills (the practice sessions of [docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md), stage 8). Not built: statistics over real holds, live planted calls inside a running gateway, taint (M2b) and an approval card (M3). Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
+Status: v0.1, a preview. Built: the gateway and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running gateway, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
 
 Jump to [a drill](#try-a-drill), [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
 ## Why it exists
 
-An MCP server can change a tool's description after you trusted it. A permission prompt that names only the tool can't tell a write inside your project from a write to `.git/hooks`, where git runs code. And a person who approves prompt after prompt stops reading. Polarizer pins what you approved, holds calls by what they would touch, and records every decision so it can be checked later. A hold only helps if the person still reads it. Drills are the first part of measuring that, under practice conditions; measuring it during real work is not built yet.
+An MCP server can change a tool's description after you trusted it. A permission prompt that names only the tool can't tell a write inside your project from a write to `.git/hooks`, where git runs code. And a person who approves prompt after prompt stops reading ([sources](docs/MEASURE-SPEC.md#2-sources)). Polarizer pins what you approved, holds calls by what they would touch, and records every decision so it can be checked later. A hold only helps if the person still reads it. Drills are the first part of measuring that, under practice conditions; measuring it during real work is not built yet.
 
 ## Try a drill
 
-A drill shows you invented agent calls one at a time, under the task the agent was given, and you allow or deny each; some were changed to be wrong on purpose, and after each answer you see whether you were right and why. It runs offline: no agent, no account, no MCP server, nothing sent anywhere. Install Polarizer as in [Setup](#setup)'s first line, then:
+A drill shows you invented agent calls one at a time, under the task the agent was given, and you allow or deny each; some were changed to be wrong on purpose, and after each answer you see whether you were right and why. It runs offline: no agent, no account, no MCP server, nothing sent anywhere.
+
+One call from a guided drill, trimmed, and the answer after allowing it:
+
+```text
+call 3 of 10
+task: Add a "Running the tests" section to README.md in the garden-planner project.
+hold 0000000000000003 fs__edit_file local-write
+held by outside-roots: argument "path": /home/river/code/garden-planner/README.md is outside every workspace root
+...
+In plain words: Edit README.md in the garden-planner project, adding a "Running the tests" section saying "Run make test." above the License heading.
+allow or deny?
+```
+
+```text
+Clean call. You allowed it.
+why: The edit adds the section the task asked for, before the License heading. It is held only because the path is outside every workspace root.
+```
+
+Install Polarizer as in [Setup](#setup)'s first line, then:
 
 ```sh
 polarizer drill --calls 10 --condition guided
@@ -67,9 +86,9 @@ For the denied call, the agent only ever saw `polarizer: fs__write_file was not 
 
 - **A changed tool disappears until you approve it again.** If a server changes a tool's definition after you approved it, the agent stops seeing that tool until you approve the new definition.
 - **Holds look at what a call would touch.** The tool's class and the call's resolved paths decide, not the tool's name.
-- **You see the exact call; the agent learns nothing.** A held call shows its exact arguments, every unusual character escaped. A refused call tells the agent only that it was not allowed.
+- **You see the exact call; the agent learns only that it was refused.** A held call shows its exact arguments, every unusual character escaped. A refused call tells the agent only that it was not allowed.
 - **Every call, hold and decision goes into a hash-chained ledger,** and a separately written verifier checks it as well as Polarizer's own.
-- **It fails closed.** A tool with no class is held on every call, and a ledger that doesn't verify stops startup.
+- **For the calls it sees, it fails closed:** a tool with no class is held on every call, and a ledger that doesn't verify stops startup. The agent's own shell and file tools never reach Polarizer ([Known limits](#known-limits)).
 
 ## Compared with Claude Code's permission prompts
 
@@ -77,11 +96,11 @@ Claude Code's own prompt for an MCP tool comes before the call reaches Polarizer
 
 ## Proof
 
-- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS; see the badge for the latest run. The last run recorded as passing on all five is at 0f32e11, when 1270 tests passed and 13 were skipped locally. ([milestones](docs/milestones.md#status), [CI record](docs/verified-facts.md#ci-run-37380445365-at-0f32e11-oct-5-2026-utc-observed-by-the-owner))
+- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS; see the badge for the latest run. The last run recorded as passing on all five, and its local test count, are in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 - **Two verifiers agree** on every conformance fixture and on 5,000 randomly damaged chains per test run. Both were written separately from the same spec by the same builder, so a misreading they share isn't ruled out; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently. ([claims table](docs/dev/m0-plan.md#tests-and-claims), [RFC 8785 record](docs/verified-facts.md#rfc-8785-text-fetched-oct-2-2026))
-- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
+- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time. The rug pull was done by the repository's own test server, which changes its definition on cue, not by a third-party server. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
 - **Approvals reach a running session:** in the interactive M1a check, `/mcp` listed newly approved tools without a reconnect, for a first approval and for a changed definition. ([M1a check](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner))
-- **Every kind of hold ending, interactively:** in the M2a check, a denied write, an allowed retry, a write held 128 s and then allowed, and a destructive move that expired after 30 s without running. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
+- **Three of the five hold endings, interactively:** in the M2a check, deny (a denied write), allow (an allowed retry) and expiry (a destructive move that expired after 30 s without running); the check also covered a write held 128 s and then allowed. The other two endings, the client's cancel and Polarizer's shutdown, are covered by tests: `tests/test_holds.py::test_client_cancel_ends_the_hold`, and `tests/test_hold_restart.py::test_esc_during_a_hold` and `::test_stdin_closed_during_a_hold`. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
 - **Claude Code's own timeout reaches the server:** in the headless live check, Claude Code cancelled a 14 s call after 5.012 s, and Polarizer's cancel reached the upstream 1 ms later. ([live check](docs/verified-facts.md#live-check-headless-claude-code-21288))
 - **Drills, built and checked as a tool:** their tests run in all five CI jobs (the pseudo-terminal ones on Linux and macOS only), and a shortcut audit of the scenario set, using only what a call's screen shows before the answer, finds that the best single-feature rule scores 4 points above always answering allow (64.0% against 60.0% over the 150 scenarios, 64.2% against 59.9% over 1,000 seeded drills). No results from people yet. ([measure spec](docs/MEASURE-SPEC.md#validation), [stage 8 notes](docs/dev/STAGE8-NOTES.md#1-the-shortcut-audit))
 
@@ -106,7 +125,7 @@ MCP servers                                 you, in a terminal: pending,
 
 The agent's own shell and file tools don't pass through Polarizer. Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent only the definitions you approved, from a stored copy. When a server's definition changes, the tool is hidden, the change is recorded, and Claude Code is told its tool list changed. For each call to an approved tool, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you. A held call ends in one of five ways, each recorded: allow, deny, expiry, the client's cancel, or Polarizer's shutdown.
 
-Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the previous entry's hash, so changing, removing or reordering a line breaks the chain, and `ledger.head` catches lines lost from the end. Call arguments stay out of the chain, in salted side files it commits to. `polarizer verify` reports one status with its own exit code and never writes. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md), [holds](docs/HOLD-SPEC.md) and [drills](docs/MEASURE-SPEC.md).
+Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the previous entry's hash, and a separate file, `ledger.head`, records the latest entry that changes what may run, such as an approval or a hold decision. `polarizer verify` detects a line that was edited, removed or reordered, and lines lost from the end back past the entry `ledger.head` records. It does not detect a rewrite by someone who can write to the whole ledger directory, since they can rewrite the ledger and its head together. Call arguments stay out of the chain, in salted side files it commits to. `polarizer verify` reports one status with its own exit code and never writes. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md), [holds](docs/HOLD-SPEC.md) and [drills](docs/MEASURE-SPEC.md).
 
 ## Related projects
 
@@ -129,14 +148,16 @@ Pins, holds and tamper-evident logs exist in several of these, and Polarizer cre
 
 Polarizer only sees calls routed through it: the agent's shell, its own file tools and servers configured directly in the client are outside it, and an agent whose call is refused can try another route. In the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take; nothing in Polarizer would have stopped it.
 
+- **Making Polarizer the only path to a tool** would mean denying the client's own shell and file tools in its permission settings; I have not tested that.
 - **Definitions, not behavior.** A server can change what a tool does without changing its definition.
 - **Paths only in the arguments you name.** Only top-level arguments listed in `path_args` are checked, not paths nested inside an argument or written in free text.
+- **A local chain, not a signature.** Someone who can write to the ledger directory can rewrite the ledger and its head together.
 - **Esc ends held calls.** Esc in Claude Code stops the Polarizer process, and every call it was holding is refused.
 - **Backgrounded after about 123 s.** In Claude Code 2.1.289 a waiting call moves to the background and the agent keeps working; the hold still waits for you.
 - **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
 - **A person who allows without reading.** Polarizer records that you allowed it; only drills measure it, and only in practice.
 - **Drill results come from invented scenarios and a person who knows they are being tested.**
-- **Shape labels in drill reports are under review.** Some planted calls carry a label their mechanical rule doesn't give.
+- **Drill reports' counts by kind of mistake are under review.** Some planted calls are labelled with one kind of mistake but match the rule for another.
 
 Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
 

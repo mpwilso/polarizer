@@ -761,7 +761,7 @@ by kind of planted call
   extra effect: 8 planted, 6 caught
   misleading summary: 7 planted, 5 caught
   look-alike: 6 planted, 5 caught
-  7 drills in all. Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.
+  7 drills in all. Counts by kind of mistake are under review: some planted calls are labelled with one kind but match the rule for another. Each drill has only one or two calls of each kind, so read these counts across many drills, not from one.
 
 each drill
   2026-10-06 plain, 20 of 20: caught 5 of 6, false flags 1 of 14, median 12.4 s
@@ -788,7 +788,7 @@ guided minus prediction gate
   caught: +4 points, 95% interval -23 to +28: not distinguishable from noise at these numbers.
   false flags: +7 points, 95% interval -8 to +30: not distinguishable from noise at these numbers.
 ```
-- **Each by-kind table** ends with one line: the number of drills it rests on (`7 drills in all.`, `1 drill in all.`), then `Shape labels are under review and each drill has only one or two calls per shape; read these counts across many drills, not from one.` Set 1's labels don't all match the shape rules (section 6, Shapes), and a drill has one or two planted calls of each shape. The export's `by_shape` is unchanged.
+- **Each by-kind table** ends with one line: the number of drills it rests on (`7 drills in all.`, `1 drill in all.`), then `Counts by kind of mistake are under review: some planted calls are labelled with one kind but match the rule for another. Each drill has only one or two calls of each kind, so read these counts across many drills, not from one.` Set 1's labels don't all match the shape rules (section 6, Shapes), and a drill has one or two planted calls of each shape. The export's `by_shape` is unchanged.
 - **Several set versions** are named in the first line: `(scenario sets 1 and 2)`.
 - **Each drill** is one line, in `drill.started` order, dated by the UTC date of its `drill.started` `ts`; `, stopped` or `, did not end` follows the counts when it didn't finish. The fixture's per-drill lines are in the golden file; the spec shows the first and last.
 - **Rates follow section 7:** below 5 of a kind, `too few to say a rate (5 or more needed)`.

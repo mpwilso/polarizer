@@ -788,9 +788,17 @@ Observed by the owner on GitHub Actions and given in the brief of Oct 5, 2026. N
 
 Observed by the owner on GitHub Actions (`gh run view`) and given in the brief of Oct 5, 2026. No session can see CI runs, so nothing here was checked in this repo.
 
-- **All five jobs passed** at commit d50da88 in CI run 37388909612: Linux (ubuntu-24.04) with Python 3.11 in 5m46s, 3.12 in 6m15s and 3.13 in 5m46s, Windows with Python 3.12 in 5m43s, and macOS with Python 3.12 in 5m30s. It is now the latest commit recorded as passing on all five, after 0f32e11 (CI run 37380445365, above); README.md's Proof, docs/EVIDENCE.md and docs/milestones.md's CI line still cite 0f32e11.
+- **All five jobs passed** at commit d50da88 in CI run 37388909612: Linux (ubuntu-24.04) with Python 3.11 in 5m46s, 3.12 in 6m15s and 3.13 in 5m46s, Windows with Python 3.12 in 5m43s, and macOS with Python 3.12 in 5m30s. It is now the latest commit recorded as passing on all five, after 0f32e11 (CI run 37380445365, above); README.md's Proof, docs/EVIDENCE.md and docs/milestones.md's CI line still cited 0f32e11 when this was written; the cold-read edits moved them to this run and the next (CI run 37390364747, below).
 - **The first run of the wheel install step:** the two install-check steps of `.github/workflows/ci.yml` (docs/dev/STAGE8-NOTES.md, Release fixes, Fix 3) ran and passed on Linux, Windows and macOS, so the Windows branch (`cygpath`, `polarizer.exe`) has now run.
 - **The local run at that commit:** `scripts/test.sh` on Linux gave 1283 passed, 13 skipped.
+
+## CI run 37390364747 at 7afd4e1 (observed by the owner)
+
+Observed by the owner on GitHub Actions and given in the brief of the cold-read edits (Oct 6, 2026, UTC). No session can see CI runs, so nothing here was checked in this repo except the diff.
+
+- **All five jobs passed** at commit 7afd4e1 in CI run 37390364747. It is now the latest commit recorded as passing on all five, after d50da88 (CI run 37388909612, above).
+- **What changed since d50da88:** only `docs/milestones.md` and `docs/verified-facts.md` (`git diff --stat d50da88 7afd4e1`, checked in this repo).
+- **Not recorded:** the per-job times and test counts, and a local run at that commit.
 
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
