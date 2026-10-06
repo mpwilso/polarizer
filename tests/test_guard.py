@@ -188,3 +188,19 @@ def test_unreadable_entry_stops_check_with_exit_2(guard):
     assert code == 2
     assert "guard: stopped while reading the state" in err and "nothing was compared" in err
     assert "no changes" not in out
+
+
+def test_unreadable_entry_in_a_repo_stops_check_with_exit_2(guard):
+    """An unreadable directory in a guarded repo, made after the snapshot, used to end check
+    with exit 1 and no line saying why, part way through its report: the search for files
+    modified since the snapshot failed under set -e, outside the state's trap."""
+    assert guard("snapshot")[0] == 0
+    locked = guard.repo / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        code, out, err = guard("check")
+    finally:
+        locked.chmod(0o700)
+    assert code == 2, out + err
+    assert "guard: stopped" in err and str(locked) in err

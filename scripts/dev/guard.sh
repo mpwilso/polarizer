@@ -275,7 +275,10 @@ check() {
     esac
     d=$(grep -F "$sec	" <<< "$diffs" || true)
     newer=""
-    case "$sec" in repo:*) newer=$(meta newer "${sec#repo:}" "$epoch");; esac
+    case "$sec" in
+      repo:*) newer=$(meta newer "${sec#repo:}" "$epoch") \
+        || stopped $? "the comparison is incomplete; nothing after ${sec#repo:} was compared";;
+    esac
     if [ -z "$d" ] && [ -z "$newer" ]; then echo "${sec/:/ }: no changes"; continue; fi
     changed=1
     if [ -n "$d" ]; then echo "${sec/:/ }: changed"; sed "s#$sec${tab}##; s#${tab}# #g" <<< "$d" | show; fi
