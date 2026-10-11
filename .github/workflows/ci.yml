@@ -2,81 +2,53 @@ name: ci
 
 on:
   push:
-  pull_request:
 
 permissions:
   contents: read
 
-# A newer push to a branch cancels its older run; master's runs always finish.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
-
 jobs:
-  test:
-    name: ${{ matrix.os }} / Python ${{ matrix.python }}
-    # A pull request from this repository already has a push run; run only for forks.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ${{ matrix.os }}
+  hang:
+    name: macos hang hunt ${{ matrix.shard }}
+    runs-on: macos-latest
+    timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04, python: "3.11" }
-          - { os: ubuntu-24.04, python: "3.12" }
-          - { os: ubuntu-24.04, python: "3.13" }
-          - { os: windows-latest, python: "3.12" }
-          - { os: macos-latest, python: "3.12" }
+        shard: [1, 2, 3, 4, 5]
     env:
-      UV_PYTHON: ${{ matrix.python }}
+      UV_PYTHON: "3.12"
+      HANG_TIMEOUT: "120"
     defaults:
       run:
         shell: bash
     steps:
-      # Pinned by commit SHA, looked up on Oct 2, 2026 from each action's own repository.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "0.12.19"
       - name: Install
         run: uv sync --locked
-      - name: Test (ruff and pytest, as scripts/test.sh runs them locally)
-        run: bash scripts/test.sh
-      - name: Append benchmark (printed, never asserted)
-        run: uv run --locked python scripts/bench_append.py
-      # The install a reader does: the built wheel, installed as a uv tool with its dependencies
-      # resolved from the package index (not uv.lock), into this job's tool directory. Whether
-      # uv's tool bin directory is already on a runner's PATH doesn't matter: the step asks uv
-      # for it, runs the executable there by its full path, and adds it to PATH for the next
-      # step. On Windows uv is given the wheel as a native path, and $GITHUB_PATH takes one.
-      - name: Install check (build the wheel, uv tool install it)
-        shell: bash
+      - name: Where things are
         run: |
-          uv build --out-dir dist
-          wheels=(dist/polarizer-*-py3-none-any.whl)
-          if [ "${#wheels[@]}" -ne 1 ] || [ ! -f "${wheels[0]}" ]; then
-            echo "expected one wheel in dist/, found: ${wheels[*]}" >&2
-            exit 1
-          fi
-          wheel="${wheels[0]}"
-          exe=polarizer
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            wheel="$(cygpath -w "$wheel")"
-            exe=polarizer.exe
-          fi
-          uv tool install "$wheel"
-          bin="$(uv tool dir --bin)"
-          echo "uv tool bin directory: $bin"
-          echo "$bin" >> "$GITHUB_PATH"
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            bin="$(cygpath -u "$bin")"
-          fi
-          test -f "$bin/$exe"
-          "$bin/$exe" --help
-          "$bin/$exe" drill --help
-      - name: Install check (run the installed polarizer from PATH)
-        shell: bash
+          command -v bash; bash --version | head -n 1; /bin/bash --version | head -n 1
+          command -v tee; sw_vers; sysctl -n hw.ncpu
+      - name: Loop the rugpull script tests for 40 minutes
         run: |
-          command -v polarizer
-          polarizer --help
-          polarizer drill --help
+          export HANG_LOG="$RUNNER_TEMP/hang.log"
+          : > "$HANG_LOG"
+          end=$(( $(date +%s) + 2400 ))
+          i=0; ok=0; bad=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            i=$((i + 1))
+            start=$(date +%s)
+            if uv run --locked pytest -p no:cacheprovider tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
+              ok=$((ok + 1)); echo "iteration $i passed in $(( $(date +%s) - start )) s"
+            else
+              bad=$((bad + 1)); echo "iteration $i FAILED in $(( $(date +%s) - start )) s"
+              tail -n 60 "$RUNNER_TEMP/out.txt"
+            fi
+          done
+          echo "iterations: $i passed: $ok failed: $bad"
+          echo "=== hang log"
+          cat "$HANG_LOG"
+          [ "$bad" = 0 ]

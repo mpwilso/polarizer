@@ -160,6 +160,7 @@ def check(tmp_path):
         if testing:
             env["POLARIZER_CHECK_TESTING"] = "1"
         env.update(extra or {})
+        env["PYTHONFAULTHANDLER"] = "1"
         if slow:
             env = slow_env(env, base)
         at_exit = AtExit(dirs["results"])
@@ -172,7 +173,17 @@ def check(tmp_path):
             text=True,
         )
         at_exit.watch(proc)
-        stdout, stderr = proc.communicate(timeout=300)
+        try:
+            stdout, stderr = proc.communicate(timeout=int(os.environ.get("HANG_TIMEOUT", "300")))
+        except subprocess.TimeoutExpired as e:
+            from helpers.hangdiag import report
+
+            so_far = (e.output or b"").decode("utf-8", "replace")
+            text = report(proc.pid, str(tmp_path.resolve()), base, so_far)
+            print(text, file=sys.stderr)
+            with open(os.environ.get("HANG_LOG", os.devnull), "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+            raise
         dirs["at_exit"] = at_exit.result()
         return proc.returncode, stdout + stderr, dirs
 
