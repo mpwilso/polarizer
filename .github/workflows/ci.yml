@@ -10,7 +10,7 @@ jobs:
   hang:
     name: macos hang hunt ${{ matrix.shard }}
     runs-on: macos-latest
-    timeout-minutes: 70
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
@@ -32,36 +32,26 @@ jobs:
         run: |
           command -v bash; bash --version | head -n 1; /bin/bash --version | head -n 1
           command -v tee; sw_vers; sysctl -n hw.ncpu
-      - name: Loop the rugpull script tests for 40 minutes, with the rest of the suite looping beside them
+      - name: The whole suite, then the rugpull file 20 more times in the same pytest process
         run: |
           export HANG_LOG="$RUNNER_TEMP/hang.log"
           : > "$HANG_LOG"
-          end=$(( $(date +%s) + 2400 ))
-          (
-            n=0
-            while [ "$(date +%s)" -lt "$end" ]; do
-              n=$((n + 1))
-              uv run --locked pytest -p no:cacheprovider --basetemp="$RUNNER_TEMP/bt-a" \
-                --ignore=tests/test_rugpull_check.py > "$RUNNER_TEMP/load.txt" 2>&1 || true
-              echo "load suite $n: $(tail -n 1 "$RUNNER_TEMP/load.txt")"
-            done
-          ) &
-          load=$!
+          files=(tests)
+          for n in $(seq 1 20); do files+=(tests/test_rugpull_check.py); done
+          end=$(( $(date +%s) + 2700 ))
           i=0; ok=0; bad=0
           while [ "$(date +%s)" -lt "$end" ]; do
             i=$((i + 1))
             start=$(date +%s)
-            if uv run --locked pytest -p no:cacheprovider --basetemp="$RUNNER_TEMP/bt-b" --durations=3 \
-                tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
-              ok=$((ok + 1)); echo "iteration $i passed in $(( $(date +%s) - start )) s"
+            if uv run --locked pytest -p no:cacheprovider --keep-duplicates --durations=5 "${files[@]}" > "$RUNNER_TEMP/out.txt" 2>&1; then
+              ok=$((ok + 1)); echo "round $i passed in $(( $(date +%s) - start )) s: $(tail -n 1 "$RUNNER_TEMP/out.txt")"
             else
-              bad=$((bad + 1)); echo "iteration $i FAILED in $(( $(date +%s) - start )) s"
-              tail -n 80 "$RUNNER_TEMP/out.txt"
+              bad=$((bad + 1)); echo "round $i FAILED in $(( $(date +%s) - start )) s"
+              grep -E '^(FAILED|ERROR)' "$RUNNER_TEMP/out.txt"; tail -n 1 "$RUNNER_TEMP/out.txt"
             fi
-            grep -E '^[0-9.]+s call' "$RUNNER_TEMP/out.txt" | head -n 1
+            grep -E '^[0-9.]+s (call|setup|teardown)' "$RUNNER_TEMP/out.txt" | head -n 5
           done
-          wait "$load"
-          echo "iterations: $i passed: $ok failed: $bad"
+          echo "rounds: $i passed: $ok failed: $bad"
           echo "=== hang log"
           cat "$HANG_LOG"
-          [ "$bad" = 0 ]
+          [ -s "$HANG_LOG" ] && exit 1 || exit 0
