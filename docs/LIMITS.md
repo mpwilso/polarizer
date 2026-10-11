@@ -44,7 +44,7 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 ## People
 
 - A hold is only as good as the person reading it. If you allow without reading, Polarizer records that you allowed it. Drills measure how often a person catches a planted call, under practice conditions only (Drills, below); nothing measures it during real work yet.
-- An agent that can run commands as you can also run `polarizer approve` or `polarizer allow`. They refuse to run without a terminal unless told they are run by a script, which only stops accidents.
+- An agent that can run commands as you can also run `polarizer approve` or `polarizer allow`. They refuse to run without a terminal unless told they are run by a script, which only stops accidents. A decision made that way is recorded with `terminal: false`, so the ledger shows it, but nothing stops it.
 
 ## Drills
 

@@ -413,6 +413,7 @@ def decide_hold(args, ledger_dir: Path, forbidden: list[Path]) -> int:
         return _err(f"polarizer: {hold_id} is not a hold id (16 lowercase hex characters)")
     try:
         decider = HoldDecider.open(ledger_dir)
+        decider.terminal = _stdin_is_terminal()
     except Refusal as e:
         print(e.line, file=sys.stderr)
         return e.exit_code
@@ -454,6 +455,7 @@ def decide(args, ledger_dir: Path, forbidden: list[Path], classes=None) -> int:
             )
     try:
         decider = Decider.open(ledger_dir)
+        decider.terminal = _stdin_is_terminal()
     except Refusal as e:
         print(e.line, file=sys.stderr)
         return e.exit_code

@@ -3,9 +3,10 @@ section 7); on holds, allow and deny (docs/HOLD-SPEC.md, section 8). The command
 test helpers share this code.
 
 Each decision is a tool.approved, tool.rejected or hold.decided entry with actor "person",
-fsynced with ledger.head updated before the call returns. A hold decision is a conditional
-append: its check runs under the ledger lock after catching up, so two processes can never both
-end one hold. Nothing here creates a ledger.
+fsynced with ledger.head updated before the call returns. A decision made without a terminal
+(the command line's --allow-no-terminal) also has terminal false; one made on a terminal has no
+terminal key. A hold decision is a conditional append: its check runs under the ledger lock
+after catching up, so two processes can never both end one hold. Nothing here creates a ledger.
 """
 
 from collections.abc import Callable
@@ -41,6 +42,7 @@ class Decider:
     ledger_dir: Path
     writer: LedgerWriter
     pins: PinState
+    terminal: bool = True  # False: recorded as data.terminal false on every decision
 
     @classmethod
     def open(cls, ledger_dir: Path, ops: FileOps | None = None) -> "Decider":
@@ -62,7 +64,7 @@ class Decider:
         self.writer.close()
 
     def _record(self, kind: str, data: dict):
-        return self.writer.append(kind, {**data, "actor": ACTOR}).result()
+        return self.writer.append(kind, _marked({**data, "actor": ACTOR}, self.terminal)).result()
 
     def approve_one(
         self, prefix: str, tool: str, def_hash: str, out: Callable[[str], None], classes=None
@@ -144,6 +146,11 @@ class Decider:
         out(f"rejected {name} {def_hash} at seq {done.seq}")
 
 
+def _marked(data: dict, terminal: bool) -> dict:
+    """A decision's data, with terminal false when it was made without a terminal."""
+    return data if terminal else {**data, "terminal": False}
+
+
 def fold_reason(text: str | None) -> str:
     """A rejection's reason: whitespace folded to single spaces, cut to 1 KiB. Empty if none."""
     return one_line(text) if text is not None else ""
@@ -159,6 +166,7 @@ class HoldDecider:
     ledger_dir: Path
     writer: LedgerWriter
     holds: HoldState
+    terminal: bool = True  # False: recorded as data.terminal false on every decision
 
     @classmethod
     def open(cls, ledger_dir: Path, ops: FileOps | None = None) -> "HoldDecider":
@@ -229,6 +237,7 @@ class HoldDecider:
             "actor": ACTOR,
             "reason": reason,
         }
+        data = _marked(data, self.terminal)
         done = self.writer.append("hold.decided", data, check=check).result()
         held = self.holds.get(hold_id)
         state = session_state(self.ledger_dir, held.session)

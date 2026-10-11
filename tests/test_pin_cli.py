@@ -332,6 +332,42 @@ def test_approve_runs_on_a_terminal(tmp_path, fake_home):
     assert done.stdout.splitlines()[-1].startswith(b"approved probe__note ")
 
 
+def test_decisions_without_a_terminal_are_marked(tmp_path, capsys, fake_home, monkeypatch):
+    """A decision recorded without a terminal (only possible with --allow-no-terminal) has
+    data.terminal false; one made on a terminal has no terminal key, as before."""
+    from helpers import holdledger as hl
+
+    monkeypatch.setattr(cli, "_now", lambda: hl.NOW)
+    tty = {"on": False}
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: tty["on"])
+    directory = pinledger.mixed(tmp_path / "ledger")
+    printed = group_id(directory, capsys)
+    h = pinledger.hashed("note")
+    ld = str(directory)
+    before = len(entries(directory))
+    assert run("approve", "--ledger-dir", ld, "--group", printed) == 0
+    approved = [e for e in entries(directory)[before:] if e["kind"] == "tool.approved"]
+    assert approved and all(e["data"]["terminal"] is False for e in approved)
+    assert run("reject", "--ledger-dir", ld, "probe", "note", h, "--reason", "r") == 0
+    assert entries(directory)[-1]["kind"] == "tool.rejected"
+    assert entries(directory)[-1]["data"]["terminal"] is False
+    tty["on"] = True
+    assert run("approve", "--ledger-dir", ld, "probe", "note", h, terminal=True) == 0
+    assert entries(directory)[-1]["kind"] == "tool.approved"
+    assert "terminal" not in entries(directory)[-1]["data"]
+
+    holds = hl.mixed(tmp_path / "holds")
+    tty["on"] = False
+    assert run("allow", "--ledger-dir", str(holds), hl.WRITE_PATTERN) == 0
+    assert entries(holds)[-1]["kind"] == "hold.decided"
+    assert entries(holds)[-1]["data"]["terminal"] is False
+    tty["on"] = True
+    assert run("deny", "--ledger-dir", str(holds), hl.UNCLASSIFIED, terminal=True) == 0
+    assert entries(holds)[-1]["kind"] == "hold.decided"
+    assert "terminal" not in entries(holds)[-1]["data"]
+    capsys.readouterr()
+
+
 def test_pending_on_a_broken_ledger_prints_verify(tmp_path, capsys):
     directory = install_fixture("broken/edit_value", tmp_path / "ledger")
     assert cli.main(["pending", "--ledger-dir", str(directory)]) == 1

@@ -131,9 +131,10 @@ def test_pending_tools_hidden(tmp_path, capfd):
     assert f"polarizer: {len(fake.names)} tools wait for approval; run polarizer pending" in err
 
 
-def test_approve_exposes(tmp_path):
+def test_approve_exposes(tmp_path, monkeypatch):
     """After approve, the client gets a change notice, without listing first (the watch reads
     the decision), and the tool is listed from its stored copy."""
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)  # as under pytest -s too
     fake = FakeUpstream(names=["echo", "wait"])
     ledger_dir = tmp_path / "ledger"
 
@@ -160,12 +161,14 @@ def test_approve_exposes(tmp_path):
         "def_hash": hash_now(fake, "wait"),
         "actor": "person",
         "group": None,
+        "terminal": False,  # run_cli passes --allow-no-terminal, with no terminal
     }
 
 
-def test_reject_hides_and_needs_reason(tmp_path, capsys):
+def test_reject_hides_and_needs_reason(tmp_path, capsys, monkeypatch):
     """reject without a reason writes nothing; with one, it hides an approved tool, records
     the reason, and the client gets a change notice."""
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)  # as under pytest -s too
     fake = FakeUpstream(names=["echo"])
     ledger_dir = tmp_path / "ledger"
     h = hash_now(fake, "echo")
@@ -195,6 +198,7 @@ def test_reject_hides_and_needs_reason(tmp_path, capsys):
         "def_hash": h,
         "actor": "person",
         "reason": "it reads my files",
+        "terminal": False,
     }
     assert "polarizer: reject needs --reason <text>" in capsys.readouterr().err
 
