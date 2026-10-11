@@ -283,7 +283,8 @@ def test_stuck_resolutions_are_capped(root):
     while stuck.count and time.monotonic() < deadline:
         time.sleep(0.01)
     assert stuck.count == 0
-    pol.resolver = paths.resolve
+    # With the default bound back: 50 ms is too tight for a real resolution on a busy Windows runner.
+    pol.resolver, pol.resolve_bound = paths.resolve, paths.RESOLVE_BOUND
     assert verdict(pol, "write", p(root / "after")).rule == "inside-roots"
     # serve's policies share one count per process.
     assert policy.Policy().stuck is paths.STUCK
