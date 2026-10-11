@@ -19,8 +19,9 @@ from polarizer.writer import FileOps
 # The policy hash of FIXED, computed once with a throwaway script in the session scratch
 # directory, outside the repo, from a hand-written form and the standard library's json
 # (sort_keys, compact separators, ensure_ascii=False, which equals RFC 8785 on the ledger's
-# subset), never from polarizer.policy (docs/dev/STAGE6-NOTES.md).
-FIXED_SHA = "bcd888f46f6866c375af7fc238eda1573eb0628ef3663b57e45bfab29e397006"
+# subset), never from polarizer.policy (docs/dev/STAGE6-NOTES.md). Recomputed the same way on
+# Oct 11, 2026 for builtin_patterns 2; the same script gives the old value, bcd888f4...7006, for 1.
+FIXED_SHA = "0165ba3dc8c0b7733b83fd84bb02fb8a69517d7df187311e02702d375e85baaf"
 FIXED = """
 [policy]
 hold_timeout_seconds = 120

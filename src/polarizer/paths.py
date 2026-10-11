@@ -364,10 +364,12 @@ def matches(pattern: Pattern, resolved: str, fold: bool = FOLD) -> bool:
 
 # The built-in lists (section 3). BUILTIN_PATTERNS is the version number in the policy hash,
 # raised whenever these lists change.
-BUILTIN_PATTERNS = 1
+BUILTIN_PATTERNS = 2  # 2: submodule hooks and config (Oct 11, 2026)
 BUILTIN_WRITE = (
     ".git/hooks/**",
     ".git/config",
+    ".git/modules/**/hooks/**",
+    ".git/modules/**/config",
     ".github/workflows/**",
     "~/.ssh/**",
     ".env*",

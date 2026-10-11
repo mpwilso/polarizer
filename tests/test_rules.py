@@ -334,6 +334,8 @@ def test_first_match_order(where):
 WRITE_PATHS = {
     ".git/hooks/**": "<root>/.git/hooks/pre-commit",
     ".git/config": "<root>/.git/config",
+    ".git/modules/**/hooks/**": "<root>/.git/modules/sub/hooks/pre-commit",
+    ".git/modules/**/config": "<root>/.git/modules/sub/config",
     ".github/workflows/**": "<root>/.github/workflows/ci.yml",
     "~/.ssh/**": "<home>/.ssh/authorized_keys",
     ".env*": "<root>/.env",
@@ -398,6 +400,24 @@ def test_builtin_patterns_cannot_be_removed(where):
             )
             v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
             assert (v.rule, v.reason) == (rule, f'argument "path": {path} matches {first}'), path
+
+
+def test_submodule_hooks_and_config_are_held(where):
+    """Git runs a submodule's hooks from .git/modules/<name>/hooks and reads its config from
+    .git/modules/<name>/config, nested submodules one modules/<name> deeper: a write to any of
+    them is held, as a write to the top repository's .git/hooks or .git/config is."""
+    pol = make(where, x=R("local-write", ("path",)))
+    pol.resolver = lambda p: p  # already resolved, by construction
+    for rel, pattern in [
+        (".git/modules/sub/hooks/pre-commit", ".git/modules/**/hooks/**"),
+        (".git/modules/sub/config", ".git/modules/**/config"),
+        (".git/modules/a/modules/b/hooks/post-checkout", ".git/modules/**/hooks/**"),
+        (".git/modules/a/modules/b/config", ".git/modules/**/config"),
+    ]:
+        path = str((where / "root").joinpath(*rel.split("/")))
+        v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
+        assert (v.action, v.rule) == ("hold", "write-pattern"), rel
+        assert v.reason == f'argument "path": {path} matches {pattern}', rel
 
 
 def test_destructive_and_egress_name_the_path(where):
