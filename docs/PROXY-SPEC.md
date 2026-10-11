@@ -283,6 +283,53 @@ orphaned           args/<name>
 
 Every row in these tables gets a golden-file test (`tests/golden/`), which runs the command on a fixture and compares stdout byte for byte, along with the exit code.
 
+## Starting from an existing MCP config
+
+```
+polarizer init --from <path> [--write <absolute directory>]
+```
+
+`init` reads an MCP config file in Claude Code's shape, a JSON object whose `mcpServers` object maps each server's name to its `command`, `args`, `env` and `type`, and prints a `polarizer.toml` that puts those servers behind Polarizer as upstreams, and the MCP config that starts `polarizer serve` with it. Any other top-level key in the file is ignored, so `--from` can name a project's `.mcp.json`. `init` only reads that file. It never writes project-scope or user-scope Claude Code or MCP config, and starts no server.
+
+**Output.** The two files are `<dir>/polarizer.toml` and `<dir>/mcp.json`, where `<dir>` is the `--write` directory, or `~/.config/polarizer` (expanded) without it.
+- **Without `--write`,** both go to stdout, each after a comment line naming where to save it: `# polarizer.toml, to save as <dir>/polarizer.toml`, then `# mcp.json, to save as <dir>/mcp.json`. Nothing is written to disk.
+- **With `--write`,** the directory is created if missing and both files are created, each only if no file of that name exists: if either exists, `init` writes neither, prints `polarizer: <path> exists; init never overwrites a file` and exits 2. A relative `--write` is a usage error.
+- **The `polarizer.toml`** has one `[upstream.<name>]` table per server, in the file's order, with `command`, `args` and `env` as the file gives them. It has no `[policy]` table and no tool classes, so every call is held until each tool gets a class (HOLD-SPEC.md, section 2); a comment at its top says so, and lists each skipped server and each placeholder below.
+- **The `mcp.json`** has one server, `polarizer`, whose `command` is the `polarizer` found on `PATH` (or `polarizer`, with a note to set it to what `command -v polarizer` prints) and whose `args` are `serve`, `--config` and the absolute path of the `polarizer.toml`. Pass it with `--strict-mcp-config --mcp-config`. Never put Polarizer in a project's `.mcp.json`, where every session opened in that directory would start it.
+- **stderr** gets one line per skipped server and per placeholder, then the next steps: run `serve` once with its input closed, `pending`, `approve`, then start Claude Code with the new `mcp.json` only.
+
+**Servers that can't be expressed are skipped, never dropped silently.** Each is named on stderr as `polarizer: skipped <name>: <reason>` and in a comment in the `polarizer.toml`. The reasons:
+- `not a JSON object`;
+- `type "<type>"; Polarizer proxies only stdio servers` (for example `http` and `sse`; a missing `type` means stdio);
+- `no "command"`;
+- `this is Polarizer itself` (the name `polarizer`, or a command whose file name is `polarizer`);
+- `the name is not a valid prefix` (Configuration, The prefix);
+- `key "<key>" has no polarizer.toml equivalent` (any key besides `type`, `command`, `args` and `env`);
+- `"args" must be a list of strings`, or `"env" must be an object of strings`;
+- `"${...}" in command or args is not expanded by Polarizer`;
+- `env <key>: only a whole "${NAME}" value is expanded`, or `env <key>: looks like a secret, and its name can't be a "${NAME}" variable`.
+
+Text from the file in these lines goes through `safe()` (Calls, Upstream text).
+
+**Secrets are not copied.** An `env` value that is a whole `"${NAME}"` is copied as it is (Configuration, The upstream's environment). Any other value that looks like a secret is written as `"${<key>}"`, so `serve` reads it from its own environment and refuses to start until it is set there, and stderr says `polarizer: <name>: env <key> looked like a secret; polarizer.toml reads it as "${<key>}" from serve's environment`. A value looks like a secret when its key has a word such as `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH` or `CREDENTIAL` (split at anything but letters and digits, or ending in one), or the value starts like a known token (`ghp_`, `github_pat_`, `sk-`, `xox`, `glpat-`, `AKIA`, `AIza`), or it is 24 or more characters with no space, `/` or `:` and both letters and digits. The test errs toward a placeholder: a false positive costs one exported variable, a false negative a secret in plain text. How Claude Code passes environment variables to a server it starts from an `--mcp-config` file is not verified (docs/verified-facts.md, Unverified).
+
+**Errors,** one line on stderr, exit 2, nothing written:
+
+```
+polarizer: init needs --from <path to an MCP config JSON>
+polarizer: --write must be an absolute path, got <path>
+polarizer: cannot read <path>: <the operating system's message>
+polarizer: <path> is not valid JSON: <json's message>
+polarizer: <path> has no "mcpServers" object
+polarizer: no server in <path> can go behind Polarizer
+```
+
+The last comes after the skipped lines, when every server was skipped.
+
+| Test | Claim | Suite |
+|---|---|---|
+| `tests/test_init.py` | Stdio servers become upstreams that `config.load` accepts, with the same command, args and env; the MCP config runs `serve --config` with the printed path; every skip reason above is listed on stderr and in the toml, and no server is missing from both; secret-looking values become placeholders and never appear in the output; `--write` creates both files and refuses, writing neither, when either exists; the source file is unchanged; every error line; `init` is in `polarizer --help`. | Default |
+
 ## Where the ledger lives
 
 `serve` and `repair` refuse a `ledger_dir` inside a forbidden path (every `ledger_forbidden_paths` entry, plus Parallax's two directories, always) and warn inside any other git working tree (startup step 2). `verify` only reads, never writes, and checks no locations.

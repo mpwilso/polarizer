@@ -120,7 +120,11 @@ mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-That installs the v0.2.0 release. For the latest code, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
+That installs the v0.2.0 release. For the latest code, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with.
+
+**Already using MCP servers in Claude Code?** `polarizer init --from <path>` reads an MCP config, such as a project's `.mcp.json`, and prints a polarizer.toml with those servers as upstreams and the `mcp.json` that starts Polarizer with it; with `--write <dir>` it saves both there instead, never over an existing file. It names every server it can't proxy, such as an HTTP server, and writes a value that looks like a secret as a `${NAME}` placeholder that `serve` reads from its environment. It is new since v0.2.0, so until the next release it needs the git install. Every tool it lists is held on every call until you give it a class, as below.
+
+Otherwise, save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 
 ```toml
 [policy]

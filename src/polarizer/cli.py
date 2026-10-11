@@ -1,6 +1,7 @@
 """The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md),
 pending, approve and reject (docs/PIN-SPEC.md, section 7), holds, allow and deny
-(docs/HOLD-SPEC.md, section 8), and drill and drill report (docs/MEASURE-SPEC.md, section 9).
+(docs/HOLD-SPEC.md, section 8), drill and drill report (docs/MEASURE-SPEC.md, section 9), and
+init (docs/PROXY-SPEC.md, Starting from an existing MCP config).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
 The other commands print results to stdout. Usage errors, config errors, unreadable files,
@@ -51,6 +52,19 @@ def _parser() -> argparse.ArgumentParser:
         "--no-holds",
         action="store_true",
         help="run with the hold rules off; recorded in the ledger at every start",
+    )
+    text = "print a polarizer.toml for the servers in an existing MCP config, and its mcp.json"
+    init = commands.add_parser("init", help=text, description=text)
+    init.add_argument(
+        "--from",
+        dest="source",
+        metavar="PATH",
+        help="an MCP config JSON with mcpServers (read only)",
+    )
+    init.add_argument(
+        "--write",
+        metavar="DIR",
+        help="create DIR/polarizer.toml and DIR/mcp.json instead of printing; never overwrites",
     )
     for name, text in [
         ("verify", "check the ledger and report its status"),
@@ -217,6 +231,14 @@ def main(argv=None) -> int:
         args = _parser().parse_args(argv)
         if args.command == "drill":
             return drill(args)
+        if args.command == "init":
+            if args.source is None:
+                raise UsageError("init needs --from <path to an MCP config JSON>")
+            if args.write is not None and not os.path.isabs(args.write):
+                raise UsageError(f"--write must be an absolute path, got {args.write}")
+            from polarizer import init_config
+
+            return init_config.run(args.source, args.write)
         if args.command == "serve":
             if args.config is None:
                 raise UsageError("serve needs --config <absolute path to polarizer.toml>")

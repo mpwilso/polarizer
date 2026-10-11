@@ -826,6 +826,7 @@ These are assumed or open. Nothing here has been observed.
   - whether interactive sessions open `subscriptions/listen` the same way;
   - whether `TaskStop` on a call moved to the background sends `notifications/cancelled`, what happens to such a call when the session exits, and whether the 123 s is fixed or configurable (M2a check, interactive);
   - elicitation forms.
+- **Environment variables for `polarizer serve`:** which of Claude Code's own environment variables reach a stdio server it starts from an `--mcp-config` file, and whether it expands `"${NAME}"` in that file's `env`. `polarizer init` writes secret-looking values as `"${NAME}"` in polarizer.toml (docs/PROXY-SPEC.md, Starting from an existing MCP config), which `serve` reads from its own environment and refuses to start without.
 - **Idle timeout:** it did not fire headless. Whether it applies interactively is unknown.
 - **Hard limit settings:** the default of 27.8 hours and the per-server `timeout` key are read from the binary, not observed.
 - **Startup in interactive sessions:** whether `MCP_TIMEOUT` (30 s) and `MCP_CONNECT_TIMEOUT_MS` (5 s) behave there as they did headless.
