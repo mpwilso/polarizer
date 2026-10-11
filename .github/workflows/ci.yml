@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1]
     env:
       UV_PYTHON: "3.12"
       HANG_TIMEOUT: "120"
@@ -32,23 +32,5 @@ jobs:
         run: |
           command -v bash; bash --version | head -n 1; /bin/bash --version | head -n 1
           command -v tee; sw_vers; sysctl -n hw.ncpu
-      - name: Loop the rugpull script tests for 40 minutes
-        run: |
-          export HANG_LOG="$RUNNER_TEMP/hang.log"
-          : > "$HANG_LOG"
-          end=$(( $(date +%s) + 2400 ))
-          i=0; ok=0; bad=0
-          while [ "$(date +%s)" -lt "$end" ]; do
-            i=$((i + 1))
-            start=$(date +%s)
-            if uv run --locked pytest -p no:cacheprovider tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
-              ok=$((ok + 1)); echo "iteration $i passed in $(( $(date +%s) - start )) s"
-            else
-              bad=$((bad + 1)); echo "iteration $i FAILED in $(( $(date +%s) - start )) s"
-              tail -n 60 "$RUNNER_TEMP/out.txt"
-            fi
-          done
-          echo "iterations: $i passed: $ok failed: $bad"
-          echo "=== hang log"
-          cat "$HANG_LOG"
-          [ "$bad" = 0 ]
+      - name: Leave a stuck rug-pull check behind
+        run: uv run --locked python calib.py
