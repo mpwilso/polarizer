@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # Wait a week after a release before proposing it, so a compromised release has time to be
+    # caught and pulled.
+    cooldown:
+      default-days: 7

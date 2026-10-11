@@ -4,9 +4,19 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+# A newer push to a branch cancels its older run; master's runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    # A pull request from this repository already has a push run; run only for forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
