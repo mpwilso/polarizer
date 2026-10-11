@@ -11,7 +11,7 @@
 
 Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools), pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a hash-chained ledger that `polarizer verify` checks. It also includes drills, offline practice sessions in which a person allows or denies invented calls and measures how well they catch the planted mistakes. It runs on your own machine, started by the agent's client, such as Claude Code. It guards only the calls that pass through it, not the agent's own shell or file tools.
 
-Status: v0.1, a preview. Built: the gateway and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running gateway, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
+Status: v0.2, a preview. Built: the gateway and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running gateway, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
 
 Jump to [a drill](#try-a-drill), [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
@@ -168,13 +168,13 @@ Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
 For Linux, WSL and macOS. You need Python 3.11 or later, [uv](https://docs.astral.sh/uv/), Node.js for `npx` servers, and Claude Code.
 
 ```sh
-uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.1.0/polarizer-0.1.0-py3-none-any.whl
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.2.0/polarizer-0.2.0-py3-none-any.whl
 polarizer --help
 mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-That installs the v0.1.0 release. For the latest code, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
+That installs the v0.2.0 release. For the latest code, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with. Save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 
 ```toml
 [policy]
