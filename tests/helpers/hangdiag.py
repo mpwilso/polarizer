@@ -62,6 +62,26 @@ def report(root_pid: int, marker: str, base: Path, output: str) -> str:
     )
     out.append("--- lsof:")
     out.append(_run(["lsof", "-nP", "-p", ",".join(map(str, pids))]))
+    # Watch for 60 s more, as the failed CI job's bash ended after the timeout and left tee.
+    alive = set(pids)
+    for _ in range(12):
+        time.sleep(5)
+        now = {pid for pid, _, _ in _procs()}
+        gone = sorted(alive - now)
+        if gone:
+            out.append(f"--- {time.strftime('%H:%M:%S')} exited: {gone}")
+        alive &= now
+    left = sorted(alive)
+    out.append(f"--- still alive after 60 s: {left}")
+    if left:
+        out.append(_run(["ps", "-ww", "-o", "pid,ppid,pgid,stat,etime,wchan,command", "-p", ",".join(map(str, left))]))
+        lsof_left = _run(["lsof", "-nP", "-p", ",".join(map(str, left))])
+        out.append(lsof_left)
+        out.append("--- every FIFO open by a process of this user:")
+        everyone = _run(["lsof", "-nP", "-u", str(os.getuid())])
+        out.append("\n".join(x for x in everyone.splitlines() if " FIFO " in x))
+    out.append("--- every process of this user now:")
+    out.append(_run(["ps", "-U", str(os.getuid()), "-ww", "-o", "pid,ppid,pgid,stat,etime,command"]))
     out.append("--- files under " + str(base))
     for path in sorted(base.rglob("*")):
         if path.is_file() and path.suffix in (".err", ".out", ".code", ".json", ".jsonl", ".log", ".txt", ""):

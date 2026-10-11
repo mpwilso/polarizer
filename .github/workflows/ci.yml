@@ -32,22 +32,35 @@ jobs:
         run: |
           command -v bash; bash --version | head -n 1; /bin/bash --version | head -n 1
           command -v tee; sw_vers; sysctl -n hw.ncpu
-      - name: Loop the rugpull script tests for 40 minutes
+      - name: Loop the rugpull script tests for 40 minutes, with the rest of the suite looping beside them
         run: |
           export HANG_LOG="$RUNNER_TEMP/hang.log"
           : > "$HANG_LOG"
           end=$(( $(date +%s) + 2400 ))
+          (
+            n=0
+            while [ "$(date +%s)" -lt "$end" ]; do
+              n=$((n + 1))
+              uv run --locked pytest -p no:cacheprovider --basetemp="$RUNNER_TEMP/bt-a" \
+                --ignore=tests/test_rugpull_check.py > "$RUNNER_TEMP/load.txt" 2>&1 || true
+              echo "load suite $n: $(tail -n 1 "$RUNNER_TEMP/load.txt")"
+            done
+          ) &
+          load=$!
           i=0; ok=0; bad=0
           while [ "$(date +%s)" -lt "$end" ]; do
             i=$((i + 1))
             start=$(date +%s)
-            if uv run --locked pytest -p no:cacheprovider tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
+            if uv run --locked pytest -p no:cacheprovider --basetemp="$RUNNER_TEMP/bt-b" --durations=3 \
+                tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
               ok=$((ok + 1)); echo "iteration $i passed in $(( $(date +%s) - start )) s"
             else
               bad=$((bad + 1)); echo "iteration $i FAILED in $(( $(date +%s) - start )) s"
-              tail -n 60 "$RUNNER_TEMP/out.txt"
+              tail -n 80 "$RUNNER_TEMP/out.txt"
             fi
+            grep -E '^[0-9.]+s call' "$RUNNER_TEMP/out.txt" | head -n 1
           done
+          wait "$load"
           echo "iterations: $i passed: $ok failed: $bad"
           echo "=== hang log"
           cat "$HANG_LOG"
