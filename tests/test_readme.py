@@ -15,9 +15,9 @@ argument parser. Outside Setup, the "Try a drill" commands run too: the drill on
 pseudo-terminal (POSIX only, since it needs a terminal) and the report without one. Every
 relative link must name a file and heading that exist, and every absolute link must be a
 well-formed https URL (checked, never fetched). The README keeps its layout and length; every
-limit and every evidence claim the v0.1 README listed is in docs/LIMITS.md or
-docs/EVIDENCE.md, where the detail moved, and every related project it names is in
-docs/verified-facts.md, with the same link.
+limit and every evidence claim the v0.1 and v0.2 READMEs listed is in docs/LIMITS.md or
+docs/EVIDENCE.md, where the detail moved, as is the v0.2 README's example hold; and every
+related project docs/related.md names is in docs/verified-facts.md, with the same link.
 """
 
 import json
@@ -447,10 +447,13 @@ def test_docs_fences_pair_up():
 
 
 def test_absolute_links_are_well_formed():
-    """Every absolute link (Markdown links, src, srcset and href) is an https URL with a host
+    """Every absolute link (Markdown links, src, srcset and href) in README.md and in
+    docs/related.md, where its list of related projects moved, is an https URL with a host
     name, no spaces and no trailing punctuation caught from the sentence. Nothing is fetched."""
-    links = re.findall(r"\]\(([a-z]+:[^)]*)\)", README)
-    links += re.findall(r'\b(?:src|srcset|href)="([a-z]+:[^"]*)"', README)
+    links = []
+    for text in (README, RELATED):
+        links += re.findall(r"\]\(([a-z]+:[^)]*)\)", text)
+        links += re.findall(r'\b(?:src|srcset|href)="([a-z]+:[^"]*)"', text)
     assert len(links) > 15
     for link in links:
         parts = urlsplit(link)
@@ -545,7 +548,6 @@ def test_try_a_drill_runs(tmp_path):
 SECTIONS = [
     "Why it exists",
     "Try a drill",
-    "What a hold looks like",
     "What's different",
     "Compared with Claude Code's permission prompts",
     "Proof",
@@ -557,6 +559,8 @@ SECTIONS = [
     "How it was built",
     "What's next",
 ]
+
+RELATED = (ROOT / "docs" / "related.md").read_text(encoding="utf-8")
 
 # One phrase from each limit and each evidence claim of the v0.1 README (commit 9496bef), which
 # moved to docs/LIMITS.md and docs/EVIDENCE.md. The two-verifier claim was reworded on purpose.
@@ -603,6 +607,28 @@ OLD_EVIDENCE = (
     "docs/verified-facts.md also lists what is not verified",
 )
 
+# The same for the v0.2.0 README's limits and proof bullets that the README trim (issue #21) left
+# out: the detail each had, in its new home.
+V02_LIMITS = (
+    "denying the client's own shell and file tools in its permission settings",
+    "a call still running after about 123 seconds is moved to the background",
+    "They refuse to run without a terminal unless told they are run by a script",
+    "looks like a bare git repository, with a config that runs code",
+    "Drill calls are invented, short and self-contained",
+    "Drill reports' counts by kind of mistake are under review",
+    "Tried only with Claude Code, on Linux (WSL2). CI runs the tests on Windows and macOS",
+)
+V02_EVIDENCE = (
+    "the latest run recorded as passing on all five",
+    "`/mcp` listed the tools again without a reconnect both times",
+    "`tests/test_holds.py::test_client_cancel_ends_the_hold`",
+    "`tests/test_hold_restart.py::test_esc_during_a_hold` and `::test_stdin_closed_during_a_hold`",
+    "a write held for 128 s was allowed and returned",
+    "Polarizer's own cancel reached the upstream 1 ms later",
+    "64.2% over 1,000 seeded drills, against 60.0% and 59.9% for always answering allow",
+    "The ledger verified intact with 71 entries in 3 sessions",
+)
+
 
 def test_readme_layout():
     """The logo, the hook, the status line, the sections in order, a short page, the text
@@ -616,6 +642,7 @@ def test_readme_layout():
     assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
     assert "(docs/LIMITS.md)" in section("Known limits")
     assert "(docs/EVIDENCE.md)" in section("Proof")
+    assert "(docs/related.md)" in section("Related projects")
     # The "How it works" image is replaced by a text diagram; the SVG files stay in docs/img/.
     assert "how-it-works" not in README
     assert blocks("text", section("How it works"))
@@ -624,16 +651,16 @@ def test_readme_layout():
 
 
 def test_related_projects_are_recorded():
-    """Every link in Related projects is in docs/verified-facts.md's record of them, and the
-    section dates what it says."""
+    """Every link in docs/related.md, where the README's Related projects list moved, is in
+    docs/verified-facts.md's record of them, and the page dates what it says."""
     facts = (ROOT / "docs" / "verified-facts.md").read_text(encoding="utf-8")
     start = facts.index("\n## Related projects (from the owner's research, October 2026")
     record = facts[start : facts.index("\n## ", start + 1)]
-    text = section("Related projects")
-    links = re.findall(r"\]\((https://[^)]+)\)", text)
+    links = re.findall(r"\]\((https://[^)]+)\)", RELATED)
     assert len(links) == 12
     assert [link for link in links if f"({link})" not in record] == []
-    assert "as their documentation described them in October 2026" in text
+    assert "as their documentation described them in October 2026" in RELATED
+    assert "https://invariantlabs.ai/" not in RELATED  # the repository now redirects to Snyk
 
 
 def test_limits_and_evidence_moved():
@@ -641,6 +668,22 @@ def test_limits_and_evidence_moved():
     evidence = (ROOT / "docs" / "EVIDENCE.md").read_text(encoding="utf-8")
     assert [p for p in OLD_LIMITS if p not in limits] == []
     assert [p for p in OLD_EVIDENCE if p not in evidence] == []
+    assert [p for p in V02_LIMITS if p not in limits] == []
+    assert [p for p in V02_EVIDENCE if p not in evidence] == []
+
+
+def test_hold_example_is_the_recorded_one():
+    """The example hold, which moved from the README to docs/EVIDENCE.md, is the M2a check's
+    output exactly as docs/verified-facts.md records it: the holds block and the ledger lines."""
+    evidence = (ROOT / "docs" / "EVIDENCE.md").read_text(encoding="utf-8")
+    facts = (ROOT / "docs" / "verified-facts.md").read_text(encoding="utf-8")
+    start = facts.index("\n### The deny and allow steps, as printed")
+    record = facts[start : facts.index("\n## ", start + 1)]
+    example = evidence[evidence.index("\n## The hold example") :]
+    shown = re.findall(r"```\n(.*?)```", example, re.S)
+    assert len(shown) == 2
+    assert [block for block in shown if f"```\n{block}```" not in record] == []
+    assert "fs__write_file was not allowed" in example
 
 
 def test_verifier_claim_is_qualified():

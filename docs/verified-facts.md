@@ -802,12 +802,12 @@ Observed by the owner on GitHub Actions and given in the brief of the cold-read 
 
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
-The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. The README's Related projects section is written from this list.
+The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.
 
 - **mcpclerk** (https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command. Its three ideas credited in Polarizer are listed above (mcpclerk: ideas credited, nothing else used).
 - **mcpproxy-go** (https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
 - **Trail of Bits' mcp-context-protector** (https://github.com/trailofbits/mcp-context-protector): pins tool definitions on first use and scans responses.
-- **Invariant's mcp-scan** (https://invariantlabs.ai/blog/introducing-mcp-scan): pins tools by hash and detects shadowing at scan time.
+- **Invariant's mcp-scan** (https://invariantlabs.ai/blog/introducing-mcp-scan): pins tools by hash and detects shadowing at scan time. On Oct 11, 2026, its repository, invariantlabs-ai/mcp-scan, redirected to Snyk's agent-scan (https://github.com/snyk/agent-scan), which docs/related.md now links: `gh api repos/snyk/agent-scan -q .full_name` and `gh api repos/invariantlabs-ai/mcp-scan -q .full_name` both printed `snyk/agent-scan`.
 - **Docker's MCP Gateway** (https://docs.docker.com/ai/sandboxes/governance/reference/mcp-policy/): Cedar policies that can read call arguments and annotations, with approval asked through MCP elicitation.
 - **vex-mcp** (https://pypi.org/project/vex-mcp/): a stdio proxy that inspects tool descriptions, pins tool definitions, enforces a default-deny policy and writes a tamper-evident audit log.
 - **warden-mcp** (https://pypi.org/project/warden-mcp/): pins tool definitions on first use and quarantines a changed tool until it is approved again.

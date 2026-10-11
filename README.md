@@ -13,7 +13,7 @@ Polarizer is a local MCP gateway: it sits between an AI agent and the MCP server
 
 Status: v0.2, a preview. Built: the gateway and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running gateway, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
 
-Jump to [a drill](#try-a-drill), [an example hold](#what-a-hold-looks-like), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
+Jump to [a drill](#try-a-drill), [an example hold](docs/EVIDENCE.md#the-hold-example), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
 ## Why it exists
 
@@ -49,39 +49,6 @@ polarizer drill report
 
 A guided drill of 10 calls takes about five minutes and adds a line in plain words under each call. The report gives your catch rate and false-flag rate, each with a 95% interval. [docs/DRILL-GUIDE.md](docs/DRILL-GUIDE.md) walks through one, for readers who are not engineers.
 
-## What a hold looks like
-
-In the interactive M2a check, I asked Claude to write a file into `.git/hooks`, and the call was held. In a second terminal, `polarizer holds --wait` printed:
-
-```
-holds: 1 open
-
-hold a81e649da6775874 fs__write_file local-write
-held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
-waiting about 0m00s; times out after 300 s
-session cbb8b462c2196ca7 started 2026-10-05T00:34:04.198Z, running
-args_commit f5b482532450b8990343ca1f2cd273725f97bf77ee142f0053e9f106cdad3617, 103 bytes of arguments
-{
-  "path": "/tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt",
-  "content": "M2a hold check c2713114"
-}
-```
-
-I denied it, and the file was never written. The same call, asked for again, was a new hold, and I allowed that one. The check script's summary of the ledger for the two holds:
-
-```
-seq 52 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
-seq 53 hold.decided: deny (M2a hold check: deny)
-seq 54 call.refused: hold a81e649da6775874 was denied
-
-seq 55 hold.created: fs__write_file, class local-write, held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/hold-check-c2713114.txt matches .git/hooks/**
-seq 56 hold.decided: allow
-seq 57 call.sent: fs__write_file, allowed_by hold
-seq 58 call.returned: outcome ok, latency_ms 36
-```
-
-For the denied call, the agent only ever saw `polarizer: fs__write_file was not allowed`. Both blocks are copied from the check's results file, as recorded in [docs/verified-facts.md](docs/verified-facts.md#the-deny-and-allow-steps-as-printed).
-
 ## What's different
 
 - **A changed tool disappears until you approve it again.** If a server changes a tool's definition after you approved it, the agent stops seeing that tool until you approve the new definition.
@@ -96,15 +63,13 @@ Claude Code's own prompt for an MCP tool comes before the call reaches Polarizer
 
 ## Proof
 
-- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS; see the badge for the latest run. The last run recorded as passing on all five, and its local test count, are in [docs/EVIDENCE.md](docs/EVIDENCE.md).
-- **Two verifiers agree** on every conformance fixture and on 5,000 randomly damaged chains per test run. Both were written separately from the same spec by the same builder, so a misreading they share isn't ruled out; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently. ([claims table](docs/dev/m0-plan.md#tests-and-claims), [RFC 8785 record](docs/verified-facts.md#rfc-8785-text-fetched-oct-2-2026))
-- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, 9 of 9 checks each time. The rug pull was done by the repository's own test server, which changes its definition on cue, not by a third-party server. A changed definition was hidden from the agent and reached nothing until it was approved. ([first run](docs/verified-facts.md#rug-pull-check-oct-4-2026-headless-claude-code-21289), [second run](docs/verified-facts.md#rug-pull-check-second-run-oct-4-2026-headless-plain-terminal-claude-code-21289))
-- **Approvals reach a running session:** in the interactive M1a check, `/mcp` listed newly approved tools without a reconnect, for a first approval and for a changed definition. ([M1a check](docs/verified-facts.md#m1a-check-interactive-oct-4-2026-observed-by-the-owner))
-- **Three of the five hold endings, interactively:** in the M2a check, deny (a denied write), allow (an allowed retry) and expiry (a destructive move that expired after 30 s without running); the check also covered a write held 128 s and then allowed. The other two endings, the client's cancel and Polarizer's shutdown, are covered by tests: `tests/test_holds.py::test_client_cancel_ends_the_hold`, and `tests/test_hold_restart.py::test_esc_during_a_hold` and `::test_stdin_closed_during_a_hold`. ([M2a check](docs/verified-facts.md#m2a-check-interactive-oct-5-2026-utc-observed-by-the-owner))
-- **Claude Code's own timeout reaches the server:** in the headless live check, Claude Code cancelled a 14 s call after 5.012 s, and Polarizer's cancel reached the upstream 1 ms later. ([live check](docs/verified-facts.md#live-check-headless-claude-code-21288))
-- **Drills, built and checked as a tool:** their tests run in all five CI jobs (the pseudo-terminal ones on Linux and macOS only), and a shortcut audit of the scenario set, using only what a call's screen shows before the answer, finds that the best single-feature rule scores 4 points above always answering allow (64.0% against 60.0% over the 150 scenarios, 64.2% against 59.9% over 1,000 seeded drills). No results from people yet. ([measure spec](docs/MEASURE-SPEC.md#validation), [stage 8 notes](docs/dev/STAGE8-NOTES.md#1-the-shortcut-audit))
+- **CI on five jobs:** Linux with Python 3.11, 3.12 and 3.13, Windows and macOS.
+- **Two verifiers agree** on every conformance fixture and on 5,000 randomly damaged chains per test run. Both were written from the same spec by the same builder; the RFC 8785 test vectors, written out by hand from the RFC, check the canonical bytes independently.
+- **A rug pull is caught on real Claude Code:** the rug-pull check passed twice with Claude Code 2.1.289, using the repository's own test server.
+- **Holds, interactively:** a write to `.git/hooks` was held, denied and never written, then allowed on a retry; a destructive move expired without running. Tests cover the other two endings.
+- **Drills, checked as a tool:** in a shortcut audit, the best rule on a single surface feature scores 4 points above always answering allow. No results from people yet.
 
-Not covered: native Windows or macOS with Claude Code, any client but Claude Code, and third-party MCP servers beyond the reference ones. Every claim, in full: [docs/EVIDENCE.md](docs/EVIDENCE.md).
+Not covered: native Windows or macOS with Claude Code, any client but Claude Code, and third-party MCP servers beyond the reference ones. Every claim, with its record and the example hold: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ## How it works
 
@@ -129,39 +94,20 @@ Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the p
 
 ## Related projects
 
-Other MCP gateways and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](docs/verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
-
-- [mcpclerk](https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command.
-- [mcpproxy-go](https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
-- [Trail of Bits' mcp-context-protector](https://github.com/trailofbits/mcp-context-protector): pins tool definitions on first use and scans responses.
-- [Invariant's mcp-scan](https://invariantlabs.ai/blog/introducing-mcp-scan): pins tools by hash and detects shadowing at scan time.
-- [Docker's MCP Gateway](https://docs.docker.com/ai/sandboxes/governance/reference/mcp-policy/): Cedar policies that can read call arguments and annotations, with approval asked through MCP elicitation.
-- [vex-mcp](https://pypi.org/project/vex-mcp/): a stdio proxy that inspects tool descriptions, pins tool definitions, enforces a default-deny policy and writes a tamper-evident audit log.
-- [warden-mcp](https://pypi.org/project/warden-mcp/): pins tool definitions on first use and quarantines a changed tool until it is approved again.
-- [MCPDome](https://docs.rs/mcpdome): schema pinning with canonical SHA-256 hashes and a hash-chained ledger component.
-- [hoop's mcpproxy](https://pkg.go.dev/github.com/hoophq/mcpproxy): holds flagged tool calls until a human approves them over a REST API.
-- [TrueFoundry's MCP gateway](https://www.truefoundry.com/blog/mcp-tool-approvals-explained): holds a matched tool call and creates an approval request.
-
-Pins, holds and tamper-evident logs exist in several of these, and Polarizer credits three of mcpclerk's ideas ([How it was built](#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. In a search in October 2026 I found tools that test AI agents with planted inputs, such as [Agent Canary](https://github.com/Auro-rium/canary) and [AgentCanary](https://github.com/antgroup/Agent3Sigma-Canary), but none that tests the person approving; a search is not proof that none exists.
+Pins, holds and tamper-evident logs exist in several other MCP gateways and scanners, and Polarizer credits three of mcpclerk's ideas ([How it was built](#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. The projects, and how they compare: [docs/related.md](docs/related.md).
 
 ## Known limits
 
 Polarizer only sees calls routed through it: the agent's shell, its own file tools and servers configured directly in the client are outside it, and an agent whose call is refused can try another route. In the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take; nothing in Polarizer would have stopped it.
 
-- **Making Polarizer the only path to a tool** would mean denying the client's own shell and file tools in its permission settings; I have not tested that.
 - **Definitions, not behavior.** A server can change what a tool does without changing its definition.
 - **Paths only in the arguments you name.** Only top-level arguments listed in `path_args` are checked, not paths nested inside an argument or written in free text.
 - **A local chain, not a signature.** Someone who can write to the ledger directory can rewrite the ledger and its head together.
 - **Esc ends held calls.** Esc in Claude Code stops the Polarizer process, and every call it was holding is refused.
-- **Backgrounded after about 123 s.** In Claude Code 2.1.289 a waiting call moves to the background and the agent keeps working; the hold still waits for you.
-- **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
 - **A person who allows without reading.** Polarizer records that you allowed it; only drills measure it, and only in practice.
-- **A script can decide holds.** With `--allow-no-terminal`, `allow` and `approve` run without a terminal, so an agent that can run commands as you can allow its own held calls.
-- **A planted bare repository.** An agent can write a directory that looks like a bare git repository; its config runs code if you later run git inside it.
-- **Drill results come from invented scenarios and a person who knows they are being tested.**
-- **Drill reports' counts by kind of mistake are under review.** Some planted calls are labelled with one kind of mistake but match the rule for another.
+- **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
 
-Every limit, grouped: [docs/LIMITS.md](docs/LIMITS.md).
+Every limit, grouped, including the ones about drills: [docs/LIMITS.md](docs/LIMITS.md).
 
 ## Setup
 
@@ -255,7 +201,7 @@ polarizer deny --config "$CONFIG" <hold id> --reason "not that file"
 - `src/polarizer/`: the proxy, the ledger, pins, holds, drills and the command line; `src/polarizer/scenarios/` holds the drill scenarios.
 - `conformance/`: the ledger fixtures and the separately written reference verifier.
 - `tests/`: every test; `tests/test_readme.py` runs this README's commands.
-- `docs/`: the five specs, [the drill guide](docs/DRILL-GUIDE.md), [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
+- `docs/`: the five specs, [the drill guide](docs/DRILL-GUIDE.md), [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md), [related projects](docs/related.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
 - `docs/brand/`: the logo, drawn by `scripts/brand.py`. The parallel lines are calls that line up with what you approved; the one turned out of line is held ([what the mark means](docs/brand/README.md)).
 - `manual/`: the config for the interactive checks.
 - `scripts/`: `test.sh` runs every check, as CI does; the live and manual check scripts; `dev/guard.sh`, a guard for my own machine.
