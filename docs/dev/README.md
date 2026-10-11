@@ -12,7 +12,6 @@ The work went in stages: a spec round for each milestone, then implementation st
 - **releasing.md:** how a GitHub release reaches PyPI, and the trusted publisher values PyPI needs first. Kept current.
 - **guard.md:** what `scripts/dev/guard.sh` records and compares on the development machine, moved here from CLAUDE.md after v0.2.0. Unlike the rest of this directory, it is kept current.
 - **MANUAL-CHECK.md:** the interactive checks the owner ran with Claude Code, for M0, M1a and M2a. Their results are in docs/verified-facts.md.
-- **QUICKSTART-DRAFT.md:** the draft that README.md replaced.
-- **PUSHING.md:** the owner's steps for the first push to GitHub and reading CI.
+- **QUICKSTART-DRAFT.md and PUSHING.md** (removed after v0.2.0; read them at tag v0.2.0): the draft that README.md replaced, and the owner's steps for the first push to GitHub. The older notes still name them.
 
 File names written without a directory in these files (such as HOLD-SPEC.md) mean the file in docs/ or here, whichever has it. Two files were renamed for v0.1, and records made before then use the old names: `scripts/guard.sh` is now `scripts/dev/guard.sh`, and the manual check's config, `polarizer.example.toml`, is now `manual/polarizer.manual.toml` (`polarizer.example.toml` became the example for users).
