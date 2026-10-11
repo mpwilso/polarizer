@@ -7,7 +7,7 @@ polarizer: allow needs <hold id>
 polarizer: unrecognized arguments: --reason r
 polarizer: deny needs <hold id>
 polarizer: --reason is empty; leave it out or give a reason
-polarizer: deny needs a terminal; pass --allow-no-terminal if this is a script
+polarizer: deny needs a terminal: a person decides holds and approvals
 polarizer: --config must be an absolute path, got polarizer.toml
 polarizer: --no-holds goes with serve
 polarizer: --no-holds goes with serve

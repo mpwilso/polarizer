@@ -64,12 +64,30 @@ def test_allow_needs_terminal(tmp_path, capsys, fake_home, monkeypatch):
         out, err = capsys.readouterr()
         assert (out, err) == (
             "",
-            f"polarizer: {command} needs a terminal; pass --allow-no-terminal if this is a script\n",
+            f"polarizer: {command} needs a terminal: a person decides holds and approvals\n",
         )
         assert (directory / "ledger.jsonl").read_bytes() == before
     for command, hold in (("allow", hl.WRITE_PATTERN), ("deny", hl.UNCLASSIFIED)):
         assert run(command, "--ledger-dir", str(directory), hold) == 0
     capsys.readouterr()
+
+
+def test_no_terminal_refusal_does_not_name_the_flag(tmp_path, capsys, fake_home, monkeypatch):
+    """The refusal without a terminal must not tell an agent how to get past it: approve,
+    reject, allow and deny never name --allow-no-terminal in it."""
+    monkeypatch.setattr(cli, "_stdin_is_terminal", lambda: False)
+    directory = hl.mixed(tmp_path / "ledger")
+    h = "0" * 64
+    for argv in (
+        ["approve", "--ledger-dir", str(directory), "probe", "note", h],
+        ["reject", "--ledger-dir", str(directory), "probe", "note", h, "--reason", "r"],
+        ["allow", "--ledger-dir", str(directory), hl.WRITE_PATTERN],
+        ["deny", "--ledger-dir", str(directory), hl.UNCLASSIFIED],
+    ):
+        assert cli.main(argv) == 2, argv[0]
+        err = capsys.readouterr().err
+        assert "needs a terminal" in err, argv[0]
+        assert "--allow-no-terminal" not in err, argv[0]
 
 
 @POSIX

@@ -159,9 +159,9 @@ def _check_decision_args(args) -> None:
         if not fold_reason(args.reason):
             raise UsageError("reject needs --reason <text>")
     if not args.allow_no_terminal and not _stdin_is_terminal():
-        raise UsageError(
-            f"{args.command} needs a terminal; pass --allow-no-terminal if this is a script"
-        )
+        # The line doesn't name --allow-no-terminal: an agent's shell has no terminal, and the
+        # refusal shouldn't tell it how to decide its own held call.
+        raise UsageError(f"{args.command} needs a terminal: a person decides holds and approvals")
 
 
 _SEED = re.compile("[0-9a-f]{32}")

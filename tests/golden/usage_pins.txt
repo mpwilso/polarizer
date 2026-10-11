@@ -7,9 +7,9 @@ polarizer: approve needs <prefix> <tool> <def_hash>, or --group <group id>
 polarizer: approve needs <prefix> <tool> <def_hash>, or --group <group id>
 polarizer: approve needs <prefix> <tool> <def_hash>, or --group <group id>
 polarizer: --upstream goes with --group, not with one definition
-polarizer: approve needs a terminal; pass --allow-no-terminal if this is a script
+polarizer: approve needs a terminal: a person decides holds and approvals
 polarizer: reject needs <prefix> <tool> <def_hash>
 polarizer: reject needs --reason <text>
-polarizer: reject needs a terminal; pass --allow-no-terminal if this is a script
+polarizer: reject needs a terminal: a person decides holds and approvals
 polarizer: --config must be an absolute path, got polarizer.toml
 polarizer: unrecognized arguments: --bogus

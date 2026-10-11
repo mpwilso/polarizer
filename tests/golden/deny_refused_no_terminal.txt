@@ -1,1 +1,1 @@
-polarizer: deny needs a terminal; pass --allow-no-terminal if this is a script
+polarizer: deny needs a terminal: a person decides holds and approvals

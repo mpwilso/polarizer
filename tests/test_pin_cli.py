@@ -306,7 +306,7 @@ def test_approve_needs_terminal(tmp_path, capsys, fake_home, monkeypatch):
         assert cli.main(argv) == 2, name
         command = name.split()[0]
         assert capsys.readouterr().err == (
-            f"polarizer: {command} needs a terminal; pass --allow-no-terminal if this is a script\n"
+            f"polarizer: {command} needs a terminal: a person decides holds and approvals\n"
         )
     assert (directory / "ledger.jsonl").read_bytes() == before
     assert cli.main([*cases["approve --group"], "--allow-no-terminal"]) == 0
