@@ -7,6 +7,8 @@
 
 <p align="center"><b>Human in the loop only works if the human is still looking.</b></p>
 
+<p align="center"><img src="docs/img/demo.svg" alt="A terminal session: polarizer holds shows an agent's write to .git/hooks/pre-commit, held by the .git/hooks pattern with its exact arguments; polarizer deny refuses it, and the agent is told only that the call was not allowed" width="720"></p>
+
 <p align="center"><a href="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml"><img src="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg" alt="CI status"></a></p>
 
 Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools), pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a hash-chained ledger that `polarizer verify` checks. It also includes drills, offline practice sessions in which a person allows or denies invented calls and measures how well they catch the planted mistakes. It runs on your own machine, started by the agent's client, such as Claude Code. It guards only the calls that pass through it, not the agent's own shell or file tools.
@@ -208,7 +210,7 @@ polarizer deny --config "$CONFIG" <hold id> --reason "not that file"
 - `docs/`: the five specs, [the drill guide](docs/DRILL-GUIDE.md), [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md), [related projects](docs/related.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log.
 - `docs/brand/`: the logo, drawn by `scripts/brand.py`. The parallel lines are calls that line up with what you approved; the one turned out of line is held ([what the mark means](docs/brand/README.md)).
 - `manual/`: the config for the interactive checks.
-- `scripts/`: `test.sh` runs every check, as CI does; the live and manual check scripts; `dev/guard.sh`, a guard for my own machine.
+- `scripts/`: `test.sh` runs every check, as CI does; `demo.py` draws the terminal picture above from a real run against a test server; the live and manual check scripts; `dev/guard.sh`, a guard for my own machine.
 
 ## How it was built
 
