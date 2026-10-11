@@ -32,3 +32,19 @@ Branch `ci-scratch/rugpull-diag` (commit 6710435): `ci.yml` runs only five macos
 Run 38173063214: 221 iterations passed, 0 failed (44, 42, 45, 45 and 45 per job), 46 to 71 s each. That is about 1,550 runs of the script, 221 of them in tamper mode. No hang.
 
 So the hang is rare when the test file runs alone: under about 1 in 1,500 script runs.
+
+### 3. The same repeat under load on macOS (not caught)
+
+Hypothesis: the hang needs a busy machine, as in the full suite, where other tests start servers and scripts while the rug-pull check runs.
+
+Branch `ci-scratch/rugpull-load` (commit d102480): each of five macos-latest jobs loops the rug-pull test file for 40 minutes while a second loop runs the rest of the suite beside it, each with its own `--basetemp`. After a timeout the diagnostics now also watch for 60 s, to see which processes end and which stay, as bash ended and tee stayed in the failed job.
+
+Run 38178206865: 205 iterations passed, 0 failed (42, 39, 41, 40 and 43), about 1,435 script runs. The slowest single test call was 16.7 s, far from any timeout. The suite beside it ran 7 times per job (2 failures each time, from running beside another pytest; not looked into, since that loop was only load). No job printed an orphan process at cleanup.
+
+### 4. Real bash 3.2 on Linux (not reproduced)
+
+Hypothesis: the hang is in bash 3.2's job handling (the `wait` on tee, or a child's exit while the EXIT trap runs), which the emulation in `tests/helpers/slowtee.py` doesn't reproduce.
+
+bash 3.2.57 built from the GNU tarball (sha256 3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4) in a scratch directory outside the repo, at -O1 with gcc 13.3 (gcc crashed on subst.c at -O2). The shipped y.tab.c predates the later parse.y patches, so the build has one call fixed by hand and `parser_remaining_input` copied from parse.y; jobs.c and the wait code are 3.2.57's. A `bash` first on PATH made the test run it (checked through /proc/<pid>/exe). Six loops of the whole test file, 30 each: 180 passed, 0 failed, 0 hung, about 1,260 script runs.
+
+Not reproduced. Apple's /bin/bash has its own patches, so this rules out only stock 3.2.57 on Linux.
