@@ -157,6 +157,7 @@ Polarizer only sees calls routed through it: the agent's shell, its own file too
 - **Tried only with Claude Code, on Linux (WSL2).** CI runs on Windows and macOS; no live check has.
 - **A person who allows without reading.** Polarizer records that you allowed it; only drills measure it, and only in practice.
 - **A script can decide holds.** With `--allow-no-terminal`, `allow` and `approve` run without a terminal, so an agent that can run commands as you can allow its own held calls.
+- **A planted bare repository.** An agent can write a directory that looks like a bare git repository; its config runs code if you later run git inside it.
 - **Drill results come from invented scenarios and a person who knows they are being tested.**
 - **Drill reports' counts by kind of mistake are under review.** Some planted calls are labelled with one kind of mistake but match the rule for another.
 

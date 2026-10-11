@@ -25,6 +25,7 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - Paths are resolved when the call arrives. A symbolic link created or changed after that is not seen, and an upstream that sees a different file system (a container, another machine) resolves paths its own way.
 - A `~` in a hold pattern means the home directory in Polarizer's own `HOME` when it starts, not necessarily your account's home.
 - The built-in patterns protect Claude Code's settings in their default place. If you move them with `CLAUDE_CONFIG_DIR`, the patterns don't follow; add the new place to `write_hold_patterns`.
+- The built-in patterns protect git's own files under `.git`, but an agent can still write a directory anywhere in the workspace that looks like a bare git repository, with a config that runs code. It does nothing until a person runs git inside that directory, which git allows by default (`safe.bareRepository` is `all`).
 - On Windows, the device names `COM1` to `COM3` and `LPT1` to `LPT3` written with a superscript digit are not recognized as device names.
 - `polarizer.example.toml` uses POSIX paths. On native Windows, edit each one to a real absolute path with a drive, such as `C:/Users/<you>/...`; a `workspace_roots` entry without a drive is refused there as not absolute.
 

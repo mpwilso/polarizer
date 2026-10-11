@@ -5,7 +5,7 @@
 - `approve`, `reject`, `allow` and `deny` without a terminal refuse with `<command> needs a terminal: a person decides holds and approvals`. The line no longer names `--allow-no-terminal`, which told an agent, whose shell has no terminal, how to decide its own held call. The flag still works.
 - A decision made without a terminal (`tool.approved`, `tool.rejected` or `hold.decided`, written with `--allow-no-terminal`) has `terminal: false` in its data. One made on a terminal has no `terminal` key, as before.
 - The README's known limits say that a script with `--allow-no-terminal` can decide holds.
-- Writes to a submodule's hooks or config, `.git/modules/**/hooks/**` and `.git/modules/**/config`, are held by the built-in write list, as writes to `.git/hooks` and `.git/config` already were. The built-in list's version in the policy hash goes from 1 to 2, so every existing config's `policy_sha256` changes once.
+- Writes to a submodule's hooks or config, `.git/modules/**/hooks/**` and `.git/modules/**/config`, and to anything named `.git` at any depth (a gitfile can point git at another directory's config and hooks), are held by the built-in write list, as writes to `.git/hooks` and `.git/config` already were. The built-in list's version in the policy hash goes from 1 to 2, so every existing config's `policy_sha256` changes once.
 - CI runs with a read-only token, cancels a branch's older run when a newer push arrives, and runs pull requests only from forks, since a branch push already has its own run. Dependabot proposes GitHub Actions updates monthly, a week after each release.
 
 ## 0.1.0 (preview, released Oct 6, 2026)

@@ -111,7 +111,7 @@ The Filesystem tool names above are the 14 tools the pinned server lists, checke
   - Unknown keys are an error.
 - A tool named under `tools` that the upstream doesn't list is not an error: an upstream can add it later. It has no effect until listed.
 
-**The policy hash.** `policy_sha256 = hex(sha256(b"POLARIZER-POLICY/1\n" + rfc8785.dumps(form)))`, where `form` is `{"builtin_patterns": 2, "hold_timeout_seconds": <n>, "read_hold_patterns": [...], "upstreams": {<prefix>: {"tools": {<tool>: {"class": <c>, "path_args": [...]}}, "trust_annotations": <bool>}}, "workspace_roots": [<resolved roots>], "write_hold_patterns": [...]}`. Every upstream appears, with an empty `tools` table if it has none. `builtin_patterns` is a version number, raised whenever section 3's built-in lists change. (Oct 11, 2026) It went from 1 to 2 when the write list gained the submodule patterns (section 3, item 1), so every existing config's `policy_sha256` changes once, at the first start after upgrading; nothing compares it across sessions, and old `policy.loaded` entries keep the hash they recorded. `session.started` already records `config_sha256` over the file's bytes; the policy hash says what the parsed policy was.
+**The policy hash.** `policy_sha256 = hex(sha256(b"POLARIZER-POLICY/1\n" + rfc8785.dumps(form)))`, where `form` is `{"builtin_patterns": 2, "hold_timeout_seconds": <n>, "read_hold_patterns": [...], "upstreams": {<prefix>: {"tools": {<tool>: {"class": <c>, "path_args": [...]}}, "trust_annotations": <bool>}}, "workspace_roots": [<resolved roots>], "write_hold_patterns": [...]}`. Every upstream appears, with an empty `tools` table if it has none. `builtin_patterns` is a version number, raised whenever section 3's built-in lists change. (Oct 11, 2026) It went from 1 to 2 when the write list gained the submodule patterns and `.git` (section 3, item 1), so every existing config's `policy_sha256` changes once, at the first start after upgrading; nothing compares it across sessions, and old `policy.loaded` entries keep the hash they recorded. `session.started` already records `config_sha256` over the file's bytes; the policy hash says what the parsed policy was.
 
 ### Errors
 
@@ -203,7 +203,7 @@ A pattern is a `/`-separated list of parts, on every platform. In a part, `*` ma
 - **Separators:** a Windows path's `\` is read as `/` for matching.
 
 **Built-in write hold patterns,** always applied to every `local-write` path, in this order:
-1. `.git/hooks/**` and `.git/config` (a hooks path or `core.fsmonitor` in `.git/config` runs code), and the same for submodules, `.git/modules/**/hooks/**` and `.git/modules/**/config`: git runs a submodule's hooks from `.git/modules/<name>/hooks` and reads its config from `.git/modules/<name>/config`, a nested submodule's one `modules/<name>` deeper (added Oct 11, 2026; `builtin_patterns` 2);
+1. `.git/hooks/**` and `.git/config` (a hooks path or `core.fsmonitor` in `.git/config` runs code), and the same for submodules, `.git/modules/**/hooks/**` and `.git/modules/**/config`: git runs a submodule's hooks from `.git/modules/<name>/hooks` and reads its config from `.git/modules/<name>/config`, a nested submodule's one `modules/<name>` deeper; and `.git` itself at any depth, since a file named `.git` (a worktree's or a submodule's gitfile, `gitdir: <path>`) tells git which directory's config and hooks to use, and a write could also put a `.git` in place of the top repository's directory (added Oct 11, 2026; `builtin_patterns` 2). `.git` matches only a path whose last part is `.git`, so paths under a `.git` directory keep the pattern that held them before;
 2. `.github/workflows/**`;
 3. `~/.ssh/**`;
 4. `.env*`;
@@ -667,6 +667,7 @@ A canary is a hold that is never forwarded, offered to see whether the person ca
 | `test_rule_table` | One case per row of section 4's table (rows 1 to 20), each asserting action, rule and reason exactly; parametrized with the row number as its id. | Default |
 | `test_first_match_order` | A local-write call with two path arguments, the first outside the roots and the second on a pattern, records the first argument's rule; reversing the config order reverses it. | Default |
 | `test_builtin_patterns_cannot_be_removed` | Each built-in write and read pattern holds, with a config whose own lists are empty. | Default |
+| `test_a_gitfile_is_held` | A write to `<root>/.git`, `<root>/sub/.git` or `<root>/a/b/.git` is held by `write-pattern`, naming `.git`; paths under a `.git` directory still name the pattern that held them before, and `.git/HEAD`, `.github`, `.gitignore` and `notes.git` are not held by it. | Default |
 | `test_submodule_hooks_and_config_are_held` | A write to `.git/modules/sub/hooks/pre-commit`, `.git/modules/sub/config`, or the same one submodule deeper, is held by `write-pattern`, naming the submodule pattern. | Default |
 | `test_annotation_suggestions` | Each row of the suggestion table, plus no annotations (`destructive`) and a non-boolean hint (absent). | Default |
 | `test_contradiction_rank` | `local-read` configured and `destructive` suggested contradicts; `destructive` configured and `local-read` suggested doesn't; `local-read` against `open-world` doesn't. | Default |
@@ -885,5 +886,5 @@ The owner ran `scripts/hold-check.sh` interactively with Claude Code 2.1.289 (ve
 ### Review fixes (Oct 11, 2026)
 
 Two changes the owner decided, folded into the sections above.
-1. **Submodule hooks and config are held** (section 3, item 1). The built-in write list gains `.git/modules/**/hooks/**` and `.git/modules/**/config`, and `builtin_patterns` goes from 1 to 2 (section 2, The policy hash). Every existing config's `policy_sha256` changes once because of it; the ledger format, statuses and exit codes don't change.
+1. **Submodule hooks and config, and `.git` itself, are held** (section 3, item 1). The built-in write list gains `.git/modules/**/hooks/**`, `.git/modules/**/config` and `.git` (a gitfile at any depth can point git at a directory whose config runs code, which the review reproduced with `core.fsmonitor`), and `builtin_patterns` goes from 1 to 2 (section 2, The policy hash). Every existing config's `policy_sha256` changes once because of it; the ledger format, statuses and exit codes don't change.
 2. **A decision made without a terminal has `terminal: false`** in its `hold.decided` data (sections 5 and 8). A decision made on a terminal has no `terminal` key, as before.

@@ -336,6 +336,7 @@ WRITE_PATHS = {
     ".git/config": "<root>/.git/config",
     ".git/modules/**/hooks/**": "<root>/.git/modules/sub/hooks/pre-commit",
     ".git/modules/**/config": "<root>/.git/modules/sub/config",
+    ".git": "<root>/sub/.git",
     ".github/workflows/**": "<root>/.github/workflows/ci.yml",
     "~/.ssh/**": "<home>/.ssh/authorized_keys",
     ".env*": "<root>/.env",
@@ -418,6 +419,31 @@ def test_submodule_hooks_and_config_are_held(where):
         v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
         assert (v.action, v.rule) == ("hold", "write-pattern"), rel
         assert v.reason == f'argument "path": {path} matches {pattern}', rel
+
+
+def test_a_gitfile_is_held(where):
+    """A file named .git at any depth (a worktree's or a submodule's gitfile, "gitdir: <path>")
+    tells git where the repository, its config and its hooks are: a write to one is held, as is
+    a write that puts a .git in place of the top repository's directory."""
+    pol = make(where, x=R("local-write", ("path",)))
+    pol.resolver = lambda p: p  # already resolved, by construction
+    for rel in (".git", "sub/.git", "a/b/.git"):
+        path = str((where / "root").joinpath(*rel.split("/")))
+        v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
+        assert (v.action, v.rule) == ("hold", "write-pattern"), rel
+        assert v.reason == f'argument "path": {path} matches .git', rel
+    # Paths under a .git directory keep the pattern that held them before.
+    for rel, pattern in [
+        (".git/hooks/pre-commit", ".git/hooks/**"),
+        (".git/config", ".git/config"),
+        ("sub/.git/hooks", ".git/hooks/**"),
+    ]:
+        path = str((where / "root").joinpath(*rel.split("/")))
+        v = policy.evaluate(pol, "fs", "x", {"path": path}, {})
+        assert v.reason == f'argument "path": {path} matches {pattern}', rel
+    for rel in (".git/HEAD", "sub/.github", "a/.gitignore", "notes.git"):
+        path = str((where / "root").joinpath(*rel.split("/")))
+        assert policy.evaluate(pol, "fs", "x", {"path": path}, {}).rule == "inside-roots", rel
 
 
 def test_destructive_and_egress_name_the_path(where):
