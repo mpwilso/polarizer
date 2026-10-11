@@ -2,9 +2,7 @@
 
 A local proxy between an AI agent and its MCP servers. It holds risky calls for a person, lets routine work through, keeps a verifiable ledger, and measures whether the person's approvals still catch anything.
 
-Read these first, in this order: CLAUDE.md, docs/dev/m0-plan.md, docs/LEDGER-SPEC.md, docs/PROXY-SPEC.md, docs/PIN-SPEC.md, docs/HOLD-SPEC.md, docs/MEASURE-SPEC.md, docs/milestones.md, docs/verified-facts.md, docs/dev/STAGE1-NOTES.md, docs/dev/STAGE2-NOTES.md, docs/dev/STAGE3-NOTES.md, docs/dev/STAGE4-NOTES.md, docs/dev/STAGE5-NOTES.md, docs/dev/STAGE6-NOTES.md, docs/dev/STAGE7-NOTES.md, docs/dev/STAGE8-NOTES.md, then docs/PLAN.md if it exists. docs/dev/MANUAL-CHECK.md is for the owner, and README.md is for readers (it replaces docs/dev/QUICKSTART-DRAFT.md); read them when the task touches them. docs/dev/README.md says what the build log in docs/dev/ holds.
-
-docs/PLAN.md is background only. Draft 5 is deferred until after M0 is done. Where PLAN.md differs from docs/dev/m0-plan.md, LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md or milestones.md, those win. The "Corrections to PLAN.md" list in docs/dev/m0-plan.md stays until draft 5.
+Read these first: CLAUDE.md, docs/milestones.md, then the one spec the task touches (docs/LEDGER-SPEC.md for the ledger, docs/PROXY-SPEC.md for the proxy and command line, docs/PIN-SPEC.md for pins, docs/HOLD-SPEC.md for holds, docs/MEASURE-SPEC.md for drills and measurement). docs/verified-facts.md records what was checked and how. The stage notes and plans in docs/dev/ are the build log (docs/dev/README.md says what each holds): read them when a task needs history. docs/dev/MANUAL-CHECK.md is for the owner, and README.md is for readers; read them when the task touches them.
 
 ## Standing rules (never break these, even if asked mid-task; stop and flag instead)
 
@@ -24,20 +22,15 @@ Polarizer must not change Parallax, ISR or Loupe in any way unless the user give
 12. The Write and Edit tools can turn a 4-digit \uXXXX escape in the content you give them into the actual character. Never put \uXXXX or \UXXXXXXXX escapes in file content you write directly: build such characters with chr(), or write the file from a script, then check the result. Every .py file in this repo is ASCII-only; tests/test_source_ascii.py enforces it, and its exception list stays empty.
 13. Never create a .mcp.json at the repo root, and never add Polarizer to project-scope or user-scope MCP config. Polarizer is started only through an explicit --mcp-config file (the manual check uses manual/mcp.json), so development sessions in this directory never spawn it. On 2026-10-03, development sessions started here launched polarizer serve from the manual check's root .mcp.json at 22:24:57, 22:55:52 and 22:57:01 UTC and appended ledger entries 29 to 40 to ~/.local/share/polarizer (docs/verified-facts.md, Manual check follow-up).
 
-Enforcement: run `scripts/dev/guard.sh snapshot` at the start of a session and `scripts/dev/guard.sh check` at the end, and report the check output.
+Enforcement: run `scripts/dev/guard.sh snapshot` at the start of a session and `scripts/dev/guard.sh check` at the end, and report the check output. What the guard records and compares is in [docs/dev/guard.md](docs/dev/guard.md).
 
-- **Snapshots:** each snapshot is kept as `.guard/snapshot-<UTC timestamp>.txt` (gitignored). `check` compares against the newest one, or against a file named on the command line.
-- **Repos:** the guarded repos are in the gitignored `.guard-paths`: the Parallax, Loupe and ISR clones under ~/code, including parallax-backup-before-rewrite.
-- **~/.claude.json:** its size and mtime are informational only. Changes to its MCP config (hashes of the top-level `mcpServers` and of each guarded repo's `projects[<path>].mcpServers`) count as real changes. ~/.claude/settings.json is compared by metadata.
-- **Tool directories:** compared by metadata only; contents are never opened.
-  - **~/.local/share/parallax** (Parallax's runtime directory) is recorded as a summary: file count, total size, newest mtime, and one sha256 over the sorted path, size and mtime lines.
-  - **~/.config/parallax and ~/isr-notes** are recorded line by line (path, size, mtime).
-  - A search by name on Oct 2, 2026 found no Loupe or ISR directories under ~/.local/share, ~/.config or ~/.cache. Add any that appear later to the guard.
-- **Settings change, Oct 2, 2026, 20:21:58 UTC:** ~/.claude/settings.json grew from 433 to 3270 bytes between turns, when the user ran /auto-mode-setup. The user made that change; no session wrote it. It matters because user-scope settings apply to every claude run, including scripts/live-check.sh, so a live-check result depends on them. Never open the file; the guard compares it by metadata only. A new baseline snapshot was taken after the change.
-- **Root .mcp.json:** `check` prints a warning line and exits non-zero if ~/code/polarizer/.mcp.json exists (rule 13).
-- **Docs integrity check:** run `uv run python scripts/check_docs.py` (scripts/test.sh runs it too, so CI does). It checks CLAUDE.md, the Markdown files at the repo root and every Markdown file under docs/ for repeated paragraphs and lines, lines that end mid-sentence, table column counts, duplicate headings, a missing final newline, any character outside printable ASCII except the micro sign, relative links that name a missing file or heading, and images with no alt text, and exits non-zero on a finding. Run the script; don't retype the checks by hand.
-- **Old snapshots** are never deleted. `check` reads the older line-by-line format too, by summarizing it the same way.
-- **Not guarded:** the Windows-side Parallax clone on the Windows drive (the origin of parallax-backup-before-rewrite). It isn't under ~/code, and /mnt/c isn't mounted in this WSL distro, so the guard can't see it. Don't touch it.
+## Testing
+
+`scripts/test.sh` is the single test entry, and CI runs exactly it.
+
+pytest config already sets -q. Never add another -q on the command line: stacked quiet flags hide the summary line. For repeat-run loops, check the summary appears on run 1 before looping.
+
+Docs integrity check: run `uv run python scripts/check_docs.py` (scripts/test.sh runs it too, so CI does). It checks CLAUDE.md, the Markdown files at the repo root and every Markdown file under docs/ for repeated paragraphs and lines, lines that end mid-sentence, table column counts, duplicate headings, a missing final newline, any character outside printable ASCII except the micro sign, relative links that name a missing file or heading, and images with no alt text, and exits non-zero on a finding. Run the script; don't retype the checks by hand.
 
 ## Clean room
 
