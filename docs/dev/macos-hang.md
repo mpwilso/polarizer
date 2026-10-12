@@ -102,3 +102,18 @@ Tests: `tests/helpers/slowtee.py` gains `stuck_env`, a stand-in tee that copies 
 Local runs with the fix: the three script test files passed with bash 5.2.21 and with the bash 3.2.57 build (33 passed); four parallel loops of the rug-pull test file, 25 each, all passed (100 runs, about 800 script runs, 0 hung).
 
 Separately, a timed-out run of the rug-pull check in its tests now reports the whole output so far and `ps` and `lsof` of its own processes, then kills them (`tests/helpers/stuck.py`, with `tests/test_stuck.py`), so a different hang would leave evidence.
+
+### 8. The fix on macOS
+
+Two runs at once, on the fix's code.
+
+Branch `ci-scratch/fifo-synth` (commit 0be47b5), run 38190721824: the plumbing of iteration 7 with the fix (variant `fix`) in three jobs and without it (`orig`) in one, three drivers per job for 40 minutes; the driver's limit is now 30 s, and it reports any run over 5 s.
+
+| Variant | Jobs | Runs | Hangs | Runs over 5 s |
+| --- | --- | --- | --- | --- |
+| fix | 3 | 54,264 | 0 | 4, all with the whole output |
+| orig | 1 | 33,985 | 0 | 0 |
+
+The four slow runs (13.3, 17.3, 17.9 and 18.2 s) are the bug happening and the bound ending it: 100 polls of 0.1 s take 13 to 18 s on a busy runner, as each `sleep` is a process. The fix variant runs fewer times in 40 minutes because each exit waits for at least one 0.1 s poll. The control job happened to see no hang this time; at iteration 7's rate about 3 were expected.
+
+Branch `ci-scratch/fix-suite` (commit 00dd797, the fix commit plus a workflow), run 38190748936: one macOS job, the whole suite and then the rug-pull file 20 times in one pytest process, twice (round 1: 1606 passed in 2,059 s; round 2: 1606 passed in 1,998 s), about 340 script runs, none failed and none of the rug-pull tests other than the stuck-tee one took over 12 s.
