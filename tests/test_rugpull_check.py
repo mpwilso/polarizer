@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from helpers.raw import RawClient
 from helpers.slowtee import AtExit, slow_env
+from helpers.stuck import stuck_report
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "rugpull-check.sh"
@@ -172,7 +173,13 @@ def check(tmp_path):
             text=True,
         )
         at_exit.watch(proc)
-        stdout, stderr = proc.communicate(timeout=300)
+        report = None
+        try:
+            stdout, stderr = proc.communicate(timeout=300)
+        except subprocess.TimeoutExpired as e:  # rare, on macOS CI: docs/dev/macos-hang.md
+            report = stuck_report(proc, e, tmp_path)
+        if report is not None:
+            pytest.fail(report, pytrace=False)
         dirs["at_exit"] = at_exit.result()
         return proc.returncode, stdout + stderr, dirs
 
