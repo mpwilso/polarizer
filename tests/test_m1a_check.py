@@ -21,7 +21,7 @@ import mcp_types as types
 import pytest
 from conftest import build_chain
 from helpers.ptyread import finish, read_some
-from helpers.slowtee import AtExit, slow_env
+from helpers.slowtee import AtExit, slow_env, stuck_env
 
 from polarizer import cli, defhash
 
@@ -488,6 +488,25 @@ def test_output_is_written_before_exit_on_bash_3_2(check):
     assert at_exit.result().rstrip().endswith(stopped), at_exit.result()
     assert out.rstrip().endswith(stopped), out
     assert list(tmp.iterdir()) == []  # the pipe and its directory were removed
+
+
+@POSIX
+def test_a_tee_that_never_exits_does_not_hang_status(check):
+    """On macOS, tee once copied all the output and then never saw end of input, so a script
+    waited for it at exit for good (docs/dev/macos-hang.md). With a stand-in tee that does that,
+    status still exits, after its 10 s bound, with all of its output in the results file and on
+    the terminal."""
+    base, env = check
+    tmp = base / "tmp"  # where the named pipe to tee is made
+    tmp.mkdir()
+    stuck = stuck_env({**env, "TMPDIR": str(tmp)}, base)
+    results = base / "m1a-check-results.txt"
+
+    at_exit = AtExit(results)
+    code, out = drive(stuck, "status", on_start=at_exit.watch)
+    assert code == 0, out
+    assert at_exit.result().endswith("Next: scripts/m1a-check.sh reset\n"), at_exit.result()
+    assert out.rstrip().endswith("Next: scripts/m1a-check.sh reset"), out
 
 
 @POSIX

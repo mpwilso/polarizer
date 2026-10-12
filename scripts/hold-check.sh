@@ -122,9 +122,21 @@ start_output() {
   [ "$SIGNALLED" = 0 ] || on_signal
 }
 
+# tee exits once it sees end of input, within milliseconds. On macOS it once copied everything
+# and never saw end of input, and the wait below never returned (docs/dev/macos-hang.md). So
+# tee gets 10 s, far more than it needs for what is left, and is then stopped.
 end_output() {
+  local i
   if [ -n "$TEE_PID" ]; then
     exec >&- 2>&-
+    i=0
+    while [ "$i" -lt 100 ] && kill -0 "$TEE_PID" 2> /dev/null; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    if kill -0 "$TEE_PID" 2> /dev/null; then
+      kill -KILL "$TEE_PID" 2> /dev/null || true
+    fi
     wait "$TEE_PID" 2> /dev/null || true
   fi
 }

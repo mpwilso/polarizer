@@ -10,7 +10,11 @@ script that still waits on a process substitution then exits before the end of i
 written; one that waits for a real child doesn't.
 
 As a program: `slowtee.py [-a] FILE` copies standard input to standard output and to FILE,
-appending with -a, sleeping DELAY seconds before each write."""
+appending with -a, sleeping DELAY seconds before each write.
+
+stuck_env does the other thing macOS once did (docs/dev/macos-hang.md): its stand-in tee copies
+everything without delay and then never exits, as a tee that never sees end of input. As a
+program that is `slowtee.py --stuck [-a] FILE`."""
 
 import os
 import sys
@@ -47,6 +51,19 @@ def slow_env(env: dict, where: Path) -> dict:
     return {**env, "PATH": f"{bin_dir}:{env.get('PATH', '')}", "BASH_ENV": str(bash_env)}
 
 
+def stuck_env(env: dict, where: Path) -> dict:
+    """env with a stand-in tee first on PATH that copies everything, then never exits; its file
+    is written under where."""
+    bin_dir = where / "stucktee-bin"
+    bin_dir.mkdir(parents=True)
+    tee = bin_dir / "tee"
+    tee.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{__file__}" --stuck "$@"\n', encoding="utf-8"
+    )
+    tee.chmod(0o755)
+    return {**env, "PATH": f"{bin_dir}:{env.get('PATH', '')}"}
+
+
 class AtExit:
     """Reads a file the moment a process exits: call watch(proc) as soon as it has started."""
 
@@ -74,6 +91,9 @@ class AtExit:
 
 
 def main(args: list[str]) -> int:
+    stuck = args[:1] == ["--stuck"]
+    args = args[1:] if stuck else args
+    delay = 0 if stuck else DELAY
     append = args[:1] == ["-a"]
     path = args[1:] if append else args
     if len(path) != 1:
@@ -81,7 +101,7 @@ def main(args: list[str]) -> int:
         return 2
     with open(path[0], "ab" if append else "wb", buffering=0) as copy:
         while chunk := os.read(0, 65536):
-            time.sleep(DELAY)
+            time.sleep(delay)
             copy.write(chunk)
             try:
                 rest = memoryview(chunk)
@@ -89,6 +109,8 @@ def main(args: list[str]) -> int:
                     rest = rest[os.write(1, rest) :]
             except OSError:  # the terminal is gone; keep writing the file, as tee does
                 pass
+    while stuck:  # everything is copied; never exit, holding standard output open
+        time.sleep(60)
     return 0
 
 
