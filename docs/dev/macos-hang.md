@@ -48,3 +48,32 @@ Hypothesis: the hang is in bash 3.2's job handling (the `wait` on tee, or a chil
 bash 3.2.57 built from the GNU tarball (sha256 3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4) in a scratch directory outside the repo, at -O1 with gcc 13.3 (gcc crashed on subst.c at -O2). The shipped y.tab.c predates the later parse.y patches, so the build has one call fixed by hand and `parser_remaining_input` copied from parse.y; jobs.c and the wait code are 3.2.57's. A `bash` first on PATH made the test run it (checked through /proc/<pid>/exe). Six loops of the whole test file, 30 each: 180 passed, 0 failed, 0 hung, about 1,260 script runs.
 
 Not reproduced. Apple's /bin/bash has its own patches, so this rules out only stock 3.2.57 on Linux.
+
+### 5. Rug-pull runs after the whole suite, in the same pytest process (caught)
+
+Hypothesis: the hang needs what the full suite leaves behind (in the pytest process, or on the machine), since the one failure came mid-suite and 3,000 runs outside it passed.
+
+Branch `ci-scratch/rugpull-suite` (commit dd8c4c6): each of five macos-latest jobs runs `pytest --keep-duplicates tests` followed by the rug-pull file 20 times, in one pytest process, for 45 minutes (2 rounds per job, about 22 minutes each, so about 280 script runs per job).
+
+Run 38182880180, job 114598985865, round 1: `test_claude_exiting_nonzero_fails` timed out (120 s here) at 23:29:33. The diagnostics show:
+
+- **The script had finished.** Its output so far runs to the last line, `Paste the output of: cat .../results.txt`, and the checks are all there (6 of 9 failed, as that test expects).
+- **bash was in end_output's `wait "$TEE_PID" 2> /dev/null`:** its open descriptors were 0 (/dev/null), 2 (/dev/null, the `2> /dev/null` of the wait) and 255 (the script). Descriptor 1 was closed. bash held no pipe or fifo at all.
+- **tee was still reading the fifo, with nothing left to read:** tee had descriptor 0 on the fifo at offset 6251, and results.txt was 6251 bytes, so it had read and written everything. Its descriptors 1 and 2 were the pipes to pytest.
+- **No process held the fifo's write end:** `lsof -u runner`, filtered to FIFO lines, listed only tee's read end.
+- **Nothing changed in 60 more seconds:** bash and tee were both still there, in the same state.
+- The `sample` of tee printed only its image list (the diagnostics kept the last 6,000 characters), so its stack is not known.
+
+So the hang is not in the stub, serve or the probe: the script's work is done, the last writer of the fifo is closed, and tee never sees end of input, so `wait "$TEE_PID"` never returns. The failed run of 38168770514 fits the same picture (iteration 6).
+
+The other four jobs passed every round. This round's other 279 or so script runs passed.
+
+### 6. What the runner's orphan cleanup lists (calibration)
+
+Question: does "only tee was left" in the failed job mean bash had already exited?
+
+Branch `ci-scratch/orphan-calib` (commit 0982df9): one macOS job runs the real script with a stub claude that sleeps for an hour in run C, gives up after 40 s without killing anything, as pytest does, and ends the step.
+
+Run 38183397952: the cleanup printed `Terminate orphan process: pid (1911) (sleep)` and then `pid (1833) (bash)`, and nothing for tee (1842) or the run's subshell (1910), which were also alive. So the runner kills from the highest pid down and names only processes still alive when it reaches them: once sleep died the subshell ended, and once bash died tee saw end of input.
+
+Read against that, the failed job's single line `(tee)` means tee had the highest pid of the processes left, so the stub, serve and the subshells were gone, and once tee was killed, bash's `wait` returned and bash exited before the runner reached it. That is the state iteration 5 caught: bash waiting for tee at exit, tee never seeing end of input.
