@@ -12,7 +12,18 @@ TEE_PID=$!
 exec > "$DIR/tee" 2>&1
 [ "${VARIANT:-orig}" = keep ] || rm -- "$DIR/tee"
 end_output() {
+  local i
   exec >&- 2>&-
+  if [ "${VARIANT:-orig}" = fix ]; then
+    i=0
+    while [ "$i" -lt 100 ] && kill -0 "$TEE_PID" 2> /dev/null; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    if kill -0 "$TEE_PID" 2> /dev/null; then
+      kill -KILL "$TEE_PID" 2> /dev/null || true
+    fi
+  fi
   wait "$TEE_PID" 2> /dev/null || true
   rm -rf -- "$DIR"
 }

@@ -12,16 +12,22 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 deadline = time.monotonic() + float(sys.argv[1])
-runs = hangs = 0
+runs = hangs = slow = 0
 while time.monotonic() < deadline:
     runs += 1
     proc = subprocess.Popen(["bash", str(HERE / "skeleton.sh")], stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     threading.Thread(target=proc.wait, daemon=True).start()
+    started = time.monotonic()
     try:
-        out, err = proc.communicate(timeout=10)
-        if "Paste the output of" not in out:
+        out, err = proc.communicate(timeout=30)
+        took = time.monotonic() - started
+        complete = out.rstrip().split("\n")[-1].startswith("Paste the output of")
+        if not complete:
             print(f"run {runs}: short output: {out[-200:]!r} {err[-200:]!r}", flush=True)
+        if took > 5:
+            slow += 1
+            print(f"run {runs}: took {took:.1f} s, output complete: {complete}", flush=True)
     except subprocess.TimeoutExpired as e:
         hangs += 1
         so_far = (e.output or b"").decode("utf-8", "replace")
@@ -46,4 +52,4 @@ while time.monotonic() < deadline:
                 pass
         proc.wait()
         sys.stdout.flush()
-print(f"variant {os.environ.get('VARIANT', 'orig')}: runs {runs} hangs {hangs}", flush=True)
+print(f"variant {os.environ.get('VARIANT', 'orig')}: runs {runs} hangs {hangs} over 5 s {slow}", flush=True)

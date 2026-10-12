@@ -15,11 +15,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { shard: 1, variant: orig }
-          - { shard: 2, variant: orig }
-          - { shard: 3, variant: orig }
-          - { shard: 4, variant: keep }
-          - { shard: 5, variant: keep }
+          - { shard: 1, variant: fix }
+          - { shard: 2, variant: fix }
+          - { shard: 3, variant: fix }
+          - { shard: 4, variant: orig }
     env:
       UV_PYTHON: "3.12"
       HANG_TIMEOUT: "120"
