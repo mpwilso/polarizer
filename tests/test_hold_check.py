@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from helpers.ptyread import finish, read_some
 from helpers.raw import RawClient
-from helpers.slowtee import AtExit, slow_env
+from helpers.slowtee import AtExit, slow_env, stuck_env
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "hold-check.sh"
@@ -375,6 +375,25 @@ def test_output_is_written_before_exit_on_bash_3_2(check):
     assert at_exit.result().endswith("-- reset: complete\n\n" + START + "\n"), at_exit.result()
     assert out.rstrip().endswith("-- reset: complete\n\n" + START), out
     assert list(tmp.iterdir()) == []  # the pipe and its directory were removed
+
+
+@POSIX
+def test_a_tee_that_never_exits_does_not_hang_status(check):
+    """On macOS, tee once copied all the output and then never saw end of input, so a script
+    waited for it at exit for good (docs/dev/macos-hang.md). With a stand-in tee that does that,
+    status still exits, after its 10 s bound, with all of its output in the results file and on
+    the terminal."""
+    base, env = check
+    tmp = base / "tmp"  # where the named pipe to tee is made
+    tmp.mkdir()
+    stuck = stuck_env({**env, "TMPDIR": str(tmp)}, base)
+    results = base / "hold-check-results.txt"
+
+    at_exit = AtExit(results)
+    code, out = drive(stuck, "status", on_start=at_exit.watch)
+    assert code == 0, out
+    assert at_exit.result().endswith("Next: scripts/hold-check.sh reset\n"), at_exit.result()
+    assert out.rstrip().endswith("Next: scripts/hold-check.sh reset"), out
 
 
 # --- scripts/hold_check.py, on every platform

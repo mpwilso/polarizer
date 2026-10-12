@@ -77,3 +77,28 @@ Branch `ci-scratch/orphan-calib` (commit 0982df9): one macOS job runs the real s
 Run 38183397952: the cleanup printed `Terminate orphan process: pid (1911) (sleep)` and then `pid (1833) (bash)`, and nothing for tee (1842) or the run's subshell (1910), which were also alive. So the runner kills from the highest pid down and names only processes still alive when it reaches them: once sleep died the subshell ended, and once bash died tee saw end of input.
 
 Read against that, the failed job's single line `(tee)` means tee had the highest pid of the processes left, so the stub, serve and the subshells were gone, and once tee was killed, bash's `wait` returned and bash exited before the runner reached it. That is the state iteration 5 caught: bash waiting for tee at exit, tee never seeing end of input.
+
+### 7. The output plumbing alone, many times (reproduced)
+
+Hypothesis: the hang is in macOS's named pipes or tee, not in the check's work, so the plumbing alone hangs at some rate.
+
+Branch `ci-scratch/fifo-synth` (commit 16ccd0e): `ci-synth/skeleton.sh` is the script's output plumbing as it is (`mkfifo`, tee as a job reading the pipe, `exec > pipe 2>&1`, the pipe removed, the same traps and `end_output`) with a stand-in body: about 1 KB of lines, command substitutions, a subshell running `/bin/sh` with redirections, files written. `ci-synth/drive.py` runs it as the test fixture does (pipes, a thread in `proc.wait()`, `communicate(timeout=10)`), and on a hang prints ps, lsof, every FIFO open by the user, and a `sample` call graph of bash and tee. Three drivers ran side by side in each of five macOS jobs for 40 minutes. The variant `keep` leaves the pipe's name in place until exit.
+
+Run 38186702689:
+
+| Variant | Jobs | Runs | Hangs |
+| --- | --- | --- | --- |
+| orig | 3 | 106,772 | 10 |
+| keep | 2 | 73,002 | 4 |
+
+Every hang is the state iteration 5 caught: the whole output written, bash in `wait4` (its call graph ends in `__wait4`), tee in `read` (its call graph is `start`, then `read`), tee's descriptor 0 on the pipe with everything read, and no process of the user holding the pipe's write end. So on this runner (macOS 26.6.2, arm64), a reader blocked on a named pipe sometimes never sees end of input after the last writer closes, about once in 10,000 runs of this plumbing. Leaving the pipe's name in place does not stop it. The kernel cause was not looked into further.
+
+## The fix
+
+The three scripts that use this plumbing (`scripts/rugpull-check.sh`, `scripts/hold-check.sh` and `scripts/m1a-check.sh`) now give tee 10 s to exit after the script closes its end of the pipe, polling every 0.1 s, then kill it (tee ignores INT and TERM, so with SIGKILL) and reap it. In the stuck state tee has already copied everything, so nothing is lost. A tee that is only slow has its usual milliseconds, and 10 s is far more than it needs for what can be left in a pipe. A normal exit is up to 0.1 s slower. The loop counts with `i=$((i + 1))` rather than `for i in $(seq ...)`, because m1a-check.sh changes IFS in places; the first version used `seq`, and `test_m1a_check.py::test_output_is_written_before_exit_on_bash_3_2` caught it (the loop ran once and tee was killed before its last line).
+
+Tests: `tests/helpers/slowtee.py` gains `stuck_env`, a stand-in tee that copies everything and then never exits. Each script has a test with it: `test_rugpull_check.py::test_a_tee_that_never_exits_does_not_hang_the_script`, and `test_a_tee_that_never_exits_does_not_hang_status` in `test_hold_check.py` and `test_m1a_check.py`. Before the fix they failed: `rugpull-check.sh did not finish in 120 s` (its output ending at `rugpull check passed`), and `hold-check.sh status still running after 60 s` and `m1a-check.sh status still running after 60 s`. After it they pass in about 16, 10 and 10 s.
+
+Local runs with the fix: the three script test files passed with bash 5.2.21 and with the bash 3.2.57 build (33 passed); four parallel loops of the rug-pull test file, 25 each, all passed (100 runs, about 800 script runs, 0 hung).
+
+Separately, a timed-out run of the rug-pull check in its tests now reports the whole output so far and `ps` and `lsof` of its own processes, then kills them (`tests/helpers/stuck.py`, with `tests/test_stuck.py`), so a different hang would leave evidence.

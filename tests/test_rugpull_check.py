@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from helpers.raw import RawClient
-from helpers.slowtee import AtExit, slow_env
+from helpers.slowtee import AtExit, slow_env, stuck_env
 from helpers.stuck import stuck_report
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,9 +138,10 @@ def check(tmp_path):
     stub.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{STUB}" "$@"\n', encoding="utf-8")
     stub.chmod(0o755)
 
-    def run(mode="", testing=True, extra=None, slow=False):
-        """slow: as bash 3.2 would, with a slow tee (tests/helpers/slowtee.py); the results
-        file's text when the script exited is then in dirs["at_exit"]."""
+    def run(mode="", testing=True, extra=None, slow=False, stuck=False, limit=300):
+        """slow: as bash 3.2 would, with a slow tee (tests/helpers/slowtee.py); stuck: with a
+        tee that never exits. The results file's text when the script exited is in
+        dirs["at_exit"]. limit: seconds the script may take."""
         base = tmp_path / (mode or "normal")
         dirs = {name: base / name for name in ("tmp", "home", "stub")}
         for d in dirs.values():
@@ -163,6 +164,8 @@ def check(tmp_path):
         env.update(extra or {})
         if slow:
             env = slow_env(env, base)
+        if stuck:
+            env = stuck_env(env, base)
         at_exit = AtExit(dirs["results"])
         proc = subprocess.Popen(
             ["bash", str(SCRIPT)],
@@ -175,7 +178,7 @@ def check(tmp_path):
         at_exit.watch(proc)
         report = None
         try:
-            stdout, stderr = proc.communicate(timeout=300)
+            stdout, stderr = proc.communicate(timeout=limit)
         except subprocess.TimeoutExpired as e:  # rare, on macOS CI: docs/dev/macos-hang.md
             report = stuck_report(proc, e, tmp_path)
         if report is not None:
@@ -326,6 +329,17 @@ def test_output_is_written_before_exit_on_bash_3_2(check):
     """With bash 3.2's wait and a tee that is slow to start (tests/helpers/slowtee.py), the
     whole output is in the results file by the time the script exits."""
     code, out, dirs = check(slow=True)
+    assert code == 0, out
+    assert out.rstrip().endswith(f"Paste the output of: cat {dirs['results']}"), out
+    assert dirs["at_exit"] == out
+
+
+@POSIX
+def test_a_tee_that_never_exits_does_not_hang_the_script(check):
+    """On macOS, tee once copied all the output and then never saw end of input, so the script
+    waited for it at exit for good (docs/dev/macos-hang.md). With a stand-in tee that does that,
+    the script still exits, after its 10 s bound, with all of its output in the results file."""
+    code, out, dirs = check(stuck=True, limit=120)
     assert code == 0, out
     assert out.rstrip().endswith(f"Paste the output of: cat {dirs['results']}"), out
     assert dirs["at_exit"] == out
