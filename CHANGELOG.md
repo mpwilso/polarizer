@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (preview, released Oct 11, 2026)
 
 - `polarizer init --from <path>` reads an MCP config in Claude Code's `mcpServers` shape and prints a polarizer.toml with its stdio servers as upstreams, and the `mcp.json` that starts `polarizer serve` with it; `--write <dir>` creates both files instead, never over an existing one. It never writes Claude Code or MCP config. A server it can't express, such as an HTTP or SSE server, is listed on stderr and in the file with the reason, and an `env` value that looks like a secret is written as a `"${NAME}"` placeholder that `serve` reads from its environment (docs/PROXY-SPEC.md, Starting from an existing MCP config).
 - The README is shorter: its proof and limits are summaries, the example hold moved to docs/EVIDENCE.md, the related projects to docs/related.md, and the dropped limits to docs/LIMITS.md. Invariant's mcp-scan now links Snyk's agent-scan, where its repository redirects.
