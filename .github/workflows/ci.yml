@@ -8,13 +8,18 @@ permissions:
 
 jobs:
   hang:
-    name: macos hang hunt ${{ matrix.shard }}
+    name: fifo synth ${{ matrix.shard }} ${{ matrix.variant }}
     runs-on: macos-latest
     timeout-minutes: 70
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        include:
+          - { shard: 1, variant: orig }
+          - { shard: 2, variant: orig }
+          - { shard: 3, variant: orig }
+          - { shard: 4, variant: keep }
+          - { shard: 5, variant: keep }
     env:
       UV_PYTHON: "3.12"
       HANG_TIMEOUT: "120"
@@ -26,29 +31,11 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           version: "0.12.19"
-      - name: Install
-        run: uv sync --locked
-      - name: Where things are
+      - name: Three drivers for 40 minutes
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
-          command -v bash; bash --version | head -n 1; /bin/bash --version | head -n 1
-          command -v tee; sw_vers; sysctl -n hw.ncpu
-      - name: Loop the rugpull script tests for 40 minutes
-        run: |
-          export HANG_LOG="$RUNNER_TEMP/hang.log"
-          : > "$HANG_LOG"
-          end=$(( $(date +%s) + 2400 ))
-          i=0; ok=0; bad=0
-          while [ "$(date +%s)" -lt "$end" ]; do
-            i=$((i + 1))
-            start=$(date +%s)
-            if uv run --locked pytest -p no:cacheprovider tests/test_rugpull_check.py > "$RUNNER_TEMP/out.txt" 2>&1; then
-              ok=$((ok + 1)); echo "iteration $i passed in $(( $(date +%s) - start )) s"
-            else
-              bad=$((bad + 1)); echo "iteration $i FAILED in $(( $(date +%s) - start )) s"
-              tail -n 60 "$RUNNER_TEMP/out.txt"
-            fi
-          done
-          echo "iterations: $i passed: $ok failed: $bad"
-          echo "=== hang log"
-          cat "$HANG_LOG"
-          [ "$bad" = 0 ]
+          for n in 1 2 3; do python3 ci-synth/drive.py 2400 > "$RUNNER_TEMP/drive-$n.txt" 2>&1 & done
+          wait
+          cat "$RUNNER_TEMP"/drive-*.txt
+          ! grep -q '=== HANG' "$RUNNER_TEMP"/drive-*.txt
