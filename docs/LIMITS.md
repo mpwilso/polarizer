@@ -1,6 +1,6 @@
 # Known limits
 
-Every stated limit of Polarizer 0.1, grouped. They come from the specs and [verified-facts.md](verified-facts.md), and [README.md](../README.md#known-limits) names the most important. A limit leaves this file only when the code or a recorded check changes it.
+Every stated limit of Polarizer, grouped. They come from the specs and [verified-facts.md](verified-facts.md), and [README.md](../README.md#known-limits) names the most important. A limit leaves this file only when the code or a recorded check changes it.
 
 Polarizer only sees calls routed through it; the agent's own shell, its file tools and MCP servers configured directly in the client are outside it, and an agent whose call is refused can try another route itself. In the M2a check, the model whose move was refused named Bash `mv` as a route it chose not to take; nothing in Polarizer would have stopped it. Making Polarizer the only path to a tool would mean denying the client's own shell and file tools in its permission settings, which has not been tested.
 

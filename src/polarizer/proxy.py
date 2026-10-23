@@ -903,7 +903,7 @@ class Gateway:
             kinds = ", ".join(sorted({INPUT_KINDS.get(r.method, r.method) for r in asked}))
             line = (
                 f"polarizer: upstream {upstream.prefix} asked the client for {kinds or 'input'}; "
-                "Polarizer 0.1 does not forward these"
+                "Polarizer does not forward these"
             )
             return await self._reply_error(line, "unsupported", finish)
         if result.is_error:

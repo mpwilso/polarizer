@@ -8,3 +8,9 @@ updates:
     # caught and pulled.
     cooldown:
       default-days: 7
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
