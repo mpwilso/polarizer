@@ -1,7 +1,7 @@
 [project]
 name = "polarizer"
 version = "0.3.0"
-description = "A local MCP gateway that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
+description = "A local MCP proxy that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

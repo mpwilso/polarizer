@@ -647,7 +647,7 @@ def test_readme_layout():
     assert 'srcset="docs/brand/lockup-dark.svg"' in README
     assert "<b>Human in the loop only works if the human is still looking.</b>" in README
     status = README[README.index("\nStatus: ") :].split("\n\n")[0]
-    assert status.startswith("\nStatus: v0.3, a preview. Built: the gateway and its ledger, ")
+    assert status.startswith("\nStatus: v0.3, a preview. Built: the proxy and its ledger, ")
     assert re.search(r"\bM\d", status) is None
     assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
     assert "(docs/LIMITS.md)" in section("Known limits")

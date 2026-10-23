@@ -17,11 +17,11 @@ polarizer --help
 polarizer drill --calls 10 --condition guided
 ```
 
-Polarizer is a local MCP gateway: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools). It pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a hash-chained ledger that `polarizer verify` checks. It runs on your own machine, started by the agent's client, such as Claude Code, and it guards only the calls that pass through it, not the agent's own shell or file tools.
+Polarizer is a local MCP proxy: it sits between an AI agent and the MCP servers it uses (MCP is the protocol AI agents use to call outside tools). It pins the tool definitions you approved, holds risky calls until a person allows them, and keeps a hash-chained ledger that `polarizer verify` checks. It runs on your own machine, started by the agent's client, such as Claude Code, and it guards only the calls that pass through it, not the agent's own shell or file tools.
 
 It also includes drills: offline practice sessions in which a person allows or denies invented calls, which measure how well they catch the planted mistakes.
 
-Status: v0.3, a preview. Built: the gateway and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running gateway, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
+Status: v0.3, a preview. Built: the proxy and its ledger, pins on tool definitions, holds by tool class and path, and drills ([docs/MEASURE-SPEC.md](docs/MEASURE-SPEC.md)). Not built: statistics over real holds, live planted calls inside a running proxy, holds after the agent reads untrusted content, and an approval page. Drills are practice sessions with invented scenarios, not measurements of a person's real approvals, and no results from people exist yet beyond the author's own tool checks.
 
 Jump to [a drill](#try-a-drill), [an example hold](docs/EVIDENCE.md#the-hold-example), [the proof](#proof), [the limits](#known-limits), [setup](#setup) or [how it was built](#how-it-was-built).
 
@@ -104,7 +104,7 @@ Every entry in the ledger is one line of canonical JSON (RFC 8785) holding the p
 
 ## Related projects
 
-Pins, holds and tamper-evident logs exist in several other MCP gateways and scanners, and Polarizer credits three of mcpclerk's ideas ([How it was built](#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. The projects, and how they compare: [docs/related.md](docs/related.md).
+Pins, holds and tamper-evident logs exist in several other MCP proxies and scanners, and Polarizer credits three of mcpclerk's ideas ([How it was built](#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. The projects, and how they compare: [docs/related.md](docs/related.md).
 
 ## Known limits
 
@@ -234,7 +234,7 @@ The point of the project is the measurement: whether a person's approvals still 
 
 1. **Statistics over real holds (stage 9):** how often you allow, how fast, by tool and rule, with a warning when decisions get faster while the approval rate stays flat.
 2. **The approval card (M3):** a local page that shows a held call, what it would change, why it was held and its history.
-3. **Live planted calls:** planted holds inside a running gateway, opt-in, each revealed once it ends.
+3. **Live planted calls:** planted holds inside a running proxy, opt-in, each revealed once it ends.
 4. **Taint (M2b):** holding outgoing calls after the agent has read untrusted content, and rules on argument values and domains.
 
 MIT license: [LICENSE](LICENSE).

@@ -1,6 +1,6 @@
 # Related projects
 
-Other MCP gateways and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
+Other MCP proxies and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
 
 - [mcpclerk](https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command.
 - [mcpproxy-go](https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
