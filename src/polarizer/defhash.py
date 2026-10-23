@@ -15,6 +15,7 @@ import mcp_types as types
 import rfc8785
 from mcp_types.methods import serialize_server_result
 
+from polarizer.ledgerdir import make_private
 from polarizer.upstream import describe
 
 PREFIX = b"POLARIZER-TOOLDEF/1\n"
@@ -99,11 +100,7 @@ def write_copy(ledger_dir: Path, def_hash: str, canon: bytes) -> bool:
     final = defs / f"{def_hash}.json"
     if final.exists():
         return False
-    try:
-        defs.mkdir(mode=0o700)
-        os.chmod(defs, 0o700)  # mkdir's mode is narrowed by the umask, never widened
-    except FileExistsError:
-        pass
+    make_private(defs)
     tmp = defs / f"{def_hash}.json.tmp-{os.getpid()}-{secrets.token_hex(4)}"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     try:

@@ -32,7 +32,6 @@ every session proven ended are recorded as hold.abandoned.
 import asyncio
 import functools
 import json
-import os
 import secrets
 import threading
 import time
@@ -52,6 +51,7 @@ from polarizer import __version__, defhash, lock, pins
 from polarizer import policy as policy_mod
 from polarizer.canon import MAX_INT, EntryRefused
 from polarizer.holds import SESSIONS, HoldState, session_state
+from polarizer.ledgerdir import make_private
 from polarizer.pins import PinState
 from polarizer.sidefiles import ArgsProblem, read_args, write_args
 from polarizer.text import safe
@@ -265,11 +265,7 @@ class Gateway:
         directory = self.writer.ledger_dir / SESSIONS
         path = directory / f"{self.session}.lock"
         try:
-            try:
-                directory.mkdir(mode=0o700)
-                os.chmod(directory, 0o700)  # mkdir's mode is narrowed by the umask
-            except FileExistsError:
-                pass
+            make_private(directory)
             self.session_lock = lock.take_session(path)
         except OSError as e:
             where, why = safe(str(path), 1024), safe(e.strerror or describe(e))

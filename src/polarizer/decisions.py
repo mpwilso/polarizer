@@ -50,15 +50,8 @@ class Decider:
         in the same pass. Raises Refusal: no ledger (2), or a ledger that isn't intact (the
         status's code, with serve's line). `ops` is the writer's file layer (tests)."""
         ledger_dir = Path(ledger_dir)
-        path = ledger_dir / LEDGER
-        if not path.is_file() or path.stat().st_size == 0:
-            raise Refusal(f"polarizer: no ledger at {ledger_dir}")
         state = PinState()
-        try:
-            writer = LedgerWriter.open(ledger_dir, on_entry=state.apply, ops=ops)
-        except LedgerError as e:
-            raise Refusal(e.line, e.exit_code) from None
-        return cls(ledger_dir, writer, state)
+        return cls(ledger_dir, _open_existing(ledger_dir, state.apply, ops), state)
 
     def close(self) -> None:
         self.writer.close()
@@ -146,6 +139,19 @@ class Decider:
         out(f"rejected {name} {def_hash} at seq {done.seq}")
 
 
+def _open_existing(ledger_dir: Path, on_entry, ops: FileOps | None) -> LedgerWriter:
+    """The writer both deciders open: 2 s lock wait, full verification, with `on_entry` fed
+    every entry of the pass. Raises Refusal: no ledger (2), or a ledger that isn't intact (the
+    status's code, with serve's line). Nothing here creates a ledger."""
+    path = ledger_dir / LEDGER
+    if not path.is_file() or path.stat().st_size == 0:
+        raise Refusal(f"polarizer: no ledger at {ledger_dir}")
+    try:
+        return LedgerWriter.open(ledger_dir, on_entry=on_entry, ops=ops)
+    except LedgerError as e:
+        raise Refusal(e.line, e.exit_code) from None
+
+
 def _marked(data: dict, terminal: bool) -> dict:
     """A decision's data, with terminal false when it was made without a terminal."""
     return data if terminal else {**data, "terminal": False}
@@ -173,17 +179,9 @@ class HoldDecider:
         """As Decider.open: 2 s lock wait, full verification, pin state and holds folded in the
         same pass. Raises Refusal."""
         ledger_dir = Path(ledger_dir)
-        path = ledger_dir / LEDGER
-        if not path.is_file() or path.stat().st_size == 0:
-            raise Refusal(f"polarizer: no ledger at {ledger_dir}")
         pin_state, hold_state = PinState(), HoldState()
-        try:
-            writer = LedgerWriter.open(
-                ledger_dir, on_entry=listener(pin_state.apply, hold_state.apply), ops=ops
-            )
-        except LedgerError as e:
-            raise Refusal(e.line, e.exit_code) from None
-        return cls(ledger_dir, writer, hold_state)
+        on_entry = listener(pin_state.apply, hold_state.apply)
+        return cls(ledger_dir, _open_existing(ledger_dir, on_entry, ops), hold_state)
 
     def close(self) -> None:
         self.writer.close()
