@@ -467,6 +467,16 @@ def test_absolute_links_are_well_formed():
 DRILL_COMMANDS = ["polarizer drill --calls 10 --condition guided", "polarizer drill report"]
 
 
+def test_block_under_the_badge_is_install_help_and_drill():
+    """Directly under the CI badge, before the lead paragraph, a three-line block: Setup's
+    install line as it is, polarizer --help, then the drill command Try a drill shows."""
+    [block] = blocks("sh", README[: README.index("\n## ")])
+    assert block.splitlines() == [commands()[0], "polarizer --help", DRILL_COMMANDS[0]]
+    badge = README.index('alt="CI status"></a></p>\n')
+    after_badge = README[README.index("\n", badge) + 1 :]
+    assert after_badge.startswith("\n```sh\n" + block + "```\n\nPolarizer is a local MCP ")
+
+
 def test_try_a_drill_commands():
     """The section's sh block is exactly the drill and the report, it links the guide, and it
     says the drill is offline."""
