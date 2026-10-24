@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.3.0 (preview, released Oct 11, 2026)
+## Unreleased (0.3.0, a preview)
 
+- The README is restructured and about half as long: the setup moved to docs/SETUP.md, the directory listing and the test notes to CONTRIBUTING.md, the credits to docs/related.md, and the how-it-works picture replaces the text diagram. It installs the v0.2.0 release and says that 0.3.0 is unreleased; `tests/test_readme.py` and `tests/test_drill_guide.py` check the install lines against the newest released heading here, and `tests/test_readme_rules.py` holds the README to its length, dash, placeholder and wording rules.
 - `polarizer init --from <path>` reads an MCP config in Claude Code's `mcpServers` shape and prints a polarizer.toml with its stdio servers as upstreams, and the `mcp.json` that starts `polarizer serve` with it; `--write <dir>` creates both files instead, never over an existing one. It never writes Claude Code or MCP config. A server it can't express, such as an HTTP or SSE server, is listed on stderr and in the file with the reason, and an `env` value that looks like a secret is written as a `"${NAME}"` placeholder that `serve` reads from its environment (docs/PROXY-SPEC.md, Starting from an existing MCP config).
 - The README is shorter: its proof and limits are summaries, the example hold moved to docs/EVIDENCE.md, the related projects to docs/related.md, and the dropped limits to docs/LIMITS.md. Invariant's mcp-scan now links Snyk's agent-scan, where its repository redirects.
 - The README shows a terminal picture of a held write to `.git/hooks` being denied, drawn by `scripts/demo.py` from a real run against the repository's test server; a test checks it against a fresh run.

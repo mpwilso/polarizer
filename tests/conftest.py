@@ -12,6 +12,14 @@ sys.path.insert(0, str(CONFORMANCE))
 sys.path.insert(0, str(ROOT / "tools"))
 
 
+def released_version() -> str:
+    """The newest released version: the first "## x.y.z" heading in CHANGELOG.md, below any
+    Unreleased heading. The install lines in README.md, docs/SETUP.md and docs/DRILL-GUIDE.md
+    name its tag, so a version that is on master but not released is never pointed at."""
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    return re.search(r"^## (\d+\.\d+\.\d+)", text, re.M).group(1)
+
+
 def expected():
     return json.loads((CONFORMANCE / "expected.json").read_text(encoding="utf-8"))
 

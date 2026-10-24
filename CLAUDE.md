@@ -2,7 +2,7 @@
 
 A local proxy between an AI agent and its MCP servers. It holds risky calls for a person, lets routine work through, keeps a verifiable ledger, and measures whether the person's approvals still catch anything.
 
-Read these first: CLAUDE.md, docs/milestones.md, then the one spec the task touches (docs/LEDGER-SPEC.md for the ledger, docs/PROXY-SPEC.md for the proxy and command line, docs/PIN-SPEC.md for pins, docs/HOLD-SPEC.md for holds, docs/MEASURE-SPEC.md for drills and measurement). docs/verified-facts.md records what was checked and how. The stage notes and plans in docs/dev/ are the build log (docs/dev/README.md says what each holds): read them when a task needs history. docs/dev/MANUAL-CHECK.md is for the owner, and README.md is for readers; read them when the task touches them.
+Read these first: docs/milestones.md, then the one spec the task touches (docs/LEDGER-SPEC.md for the ledger, docs/PROXY-SPEC.md for the proxy and command line, docs/PIN-SPEC.md for pins, docs/HOLD-SPEC.md for holds, docs/MEASURE-SPEC.md for drills and measurement). docs/verified-facts.md records what was checked and how. The stage notes and plans in docs/dev/ are the build log (docs/dev/README.md says what each holds): read them when a task needs history. docs/dev/MANUAL-CHECK.md is for the owner, and README.md is for readers; read them when the task touches them.
 
 ## Standing rules (never break these, even if asked mid-task; stop and flag instead)
 
@@ -39,4 +39,4 @@ Nothing from mcpclerk's code goes in this repo: no code, text or structure copie
 - tools hidden from the list are still refused and recorded when called by name;
 - an approve-everything switch that exists only as a command-line flag, never in the policy file.
 
-Only original work goes in this repo. Credit other ideas in the README's prior art.
+Only original work goes in this repo. Credit other ideas in docs/related.md, under Related projects or Credits.

@@ -10,7 +10,7 @@ a tool directory of the test's own, when uv's cache holds every package the inst
 offline dry run of the same install decides, and the test is skipped, naming the package,
 only when that dry run fails for want of a cached package. A fresh machine's cache is empty
 (CI run 37361705150). The three lines that fetch the project from GitHub are not run: the
-release line's URL is parsed, and must name this version's tag and the wheel `uv build` makes,
+release line's URL is parsed, and must name the newest released version in CHANGELOG.md and its wheel,
 and the polarizer command in the uvx line parses. The install check, `uv --version`, is run, and the
 line the guide says the install ends with is checked against what uv printed. `uv tool
 update-shell` edits shell startup files (or, on Windows, the user's PATH), so only its help is
@@ -32,7 +32,7 @@ import zipfile
 from urllib.parse import urlsplit
 
 import pytest
-from conftest import ROOT
+from conftest import ROOT, released_version
 from helpers.ptyread import finish, read_some
 from packaging.utils import parse_wheel_filename
 
@@ -44,7 +44,8 @@ GOLDEN = ROOT / "tests" / "golden"
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 REPOSITORY = PYPROJECT["project"]["urls"]["Source"]
 WHEEL = f"polarizer-{polarizer.__version__}-py3-none-any.whl"
-RELEASE_WHEEL = f"{REPOSITORY}/releases/download/v{polarizer.__version__}/{WHEEL}"
+RELEASED = released_version()
+RELEASE_WHEEL = f"{REPOSITORY}/releases/download/v{RELEASED}/polarizer-{RELEASED}-py3-none-any.whl"
 # The guide's uv lines. Those that fetch the project from GitHub need the network and are not
 # run; the others are run by test_guide_install_lines_run_offline. The release line is first.
 NETWORK = [f"uv tool install {RELEASE_WHEEL}", f"uv tool install git+{REPOSITORY}",
@@ -93,21 +94,25 @@ def test_guide_commands_exist():
 
 def test_guide_release_line():
     """Step 2's first line installs the release wheel, and needs only uv. Parsed, never fetched:
-    an https URL to this version's tag on the repository's releases, ending in the wheel name
-    `uv build` makes (test_guide_install_lines_run_offline builds it), which the wheel filename
-    parser reads as this package and version, for any Python 3. The git and uvx lines come
-    after it, and the guide says both need git."""
+    an https URL to the newest released version's tag on the repository's releases (the first
+    released heading in CHANGELOG.md, not pyproject.toml's version, which may be unreleased),
+    ending in that version's wheel name, which the wheel filename parser reads as this package
+    and that version, for any Python 3. The package file line, which
+    test_guide_install_lines_run_offline runs, names the wheel `uv build` makes from this
+    checkout. The git and uvx lines come after the release line, and the guide says both need
+    git."""
     installs = [c for c in commands() if c.startswith(("uv tool install ", "uvx "))]
     assert installs[:2] == NETWORK[:2] and installs[-1] == NETWORK[2]
     argv = shlex.split(NETWORK[0])
     assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
     url = urlsplit(argv[3])
     assert url.scheme == "https" and not url.query and not url.fragment
-    assert f"https://{url.netloc}" + url.path.removesuffix(f"/{WHEEL}") == (
-        f"{REPOSITORY}/releases/download/v{polarizer.__version__}"
+    assert f"https://{url.netloc}" + url.path.rsplit("/", 1)[0] == (
+        f"{REPOSITORY}/releases/download/v{RELEASED}"
     )
     name, version, build, tags = parse_wheel_filename(url.path.rsplit("/", 1)[1])
-    assert (name, str(version), build) == ("polarizer", polarizer.__version__, ())
+    assert (name, str(version), build) == ("polarizer", RELEASED, ())
+    assert [c for c in commands() if c == f"uv tool install ./{WHEEL}"]
     assert {str(tag) for tag in tags} == {"py3-none-any"}
     install = GUIDE[GUIDE.index("2. Install Polarizer") : GUIDE.index("## Run your first drill")]
     assert "This line needs only uv" in install.split("```")[0]

@@ -1,6 +1,6 @@
 """docs/img/demo.svg is exactly what scripts/demo.py draws from a fresh run of the real commands
 against the test stub, and stays small, ASCII and labelled; the README shows it under the
-tagline with alt text."""
+status line with alt text."""
 
 import importlib.util
 import re
@@ -31,8 +31,7 @@ def test_demo_is_small_ascii_and_labelled():
 
 def test_readme_shows_the_demo_under_the_tagline():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    tagline = readme.index("<b>Human in the loop only works if the human is still looking.</b>")
+    tagline = readme.index("<b>Human in the loop works if the human is still looking.</b>")
     [tag] = re.findall(r'<img src="docs/img/demo\.svg"[^>]*>', readme)
-    assert readme.index(tag) > tagline
-    assert readme.index(tag) < readme.index("\nStatus: ")
+    assert tagline < readme.index("\nStatus: ") < readme.index(tag) < readme.index("\n## ")
     assert re.search(r'\balt="[^"]{40,}"', tag)

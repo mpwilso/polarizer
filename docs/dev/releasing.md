@@ -18,7 +18,7 @@ The first successful upload creates the project on PyPI and turns the pending pu
 
 ## Each release
 
-1. Set the version in `pyproject.toml` (the one version source; run `uv lock` after), date the CHANGELOG section, and update the README's install line to the new tag's wheel (`tests/test_readme.py` checks it names this version).
+1. Set the version in `pyproject.toml` (the one version source; run `uv lock` after), turn the CHANGELOG's Unreleased heading into the version with its date, and update the install lines in README.md, docs/SETUP.md and docs/DRILL-GUIDE.md to the new tag's wheel (`tests/test_readme.py` and `tests/test_drill_guide.py` check they name the newest released heading in CHANGELOG.md).
 2. Merge to `master`, tag `v<version>`, and publish a GitHub release for the tag with the wheel attached, as before.
 3. The release workflow uploads the same version to PyPI. A failed upload can be re-run from the Actions tab; PyPI refuses a version it already has.
 
