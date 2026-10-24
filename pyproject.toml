@@ -29,7 +29,7 @@ dependencies = [
     "mcp==2.2.0",
     "mcp-types==2.2.0",
     # Imported directly (proxy.py catches its ValidationError); the version mcp 2.2.0 resolved.
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
     "rfc8785==0.1.4",
 ]
 
