@@ -1,6 +1,7 @@
 """The logo lockups, the small mark and the how-it-works diagram are exactly what
 scripts/brand.py draws, and stay small, ASCII and labelled for screen readers. The lockups
-animate once, with CSS only, and their finished frame is the static mark they replaced."""
+loop, with CSS only, and the frame every cycle starts and ends on is the static mark they
+replaced."""
 
 import importlib.util
 import re
@@ -85,25 +86,34 @@ def test_animated_files_respect_reduced_motion():
         assert REDUCED in text, path
 
 
-def test_animation_plays_once_within_the_limit():
-    """No animation repeats, and every one ends by its latest delay plus its longest duration,
-    which is under 2.5 s."""
+def test_animation_loops_with_a_long_hold():
+    """Every animation repeats for good, with no delay, and every one has the same cycle: the
+    moving part, under 2.5 s, then the finished mark held still for at least 2 s. The hold is
+    what keeps a looping header from being busy, and it is where the loop joins."""
     for path in ANIMATED:
         style = re.search(r"<style>(.*?)</style>", path.read_text(encoding="utf-8")).group(1)
-        assert "infinite" not in style and "iteration-count" not in style, path
-        times = [re.findall(r"\d*\.?\d+m?s\b", value) for value in
-                 re.findall(r"animation:([^;}]+)", style)]  # fmt: skip
-        durations = [seconds(t[0]) for t in times if t]
-        delays = [seconds(t[1]) for t in times if len(t) > 1]
-        delays += [seconds(v) for v in re.findall(r"animation-delay:([^;}]+)", style)]
-        assert durations, path
-        total = max(delays, default=0) + max(durations)
-        assert total < 2.5, (path, total)
-        assert total == brand.TOTAL_SECONDS, (path, total)
+        declarations = re.findall(r"animation:([^;}]+)", style)
+        declarations = [v for v in declarations if not v.startswith("none")]  # reduced motion
+        assert declarations, path
+        for value in declarations:
+            assert "infinite" in value.split(), (path, value)
+            times = re.findall(r"\d*\.?\d+m?s\b", value)
+            assert len(times) == 1, (path, value)  # a duration, no delay
+            assert seconds(times[0]) == brand.CYCLE_SECONDS, (path, value)
+        assert "animation-delay" not in style, path
+        assert brand.TOTAL_SECONDS < 2.5, brand.TOTAL_SECONDS
+        assert brand.CYCLE_SECONDS - brand.TOTAL_SECONDS >= 2, brand.CYCLE_SECONDS
+        # Nothing moves after the moving part: every keyframe offset is at or before its end.
+        _, found = keyframes(style)
+        last = brand.TOTAL_SECONDS / brand.CYCLE_SECONDS * 100
+        for name, frames in found.items():
+            for selector, _ in frames:
+                for stop in selector.split(","):
+                    assert float(stop.strip().rstrip("%")) <= last + 0.01, (path, name, stop)
 
 
 def test_final_frame_is_the_old_static_mark():
-    """With the animation over (or never run), each lockup is the mark as it was: the same
+    """In the hold (or with the animation never run), each lockup is the mark as it was: the same
     elements with the same geometry. Animation lives only in <style> and class attributes."""
     for path in ANIMATED:
         assert geometry(path.read_text(encoding="utf-8")) == OLD_GEOMETRY, path
