@@ -1,12 +1,14 @@
 """The animated lockups, drawn by a real browser in an <img>, as GitHub shows them, show the
-whole mark: after the animation has run in real time, with the animation switched off, and
-with its clock stopped at the start. Each is compared with the reduced-motion render, which is
-the finished mark.
+whole mark: in the hold of the second cycle, with the animation switched off, and with its
+clock stopped at the start. Each is compared with the reduced-motion render, which is the
+finished mark. One more render, in the drawing part of the second cycle, shows the loop is a
+loop: fewer of the lines than the finished mark.
 
 These need a headless Chromium (tests/helpers/chromium.py says where it looks) and skip without
-one. They take about 8 s, most of it the real-time wait.
+one. They take about 10 s, most of it the real-time wait.
 """
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,13 @@ WIDTH, HEIGHT = 430, 100
 TOLERANCE = 12  # per channel; keeps the dark band's color apart from the dark rim's
 OFF = "<style>*{animation:none!important}</style></svg>"
 STOPPED = "<style>*{animation-play-state:paused!important}</style></svg>"
+
+spec = importlib.util.spec_from_file_location("brand", ROOT / "scripts" / "brand.py")
+brand = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(brand)
+# Into the second cycle: the middle of its hold, and 0.6 s in, when the first lines are drawing.
+HOLDING = brand.CYCLE_SECONDS + brand.TOTAL_SECONDS + brand.HOLD / 2
+DRAWING = brand.CYCLE_SECONDS + 0.6
 
 BINARY = chromium.find()
 pytestmark = pytest.mark.skipif(
@@ -68,7 +77,8 @@ def renders(tmp_path_factory) -> dict[str, bytes]:
     folder = tmp_path_factory.mktemp("lockups")
     return {
         "reduced": render(page(folder, "reduced"), 1.0, ("--force-prefers-reduced-motion",)),
-        "after 6 s": render(page(folder, "played"), 6.0),
+        "second cycle, holding": render(page(folder, "played"), HOLDING),
+        "second cycle, drawing": render(page(folder, "drawing"), DRAWING),
         "animation off": render(page(folder, "off", OFF), 1.0),
         "clock stopped at 0": render(page(folder, "stopped", STOPPED), 1.0),
     }
@@ -89,7 +99,7 @@ def test_reduced_motion_render_shows_the_mark(renders):
         assert lines > 2000 and band > 400, (theme, lines, band)
 
 
-@pytest.mark.parametrize("name", ["after 6 s", "animation off", "clock stopped at 0"])
+@pytest.mark.parametrize("name", ["second cycle, holding", "animation off", "clock stopped at 0"])
 def test_lockup_in_an_img_shows_the_mark(renders, name):
     for i, (theme, _) in enumerate(LOCKUPS):
         lines, band = counts(renders[name], i, theme)
@@ -103,3 +113,13 @@ def test_lockup_in_an_img_shows_the_mark(renders, name):
         left, top, right, bottom = disc(i)
         changed = chromium.differing(renders[name], renders["reduced"], disc(i))
         assert changed <= 0.01 * (right - left) * (bottom - top), (name, theme, changed)
+
+
+def test_second_cycle_is_drawing_again(renders):
+    """0.6 s into the second cycle the lines are drawing in again, so the loop is a loop: the
+    first few lines are whole, the rest are short or not yet started, and the disc has well
+    under the finished mark's line pixels."""
+    for i, (theme, _) in enumerate(LOCKUPS):
+        lines, _ = counts(renders["second cycle, drawing"], i, theme)
+        want_lines, _ = counts(renders["reduced"], i, theme)
+        assert lines < 0.8 * want_lines, (theme, lines, want_lines)
