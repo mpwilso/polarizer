@@ -1,7 +1,7 @@
 [project]
 name = "polarizer"
-version = "0.2.0"
-description = "A local MCP gateway that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
+version = "0.3.0"
+description = "A local MCP proxy that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -29,7 +29,7 @@ dependencies = [
     "mcp==2.2.0",
     "mcp-types==2.2.0",
     # Imported directly (proxy.py catches its ValidationError); the version mcp 2.2.0 resolved.
-    "pydantic==2.13.5",
+    "pydantic==2.14.1",
     "rfc8785==0.1.4",
 ]
 
@@ -45,11 +45,11 @@ polarizer = "polarizer.cli:main"
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.16.10",
+    "ruff==0.17.1",
 ]
 
 [build-system]
-requires = ["uv_build==0.12.19"]
+requires = ["uv_build==0.13.1"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]

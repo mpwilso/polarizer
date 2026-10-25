@@ -41,11 +41,7 @@ def serve(cfg) -> RawClient:
     return RawClient([sys.executable, "-m", "polarizer", "serve", "--config", str(cfg)])
 
 
-def wait_for(condition, seconds=30):
-    deadline = time.monotonic() + seconds
-    while not condition():
-        assert time.monotonic() < deadline, "timed out"
-        time.sleep(0.01)
+wait_for = rig.wait_for
 
 
 def start_long_call(client: RawClient, log) -> None:

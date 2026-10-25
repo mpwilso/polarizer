@@ -50,10 +50,11 @@ LINES_X = (18, 26, 34, 42, 50, 66, 74, 82)  # BAND_X's place is the band's
 LOCKUP_ALT = "Polarizer: a round filter of parallel lines, with one line turned out of line"
 SMALL_ALT = "Polarizer"
 
-# The animation, once: the whole mark at first, so a renderer that paints the image once and
+# The animation, looping: the whole mark at first, so a renderer that paints the image once and
 # never moves its clock on still shows it; the lines and the band fade out; the lines draw in
 # from the top, one after another from the left, the band in its place among them while still
-# in line; then the band turns out of line; then everything holds. Seconds.
+# in line; then the band turns out of line; then everything holds, finished, until the cycle
+# ends and the next one starts from the same finished mark. Seconds.
 FADE = 0.15  # the lines and the band fade out
 HIDE = 0.16  # out of sight, each line is folded to its top and the band set back in line
 DRAW_AT = 0.18  # the first line starts to draw
@@ -61,12 +62,14 @@ DRAW = 0.36  # each line's draw
 STAGGER = 0.06  # between one line's start and the next's
 SWING_AT = round(DRAW_AT + STAGGER * len(LINES_X) + DRAW, 2)  # the last line is drawn
 SWING = 0.58
-TOTAL_SECONDS = round(SWING_AT + SWING, 2)
+TOTAL_SECONDS = round(SWING_AT + SWING, 2)  # the moving part
+HOLD = 2.4  # the finished mark, still, before the next cycle
+CYCLE_SECONDS = round(TOTAL_SECONDS + HOLD, 2)
 
 
 def at(seconds: float) -> str:
-    """A time in the animation as a keyframe offset."""
-    return f"{seconds / TOTAL_SECONDS * 100:.2f}".rstrip("0").rstrip(".") + "%"
+    """A time in the cycle as a keyframe offset."""
+    return f"{seconds / CYCLE_SECONDS * 100:.2f}".rstrip("0").rstrip(".") + "%"
 
 
 def lockup(theme: str) -> str:
@@ -75,10 +78,11 @@ def lockup(theme: str) -> str:
     lines = "".join(f'<path class="draw d{order.index(x)}" d="M{x} 6 V94"/>' for x in LINES_X)
     band = f'class="draw d{order.index(BAND_X)}" d="M{BAND_X} 30 V70"'
     # Each line has its own keyframes, so no animation waits on a delay. A keyframe list leaves
-    # out 0% and 100%, so both are the element's own style: the whole mark. Hiding is only
-    # ever between them, once a line has faded out.
+    # out 0% and 100%, so both are the element's own style: the whole mark, which is also what
+    # the cycle ends on and restarts from, so the loop has no seam. Hiding is only ever between
+    # them, once a line has faded out.
     draws = "".join(
-        f".d{i}{{animation:d{i} {TOTAL_SECONDS}s}}@keyframes d{i}{{"
+        f".d{i}{{animation:d{i} {CYCLE_SECONDS}s infinite}}@keyframes d{i}{{"
         f"{at(FADE)}{{opacity:0;transform:none}}{at(HIDE)}{{opacity:0;transform:scaleY(0)}}"
         f"{at(DRAW_AT + STAGGER * i)}{{opacity:1;transform:scaleY(0);"
         "animation-timing-function:ease-out}"
@@ -88,14 +92,16 @@ def lockup(theme: str) -> str:
     style = (
         # Every element's own attributes and base style are the finished mark, so a renderer
         # without CSS animation, a viewer who asks for reduced motion, a renderer that never
-        # moves the clock on from the first frame, and the end of the animation all show it.
-        # Lines scale from their own tops. The inner group's SVG transform is the band's turn;
-        # the outer group's animation holds it back in line until it swings.
+        # moves the clock on from the first frame, and the hold at the end of every cycle all
+        # show it. Lines scale from their own tops. The inner group's SVG transform is the
+        # band's turn; the outer group's animation holds it back in line until it swings.
         f".draw{{transform-box:fill-box;transform-origin:50% 0}}{draws}"
         f".turn{{transform-box:view-box;transform-origin:{BAND_X}px 50px;"
-        f"animation:turn {TOTAL_SECONDS}s}}"
+        f"animation:turn {CYCLE_SECONDS}s infinite}}"
+        # The swing ends at TOTAL_SECONDS, not at the cycle's end, which is now the hold's end.
         f"@keyframes turn{{{at(FADE)}{{transform:none}}{at(HIDE)}{{transform:rotate(-{TURN}deg)}}"
-        f"{at(SWING_AT)}{{transform:rotate(-{TURN}deg);animation-timing-function:ease-in-out}}}}"
+        f"{at(SWING_AT)}{{transform:rotate(-{TURN}deg);animation-timing-function:ease-in-out}}"
+        f"{at(TOTAL_SECONDS)}{{transform:none}}}}"
         "@media (prefers-reduced-motion: reduce){*{animation:none!important}}"
         f".word{{font-family:{SANS};font-weight:800;letter-spacing:3px}}"
     )

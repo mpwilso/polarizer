@@ -2,8 +2,9 @@
 
     python tests/helpers/append_worker.py <ledger_dir> <go-flag file> <count> <worker id>
 
-It waits until the go-flag file exists, so several workers start together, then opens the
-ledger (creating it on first run) and appends <count> "note" entries.
+It prints "ready" once it is watching for the go-flag file, then waits until that file exists,
+so several workers start together, then opens the ledger (creating it on first run) and
+appends <count> "note" entries.
 """
 
 import sys
@@ -14,6 +15,7 @@ from polarizer.writer import LedgerWriter
 
 
 def main(directory: str, go: str, count: str, worker: str) -> int:
+    print("ready", flush=True)
     while not Path(go).exists():
         time.sleep(0.001)
     writer = LedgerWriter.open(Path(directory))

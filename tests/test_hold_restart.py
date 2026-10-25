@@ -290,11 +290,7 @@ def complete_entries(ld: Path) -> list[dict]:
     return [json.loads(line) for line in data[: data.rfind(b"\n") + 1].splitlines()]
 
 
-def wait_for(condition, seconds: float = 30):
-    deadline = time.monotonic() + seconds
-    while not condition():
-        assert time.monotonic() < deadline, "timed out"
-        time.sleep(0.01)
+wait_for = rig.wait_for
 
 
 def hold_one_call(client: RawClient, ld: Path, meta: dict | None = None) -> str:

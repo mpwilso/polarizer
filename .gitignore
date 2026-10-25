@@ -6,6 +6,8 @@ __pycache__/
 .guard-paths
 .guard/
 /polarizer.toml
+.env
+.env.*
 .repro/
 .backup/
 /manual/mcp.json

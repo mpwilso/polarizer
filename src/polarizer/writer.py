@@ -37,6 +37,7 @@ from polarizer.ledger import (
     parse_head,
     verify_bytes,
 )
+from polarizer.ledgerdir import make_private
 from polarizer.lock import LedgerLock
 from polarizer.text import safe
 
@@ -269,11 +270,7 @@ class LedgerWriter:
         """
         ops = ops or FileOps()
         ledger_dir = Path(ledger_dir)
-        try:
-            ledger_dir.mkdir(mode=0o700, parents=True)
-            os.chmod(ledger_dir, 0o700)  # mkdir's mode is narrowed by the umask, never widened
-        except FileExistsError:
-            pass  # existing, or created a moment ago by another process starting with us
+        make_private(ledger_dir, parents=True)
         lock = LedgerLock.create(ledger_dir / LOCK)
         if not lock.acquire(lock_wait):
             lock.close()

@@ -1,6 +1,6 @@
 # Related projects
 
-Other MCP gateways and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
+Other MCP proxies and scanners, as their documentation described them in October 2026 (the record: [docs/verified-facts.md](verified-facts.md#related-projects-from-the-owners-research-october-2026-not-re-checked-in-this-repo)):
 
 - [mcpclerk](https://github.com/hishamalward/mcpclerk): a Python gateway on the official MCP SDK with default deny, per-tool allow, deny or approve, held calls where a timeout counts as a refusal, and a hash-chained log with a verify command.
 - [mcpproxy-go](https://github.com/smart-mcp-proxy/mcpproxy-go): holds a tool whose definition changed until it is approved again.
@@ -13,4 +13,8 @@ Other MCP gateways and scanners, as their documentation described them in Octobe
 - [hoop's mcpproxy](https://pkg.go.dev/github.com/hoophq/mcpproxy): holds flagged tool calls until a human approves them over a REST API.
 - [TrueFoundry's MCP gateway](https://www.truefoundry.com/blog/mcp-tool-approvals-explained): holds a matched tool call and creates an approval request.
 
-Pins, holds and tamper-evident logs exist in several of these, and Polarizer credits three of mcpclerk's ideas ([README.md](../README.md#how-it-was-built)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. In a search in October 2026 I found tools that test AI agents with planted inputs, such as [Agent Canary](https://github.com/Auro-rium/canary) and [AgentCanary](https://github.com/antgroup/Agent3Sigma-Canary), but none that tests the person approving; a search is not proof that none exists.
+Pins, holds and tamper-evident logs exist in several of these, and Polarizer credits three of mcpclerk's ideas ([Credits](#credits)). What Polarizer adds is holds decided by a call's resolved path arguments and its tool class, a ledger checked by a separately written verifier and RFC 8785 test vectors, and drills that measure the person's catch rate and false-flag rate with intervals. In a search in October 2026 I found tools that test AI agents with planted inputs, such as [Agent Canary](https://github.com/Auro-rium/canary) and [AgentCanary](https://github.com/antgroup/Agent3Sigma-Canary), but none that tests the person approving; a search is not proof that none exists.
+
+## Credits
+
+From mcpclerk, three ideas, credited by name, with none of its code or text used: a run-end entry that records how many entries the run wrote, which inspired `ledger.head`; tools hidden from the list that are still refused and recorded when called by name; and an approve-everything switch that exists as a command-line flag and never in the policy file (`--no-holds`). Polarizer is built on the MCP Python SDK and the `rfc8785` package, uses RFC 8785 (JSON Canonicalization Scheme) for its ledger entries, and is tested against the reference Everything and Filesystem MCP servers. No code from any of these projects is copied here.

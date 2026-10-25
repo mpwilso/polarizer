@@ -12,7 +12,7 @@ M0 proxies tools only.
 
 Draft README text for the limits:
 
-> Polarizer 0.1 proxies tools only. Resources, prompts and completions from upstream servers are not exposed. When an upstream server asks the client for input (elicitation, sampling or roots), Polarizer doesn't pass the request on, and the tool call fails. A server on the 2026-07-28 protocol gets a one-line error naming it. A server on an older protocol gets the error it returns itself, recorded as a protocol error, because Polarizer can't see those requests without advertising support for them. Upstreams start once per session; one that fails to start stays off until Claude Code restarts Polarizer. Results pass through the MCP Python SDK, which drops fields the protocol doesn't define.
+> Polarizer proxies tools only. Resources, prompts and completions from upstream servers are not exposed. When an upstream server asks the client for input (elicitation, sampling or roots), Polarizer doesn't pass the request on, and the tool call fails. A server on the 2026-07-28 protocol gets a one-line error naming it. A server on an older protocol gets the error it returns itself, recorded as a protocol error, because Polarizer can't see those requests without advertising support for them. Upstreams start once per session; one that fails to start stays off until Claude Code restarts Polarizer. Results pass through the MCP Python SDK, which drops fields the protocol doesn't define.
 
 ## Configuration: polarizer.toml
 
@@ -165,7 +165,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 | `protocol-error` | `MCPError` with any code except -32000 | the same code and message, re-raised as a JSON-RPC error. The upstream's `data` is dropped. |
 | `transport-error` | `MCPError` -32000 (the SDK's `CONNECTION_CLOSED`), or any other exception | a result with `isError` and one line: `polarizer: upstream <prefix> failed: <message>` |
 | `cancelled` | `CancelledError` in the handler, from Claude Code's `notifications/cancelled` or its timeout | nothing: the SDK has already abandoned the request. Polarizer records the entry in a shielded scope, then re-raises. The SDK's upstream client sends its own `notifications/cancelled` upstream. |
-| `unsupported` | an `InputRequiredResult` | a result with `isError` and one line: `polarizer: upstream <prefix> asked the client for <kinds>; Polarizer 0.1 does not forward these` |
+| `unsupported` | an `InputRequiredResult` | a result with `isError` and one line: `polarizer: upstream <prefix> asked the client for <kinds>; Polarizer does not forward these` |
 
 `call.returned` records the outcome, plus `error` (the one line) for every outcome except `ok`, and `code` for `protocol-error`. It also records:
 - **`latency_ms`:** always an integer: whole milliseconds on a monotonic clock, from just before the upstream call to just after it ends, rounded down.

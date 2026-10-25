@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -229,6 +230,15 @@ async def until(condition, seconds: float = 5, step: float = 0.01):
     with anyio.fail_after(seconds):
         while not condition():
             await anyio.sleep(step)
+
+
+def wait_for(condition, seconds: float = 30, step: float = 0.01) -> None:
+    """`until` for synchronous tests: poll condition() every `step` seconds, at most `seconds`.
+    Replaces a fixed sleep with a wait on the thing the test is waiting for."""
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(step)
 
 
 def entries(ledger_dir: Path) -> list[dict]:

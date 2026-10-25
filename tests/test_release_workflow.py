@@ -1,6 +1,6 @@
 """The release workflow: it runs only for a published release, every action is pinned to a
-full commit SHA with its version in a comment, only the publish job can mint an OIDC token, and
-it publishes from the pypi environment with trusted publishing, never a stored token
+full commit SHA with its version in a comment, it has one job, which builds the wheel and sdist
+with a read-only token, and nothing in it can reach PyPI or any stored secret
 (docs/dev/releasing.md)."""
 
 import re
@@ -23,19 +23,16 @@ def test_runs_only_for_a_published_release():
 
 def test_every_action_is_pinned_by_sha():
     uses = re.findall(r"uses: (\S+)(.*)", WORKFLOW)
-    assert len(uses) >= 5
+    assert len(uses) >= 3
     for action, rest in uses:
         assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", action), action
         assert re.fullmatch(r"  # v\d+\.\d+\.\d+", rest), (action, rest)
 
 
-def test_only_publish_gets_an_id_token():
-    assert WORKFLOW.count("id-token: write") == 1
-    publish = job("publish")
-    assert "    permissions:\n      id-token: write\n" in publish
-    assert "    environment:\n      name: pypi\n" in publish
-    assert "uses: pypa/gh-action-pypi-publish@" in publish
-    assert "id-token" not in job("build")
+def test_one_job_with_a_read_only_token_and_no_way_to_publish():
+    assert re.findall(r"^  ([a-z]+):\n", WORKFLOW[WORKFLOW.index("\njobs:\n") :], re.M) == ["build"]
+    assert "id-token" not in WORKFLOW and "environment:" not in WORKFLOW
+    assert "pypa/" not in WORKFLOW and "pypi.org" not in WORKFLOW
     assert "password" not in WORKFLOW and "secrets." not in WORKFLOW
 
 

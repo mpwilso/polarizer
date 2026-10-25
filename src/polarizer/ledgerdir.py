@@ -3,6 +3,8 @@
 serve and repair refuse a ledger_dir inside a forbidden path, and warn inside any other git
 working tree. Paths are compared as resolved real paths, component by component, never as
 string prefixes. The installed tool never reads .guard-paths; that is scripts/dev/guard.sh's file.
+The ledger's directories (ledger_dir itself, args, defs and sessions) are all created the same
+way, by make_private.
 """
 
 import os
@@ -17,6 +19,18 @@ class ForbiddenPath(Exception):
 
 def default_ledger_dir() -> Path:
     return Path.home() / ".local" / "share" / "polarizer"
+
+
+def make_private(directory: Path, parents: bool = False) -> None:
+    """Create `directory` with mode 0700 (its owner alone), or leave an existing one as it is.
+    mkdir's mode is narrowed by the umask and never widened, so the new directory is chmod'ed
+    after it. One that exists already, or that another process created a moment ago, is left
+    alone, mode included. Raises OSError for anything else."""
+    try:
+        Path(directory).mkdir(mode=0o700, parents=parents)
+        os.chmod(directory, 0o700)
+    except FileExistsError:
+        pass
 
 
 def always_forbidden() -> list[Path]:

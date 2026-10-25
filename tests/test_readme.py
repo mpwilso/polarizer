@@ -1,23 +1,24 @@
-"""README.md's setup, run as written, so the README can't drift from the code.
+"""README.md and docs/SETUP.md, run as written, so neither can drift from the code.
 
-Every command in the Setup section's sh blocks is run in README order, except the ones that need
+Every command in docs/SETUP.md's sh blocks is run in the doc's order, except the ones that need
 the network or Claude Code (SKIPPED); the install line, which fetches the release wheel, is
-parsed instead, as is the git install line in the text after it. The polarizer.toml block is written where the README says,
-with /home/you replaced by a temporary home; only its Filesystem server's command and args are
-swapped for the stdlib probe, so nothing is fetched. Its tools are then unclassified, so every
-call is held. A raw stdio client stands in for Claude Code to make those calls, which gives the
-second terminal's holds, allow and deny real holds to act on. approve, allow and deny get a
-pseudo-terminal as stdin, as in a person's terminal; Windows has none, so there they are given
---allow-no-terminal.
+parsed instead, as is the git install line in the text after it. The polarizer.toml block is
+written where the doc says, with /home/you replaced by a temporary home; only its Filesystem
+server's command and args are swapped for the stdlib probe, so nothing is fetched. Its tools are
+then unclassified, so every call is held. A raw stdio client stands in for Claude Code to make
+those calls, which gives the second terminal's holds, allow and deny real holds to act on.
+approve, allow and deny get a pseudo-terminal as stdin, as in a person's terminal; Windows has
+none, so there they are given --allow-no-terminal.
 
-Every `polarizer ...` command shown anywhere in README.md must also parse with the real
-argument parser. Outside Setup, the "Try a drill" commands run too: the drill on a
+Every `polarizer ...` command shown anywhere in README.md or docs/SETUP.md must also parse with
+the real argument parser. The README's "Try a drill" commands run too: the drill on a
 pseudo-terminal (POSIX only, since it needs a terminal) and the report without one. Every
 relative link must name a file and heading that exist, and every absolute link must be a
-well-formed https URL (checked, never fetched). The README keeps its layout and length; every
-limit and every evidence claim the v0.1 and v0.2 READMEs listed is in docs/LIMITS.md or
-docs/EVIDENCE.md, where the detail moved, as is the v0.2 README's example hold; and every
-related project docs/related.md names is in docs/verified-facts.md, with the same link.
+well-formed https URL (checked, never fetched). The README keeps its layout (its length and
+wording rules are tests/test_readme_rules.py's); every limit and every evidence claim the v0.1
+and v0.2 READMEs listed is in docs/LIMITS.md or docs/EVIDENCE.md, where the detail moved, as is
+the v0.2 README's example hold; and every related project docs/related.md names is in
+docs/verified-facts.md, with the same link.
 """
 
 import json
@@ -32,7 +33,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from conftest import ROOT
+from conftest import ROOT, released_version
 from helpers import rig
 from helpers.raw import RawClient
 from packaging.utils import parse_wheel_filename
@@ -59,7 +60,8 @@ def section(title: str) -> str:
     return README[start : end if end != -1 else len(README)]
 
 
-QUICKSTART = section("Setup")
+SETUP = (ROOT / "docs" / "SETUP.md").read_text(encoding="utf-8")
+QUICKSTART = SETUP  # the whole doc: README's Setup section until the readme-sweep branch
 
 
 def blocks(language: str, text: str = QUICKSTART) -> list[str]:
@@ -289,18 +291,30 @@ def test_quickstart_runs_as_written(tmp_path):
 
 
 def test_install_lines_parse():
-    """Setup installs the release wheel first; the text after the block gives the git line for
-    the latest code and says it needs git. Both are parsed, never run or fetched: the release
-    URL names this version's tag on the repository in pyproject.toml and the wheel `uv build`
-    makes, read by the wheel filename parser as this package and version, for any Python 3."""
+    """docs/SETUP.md and the README's Try it install the release wheel first; the text after
+    each block gives the git line for the latest code and says it needs git. Both are parsed,
+    never run or fetched: the release URL names the newest released version's tag on the
+    repository in pyproject.toml (the first released heading in CHANGELOG.md, since the version
+    in pyproject.toml may be unreleased) and that version's wheel, read by the wheel filename
+    parser as this package and version, for any Python 3. Both texts say what the release line
+    installs, and, when the version in pyproject.toml is newer, that it is on master and not
+    released."""
     repository = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "urls"
     ]["Source"]
-    version = polarizer.__version__
+    version = released_version()
     wheel = f"polarizer-{version}-py3-none-any.whl"
     installs = [c for c in commands() if c.startswith("uv tool install ")]
     release = f"uv tool install {repository}/releases/download/v{version}/{wheel}"
     assert installs == [release] and commands()[0] == release
+    try_it = section("Try it")
+    assert commands(try_it)[0] == release
+    for text in (QUICKSTART, try_it):
+        assert f"That installs the v{version} release." in text
+        if version != polarizer.__version__:
+            assert f"Version {polarizer.__version__}" in text and "is not released yet" in text
+        else:
+            assert "is not released yet" not in text
     argv = shlex.split(installs[0])
     assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
     url = urlsplit(argv[3])
@@ -308,16 +322,17 @@ def test_install_lines_parse():
     name, parsed, build, tags = parse_wheel_filename(url.path.rsplit("/", 1)[1])
     assert (name, str(parsed), build) == ("polarizer", version, ())
     assert {str(tag) for tag in tags} == {"py3-none-any"}
-    git = [s for s in spans(QUICKSTART) if s.startswith("uv tool install ")]
-    assert git == [f"uv tool install git+{repository}"]
-    argv = shlex.split(git[0])
-    assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
-    assert urlsplit(argv[3].removeprefix("git+")).scheme == "https"
-    assert f"`{git[0]}`, which needs git." in QUICKSTART
+    for text in (QUICKSTART, try_it):
+        git = [s for s in spans(text) if s.startswith("uv tool install ")]
+        assert git == [f"uv tool install git+{repository}"]
+        argv = shlex.split(git[0])
+        assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
+        assert urlsplit(argv[3].removeprefix("git+")).scheme == "https"
+        assert f"`{git[0]}`, which needs git." in text
 
 
 def test_quickstart_config_matches_the_example():
-    """The README's polarizer.toml is polarizer.example.toml without its comments, as it says,
+    """docs/SETUP.md's polarizer.toml is polarizer.example.toml without its comments, as it says,
     and its npx commands name the same pinned version."""
     [toml] = blocks("toml")
     readme = tomllib.loads(toml)
@@ -330,7 +345,7 @@ def test_quickstart_config_matches_the_example():
 
 
 def test_quickstart_mcp_config():
-    """The MCP config runs `polarizer serve --config <absolute path>` with the path the README
+    """The MCP config runs `polarizer serve --config <absolute path>` with the path docs/SETUP.md
     saves polarizer.toml to, and Claude Code is started with that file only."""
     [block] = blocks("json")
     servers = json.loads(block)["mcpServers"]
@@ -349,10 +364,12 @@ def test_quickstart_mcp_config():
 
 
 def test_every_polarizer_command_parses():
-    """Every `polarizer ...` command in README.md, in a code span or a block, names a real
-    command with real flags."""
-    shown = [s for s in spans(README) if s.startswith("polarizer ")]
-    shown += [c for c in commands(README) if c.startswith("polarizer ")]
+    """Every `polarizer ...` command in README.md or docs/SETUP.md, in a code span or a block,
+    names a real command with real flags."""
+    shown = []
+    for text in (README, SETUP):
+        shown += [s for s in spans(text) if s.startswith("polarizer ")]
+        shown += [c for c in commands(text) if c.startswith("polarizer ")]
     assert len(shown) > 10
     assert {c for c in commands(README) if c.startswith("polarizer ")} >= set(DRILL_COMMANDS)
     for text in shown:
@@ -375,10 +392,11 @@ def slug(heading: str) -> str:
 
 
 def test_readme_links_resolve():
-    """Every relative link, image and srcset names a file, and every #anchor a heading in it (an
-    anchor alone means this README). scripts/check_docs.py checks every doc the same way."""
+    """Every relative link, image, srcset and href names a file, and every #anchor a heading in
+    it (an anchor alone means this README). scripts/check_docs.py checks every doc the same
+    way; tests/test_readme_rules.py has the README's other rules."""
     links = re.findall(r"\]\(([^)]+)\)", README)
-    links += re.findall(r'\b(?:src|srcset)="([^"]+)"', README)
+    links += re.findall(r'\b(?:src|srcset|href)="([^"]+)"', README)
     local = [link for link in links if not link.startswith("https://")]
     assert len(local) > 10
     for link in local:
@@ -424,13 +442,14 @@ def fence_problems(text: str) -> list[str]:
 
 
 def test_readme_fences_pair_up():
-    """README.md's code fences pair up, and its JSON is labelled json. The check catches the
-    Setup section's MCP config with its opening ```json fence missing, which turns the JSON
-    into plain text and lets its closing fence swallow the claude command."""
+    """README.md's and docs/SETUP.md's code fences pair up, and the JSON is labelled json. The
+    check catches docs/SETUP.md's MCP config with its opening ```json fence missing, which turns
+    the JSON into plain text and lets its closing fence swallow the claude command."""
     assert fence_problems(README) == []
+    assert fence_problems(SETUP) == []
     opening = '```json\n{\n  "mcpServers"'
-    assert README.count(opening) == 1
-    broken = README.replace(opening, opening.removeprefix("```json\n"))
+    assert SETUP.count(opening) == 1
+    broken = SETUP.replace(opening, opening.removeprefix("```json\n"))
     assert fence_problems(broken)
 
 
@@ -467,12 +486,23 @@ def test_absolute_links_are_well_formed():
 DRILL_COMMANDS = ["polarizer drill --calls 10 --condition guided", "polarizer drill report"]
 
 
+def test_try_it_is_install_help_and_drill():
+    """Try it has one three-line block: docs/SETUP.md's install line as it is, polarizer --help,
+    then the drill command Try a drill shows; and it points at docs/SETUP.md for the rest."""
+    text = section("Try it")
+    [block] = blocks("sh", text)
+    assert block.splitlines() == [commands()[0], "polarizer --help", DRILL_COMMANDS[0]]
+    assert "[docs/SETUP.md](docs/SETUP.md)" in text
+    assert "macOS has passed CI but no live check" in text
+
+
 def test_try_a_drill_commands():
     """The section's sh block is exactly the drill and the report, it links the guide, and it
-    says the drill is offline."""
+    says the drill is offline and cites the sources on approvers who stop reading."""
     text = section("Try a drill")
     assert commands(text) == DRILL_COMMANDS
     assert "(docs/DRILL-GUIDE.md)" in text and "offline" in text
+    assert "([sources](docs/MEASURE-SPEC.md#2-sources))" in text
 
 
 def test_try_a_drill_excerpt_is_the_guides():
@@ -546,19 +576,21 @@ def test_try_a_drill_runs(tmp_path):
 # The layout, and the detail that moved out of the README -----------------------------------
 
 SECTIONS = [
-    "Why it exists",
-    "Try a drill",
     "What's different",
-    "Compared with Claude Code's permission prompts",
-    "Proof",
+    "Try it",
+    "Try a drill",
+    "What was measured",
     "How it works",
-    "Related projects",
-    "Known limits",
-    "Setup",
-    "What's here",
+    "Limits",
     "How it was built",
-    "What's next",
+    "The other tools",
+    "License",
 ]
+PLAIN_SENTENCE = (
+    "Polarizer sits between an AI coding agent and the tools it calls, holds the risky calls "
+    "until a person says yes, and keeps a ledger that can be checked."
+)
+STATUS = "Status: a portfolio project, built to show how I design, test and judge an AI tool. "
 
 RELATED = (ROOT / "docs" / "related.md").read_text(encoding="utf-8")
 
@@ -631,28 +663,48 @@ V02_EVIDENCE = (
 
 
 def test_readme_layout():
-    """The logo, the hook, the status line, the sections in order, a short page, the text
-    diagram in place of the image, and the links to the detail that moved out of it."""
-    assert README.count("\n") <= 280
-    assert 'srcset="docs/brand/lockup-dark.svg"' in README
-    assert "<b>Human in the loop only works if the human is still looking.</b>" in README
-    status = README[README.index("\nStatus: ") :].split("\n\n")[0]
-    assert status.startswith("\nStatus: v0.2, a preview. Built: the gateway and its ledger, ")
-    assert re.search(r"\bM\d", status) is None
+    """The top in the shared order (the lockup in both themes, the CI badge, the tagline, the
+    plain sentence, the status line in its template, the demo), the sections in order, the
+    how-it-works diagram in both themes, the pointers to the detail that moved out, and the
+    license as a link."""
+    top = README[: README.index("\n## ")]
+    order = [
+        'srcset="docs/brand/lockup-dark.svg"',
+        'src="docs/brand/lockup-light.svg"',
+        '<a href="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml"><img src="https://github.com/mpwilso/polarizer/actions/workflows/ci.yml/badge.svg" alt="CI"></a>',
+        "<b>Human in the loop works if the human is still looking.</b>",
+        f"\n{PLAIN_SENTENCE}\n",
+        f"\n{STATUS}",
+        '<img src="docs/img/demo.svg"',
+    ]
+    positions = [top.index(part) for part in order]
+    assert positions == sorted(positions)
+    status = top[top.index("\nStatus: ") :].split("\n\n")[0]
+    assert status.count(". ") == 1 and status.endswith("([docs/EVIDENCE.md](docs/EVIDENCE.md)).")
+    assert re.search(r"\bM\d", status) is None and "0.3" not in status
     assert re.findall(r"^## (.+)$", README, re.M) == SECTIONS
-    assert "(docs/LIMITS.md)" in section("Known limits")
-    assert "(docs/EVIDENCE.md)" in section("Proof")
-    assert "(docs/related.md)" in section("Related projects")
-    # The "How it works" image is replaced by a text diagram; the SVG files stay in docs/img/.
-    assert "how-it-works" not in README
-    assert blocks("text", section("How it works"))
-    for name in ("how-it-works-light.svg", "how-it-works-dark.svg"):
-        assert (ROOT / "docs" / "img" / name).exists()
+    assert "(docs/related.md)" in section("What's different")
+    assert "(docs/EVIDENCE.md)" in section("What was measured")
+    assert "(docs/LIMITS.md)" in section("Limits")
+    assert "(docs/milestones.md)" in section("Limits")
+    assert "(docs/SETUP.md)" in section("Try it")
+    assert "(CONTRIBUTING.md)" in section("How it was built")
+    assert "(docs/related.md#credits)" in section("How it was built")
+    works = section("How it works")
+    assert (
+        '<source media="(prefers-color-scheme: dark)" srcset="docs/img/how-it-works-dark.svg">'
+        in works
+    )
+    assert 'src="docs/img/how-it-works-light.svg"' in works
+    assert not blocks("text", works)
+    assert section("License").strip().endswith("\n\n[MIT](LICENSE).")
+    assert "[Polarizer](https://github.com/mpwilso/polarizer)" not in README
 
 
 def test_related_projects_are_recorded():
     """Every link in docs/related.md, where the README's Related projects list moved, is in
-    docs/verified-facts.md's record of them, and the page dates what it says."""
+    docs/verified-facts.md's record of them, the page dates what it says, and it holds the
+    credits that moved out of the README: the three mcpclerk ideas, the SDK and the servers."""
     facts = (ROOT / "docs" / "verified-facts.md").read_text(encoding="utf-8")
     start = facts.index("\n## Related projects (from the owner's research, October 2026")
     record = facts[start : facts.index("\n## ", start + 1)]
@@ -661,6 +713,19 @@ def test_related_projects_are_recorded():
     assert [link for link in links if f"({link})" not in record] == []
     assert "as their documentation described them in October 2026" in RELATED
     assert "https://invariantlabs.ai/" not in RELATED  # the repository now redirects to Snyk
+    credits = RELATED[RELATED.index("\n## Credits") :]
+    for phrase in (
+        "From mcpclerk, three ideas, credited by name, with none of its code or text used",
+        "`ledger.head`",
+        "still refused and recorded when called by name",
+        "(`--no-holds`)",
+        "MCP Python SDK",
+        "`rfc8785`",
+        "reference Everything and Filesystem MCP servers",
+        "No code from any of these projects is copied here.",
+    ):
+        assert phrase in credits, phrase
+    assert "Three of mcpclerk's ideas are credited by name" in section("How it was built")
 
 
 def test_limits_and_evidence_moved():

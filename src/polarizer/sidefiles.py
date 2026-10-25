@@ -13,6 +13,8 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from polarizer.ledgerdir import make_private
+
 ARGS = "args"
 _BINARY = getattr(os, "O_BINARY", 0)
 _COMMIT = re.compile("[0-9a-f]{64}")
@@ -24,11 +26,7 @@ def write_args(ledger_dir: Path, arguments) -> str:
     blob = secrets.token_bytes(32) + stored.encode("utf-8", "surrogatepass")
     commit = hashlib.sha256(blob).hexdigest()
     directory = Path(ledger_dir) / ARGS
-    try:
-        directory.mkdir(mode=0o700)
-        os.chmod(directory, 0o700)
-    except FileExistsError:
-        pass
+    make_private(directory)
     fd = os.open(directory / f"{commit}.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL | _BINARY, 0o600)
     try:
         view = memoryview(blob)

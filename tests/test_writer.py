@@ -110,11 +110,13 @@ def run_workers(directory, go, n_workers, count):
     procs = [
         subprocess.Popen(
             [sys.executable, str(WORKER), str(directory), str(go), str(count), str(k)],
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         for k in range(n_workers)
     ]
-    time.sleep(0.3)  # let every worker start and wait on the flag
+    for p in procs:  # each worker says so once it is waiting on the flag
+        assert p.stdout.readline().strip() == b"ready"
     go.write_text("go")
     for p in procs:
         _, err = p.communicate(timeout=120)

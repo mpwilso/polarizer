@@ -1,8 +1,9 @@
 name: release
 
-# Builds the wheel and sdist for a published GitHub release and uploads them to PyPI with
-# trusted publishing (no token is stored). PyPI must first know this workflow as a trusted
-# publisher: docs/dev/releasing.md has the values.
+# Builds the wheel and sdist for a published GitHub release, after checking that the release
+# tag names the version in pyproject.toml, and keeps them as the run's artifact. The owner
+# attaches them to the release (docs/dev/releasing.md). Publishing to PyPI was set up here on
+# Oct 11, 2026, never used, and dropped on Oct 24, 2026.
 on:
   release:
     types: [published]
@@ -18,7 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
           version: "0.12.19"
       - name: The release tag names the package version
@@ -38,17 +39,3 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
-    needs: build
-    runs-on: ubuntu-24.04
-    environment:
-      name: pypi
-      url: https://pypi.org/project/polarizer/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2

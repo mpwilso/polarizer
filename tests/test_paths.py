@@ -231,12 +231,17 @@ def test_relative_tilde_nul_are_held(root):
 
 
 def test_slow_resolution_is_held(root):
+    release = threading.Event()  # the resolver is slower than the bound until the test lets it go
+
     def slow(path):
-        time.sleep(1.0)
+        release.wait(30)
         return path
 
     started = time.monotonic()
-    v = verdict(write_policy(root, resolver=slow, resolve_bound=0.05), "write", p(root / "x"))
+    try:
+        v = verdict(write_policy(root, resolver=slow, resolve_bound=0.05), "write", p(root / "x"))
+    finally:
+        release.set()
     assert time.monotonic() - started < 1.0  # the bound, not the resolver, ended it
     assert (v.rule, v.reason) == (
         "path-unresolvable",

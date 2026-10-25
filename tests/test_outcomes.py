@@ -59,7 +59,7 @@ def test_one_sent_one_returned_per_call(tmp_path):
     unsupported = got["unsupported"]
     assert unsupported.is_error
     assert unsupported.content[0].text == (
-        "polarizer: upstream f asked the client for elicitation; Polarizer 0.1 does not forward these"
+        "polarizer: upstream f asked the client for elicitation; Polarizer does not forward these"
     )
 
     entries = rig.entries(tmp_path / "ledger")

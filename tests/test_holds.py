@@ -460,7 +460,7 @@ def test_allow_racing_timeout_decision_first(tmp_path):
                 [hold] = await rig.holds_created(ld, 1)
                 tasks.start_soon(anyio.to_thread.run_sync, decide, hold)
                 await rig.until(held.holding.is_set)
-                await anyio.sleep(1.0)  # past the timeout: serve now waits for the lock
+                await rig.until(lambda: tried)  # the timeout fired: serve now waits for the lock
                 held.release.set()
                 result = await calls.result("a")
                 # The timeout fired while the allow's fsync was held, and its conditional
