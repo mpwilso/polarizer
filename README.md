@@ -31,12 +31,12 @@ Other MCP proxies and scanners pin, hold and log too. What each does, and what P
 Linux and WSL, with Python 3.11 or later and [uv](https://docs.astral.sh/uv/); macOS has passed CI but no live check.
 
 ```sh
-uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.2.0/polarizer-0.2.0-py3-none-any.whl
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.3.0/polarizer-0.3.0-py3-none-any.whl
 polarizer --help
 polarizer drill --calls 10 --condition guided
 ```
 
-That installs the v0.2.0 release. Version 0.3.0, which master holds, is not released yet; it adds `polarizer init`, which writes a config from the MCP config you already use. For it, install with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. From the install to a held call in Claude Code: [docs/SETUP.md](docs/SETUP.md).
+That installs the v0.3.0 release. For the latest code instead, install with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. `polarizer init` writes a config from the MCP config you already use; from the install to a held call in Claude Code: [docs/SETUP.md](docs/SETUP.md).
 
 ## Try a drill
 

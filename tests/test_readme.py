@@ -297,12 +297,12 @@ def test_install_lines_parse():
     repository in pyproject.toml (the first released heading in CHANGELOG.md, since the version
     in pyproject.toml may be unreleased) and that version's wheel, read by the wheel filename
     parser as this package and version, for any Python 3. Both texts say what the release line
-    installs and that the unreleased version is on master."""
+    installs, and, when the version in pyproject.toml is newer, that it is on master and not
+    released."""
     repository = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "urls"
     ]["Source"]
     version = released_version()
-    assert version != polarizer.__version__, "0.3.0 is released: the README and docs say not"
     wheel = f"polarizer-{version}-py3-none-any.whl"
     installs = [c for c in commands() if c.startswith("uv tool install ")]
     release = f"uv tool install {repository}/releases/download/v{version}/{wheel}"
@@ -310,8 +310,11 @@ def test_install_lines_parse():
     try_it = section("Try it")
     assert commands(try_it)[0] == release
     for text in (QUICKSTART, try_it):
-        assert f"That installs the v{version} release. Version {polarizer.__version__}" in text
-        assert "is not released yet" in text
+        assert f"That installs the v{version} release." in text
+        if version != polarizer.__version__:
+            assert f"Version {polarizer.__version__}" in text and "is not released yet" in text
+        else:
+            assert "is not released yet" not in text
     argv = shlex.split(installs[0])
     assert argv[:3] == ["uv", "tool", "install"] and len(argv) == 4
     url = urlsplit(argv[3])

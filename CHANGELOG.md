@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased (0.3.0, a preview)
+## 0.3.0 (preview, released Oct 24, 2026)
 
-- The README is restructured and about half as long: the setup moved to docs/SETUP.md, the directory listing and the test notes to CONTRIBUTING.md, the credits to docs/related.md, and the how-it-works picture replaces the text diagram. It installs the v0.2.0 release and says that 0.3.0 is unreleased; `tests/test_readme.py` and `tests/test_drill_guide.py` check the install lines against the newest released heading here, and `tests/test_readme_rules.py` holds the README to its length, dash, placeholder and wording rules.
+- The README is restructured and about half as long: the setup moved to docs/SETUP.md, the directory listing and the test notes to CONTRIBUTING.md, the credits to docs/related.md, and the how-it-works picture replaces the text diagram. Its install lines name the newest release; `tests/test_readme.py` and `tests/test_drill_guide.py` check them against the newest released heading here, and `tests/test_readme_rules.py` holds the README to its length, dash, placeholder and wording rules.
 - `polarizer init --from <path>` reads an MCP config in Claude Code's `mcpServers` shape and prints a polarizer.toml with its stdio servers as upstreams, and the `mcp.json` that starts `polarizer serve` with it; `--write <dir>` creates both files instead, never over an existing one. It never writes Claude Code or MCP config. A server it can't express, such as an HTTP or SSE server, is listed on stderr and in the file with the reason, and an `env` value that looks like a secret is written as a `"${NAME}"` placeholder that `serve` reads from its environment (docs/PROXY-SPEC.md, Starting from an existing MCP config).
 - The README is shorter: its proof and limits are summaries, the example hold moved to docs/EVIDENCE.md, the related projects to docs/related.md, and the dropped limits to docs/LIMITS.md. Invariant's mcp-scan now links Snyk's agent-scan, where its repository redirects.
 - The README shows a terminal picture of a held write to `.git/hooks` being denied, drawn by `scripts/demo.py` from a real run against the repository's test server; a test checks it against a fresh run.
-- A release workflow publishes each GitHub release to PyPI with trusted publishing. It needs a pending publisher on pypi.org first (docs/dev/releasing.md), and the README still installs from the GitHub release until a version is on PyPI.
+- A release workflow publishes each GitHub release to PyPI with trusted publishing (docs/dev/releasing.md); v0.3.0 is its first run. The README installs from the GitHub release until a version is on PyPI.
 - CLAUDE.md's read-first list is the milestones and the one spec a task touches, the machine-specific guard notes moved to docs/dev/guard.md, and a Testing section says pytest already sets `-q`.
 - docs/dev/QUICKSTART-DRAFT.md and docs/dev/PUSHING.md are removed; both are readable at tag v0.2.0.
 

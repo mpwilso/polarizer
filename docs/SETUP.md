@@ -3,15 +3,15 @@
 From an install to a held call in Claude Code. For Linux and WSL; macOS has passed CI but no live check. You need Python 3.11 or later, [uv](https://docs.astral.sh/uv/), Node.js for `npx` servers, and Claude Code. [README.md](../README.md#try-it) has the short version, and [DRILL-GUIDE.md](DRILL-GUIDE.md) a drill that needs none of this.
 
 ```sh
-uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.2.0/polarizer-0.2.0-py3-none-any.whl
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.3.0/polarizer-0.3.0-py3-none-any.whl
 polarizer --help
 mkdir -p ~/.config/polarizer ~/projects/demo
 CONFIG="$HOME/.config/polarizer/polarizer.toml"
 ```
 
-That installs the v0.2.0 release. Version 0.3.0, which master holds, is not released yet; it adds `polarizer init`, below. For it, install from the repository's default branch instead with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with.
+That installs the v0.3.0 release. For the latest code instead, install from the repository's default branch with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. Neither line reads `uv.lock`, which holds the full set of versions Polarizer was tested with.
 
-**Already using MCP servers in Claude Code?** With 0.3.0, `polarizer init --from <path>` reads an MCP config, such as a project's `.mcp.json`, and prints a polarizer.toml with those servers as upstreams and the `mcp.json` that starts Polarizer with it; with `--write <dir>` it saves both there instead, never over an existing file. It names every server it can't proxy, such as an HTTP server, and writes a value that looks like a secret as a `${NAME}` placeholder that `serve` reads from its environment. Every tool it lists is held on every call until you give it a class, as below.
+**Already using MCP servers in Claude Code?** `polarizer init --from <path>` reads an MCP config, such as a project's `.mcp.json`, and prints a polarizer.toml with those servers as upstreams and the `mcp.json` that starts Polarizer with it; with `--write <dir>` it saves both there instead, never over an existing file. It names every server it can't proxy, such as an HTTP server, and writes a value that looks like a secret as a `${NAME}` placeholder that `serve` reads from its environment. Every tool it lists is held on every call until you give it a class, as below.
 
 Otherwise, save this as `~/.config/polarizer/polarizer.toml`, with `/home/you` replaced by your home directory (on macOS, `/Users/<you>`). It is [polarizer.example.toml](../polarizer.example.toml) without its comments: the reference Filesystem server, pinned to an exact version.
 

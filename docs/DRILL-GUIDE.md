@@ -27,7 +27,7 @@ uv --version
 2. Install Polarizer. This line needs only uv, which step 1 installed:
 
 ```sh
-uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.2.0/polarizer-0.2.0-py3-none-any.whl
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.3.0/polarizer-0.3.0-py3-none-any.whl
 ```
 
 When it worked, the list uv prints ends with `Installed 1 executable: polarizer`.
