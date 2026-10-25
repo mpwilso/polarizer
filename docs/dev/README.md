@@ -9,7 +9,7 @@ The work went in stages: a spec round for each milestone, then implementation st
 - **STAGE4-NOTES.md and STAGE5-NOTES.md:** M1a, pins at rest and in motion, shutdown, upstream text safety, and the rug-pull check.
 - **STAGE6-NOTES.md and STAGE7-NOTES.md:** M2a, classes, path rules and holds, then session lifetime, progress and `holds --wait`, and the CI follow-ups for Windows and macOS.
 - **STAGE8-NOTES.md:** the first slice of measurement: the hold-check test fix, the owner's answers to the measure spec, and drills (the statistics, the scenario set, `polarizer drill`, `drill report` and the export, and docs/DRILL-GUIDE.md), then the shortcut audit, the guided condition, the release round (the shape audit, the README, the CI install check and the public-readiness review), the release fixes (the fence test, the CI record and the install step's PATH) and the animated logo, with a cold-read review of the README, then the lockups' fix for a first frame with no lines.
-- **releasing.md:** how a GitHub release reaches PyPI, and the trusted publisher values PyPI needs first. Kept current.
+- **releasing.md:** the steps for a GitHub release, and what the release workflow checks. Polarizer is not on PyPI. Kept current.
 - **guard.md:** what `scripts/dev/guard.sh` records and compares on the development machine, moved here from CLAUDE.md after v0.2.0. Unlike the rest of this directory, it is kept current.
 - **MANUAL-CHECK.md:** the interactive checks the owner ran with Claude Code, for M0, M1a and M2a. Their results are in docs/verified-facts.md.
 - **QUICKSTART-DRAFT.md and PUSHING.md** (removed after v0.2.0; read them at tag v0.2.0): the draft that README.md replaced, and the owner's steps for the first push to GitHub. The older notes still name them.
