@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The manual check scripts (`scripts/rugpull-check.sh`, `scripts/m1a-check.sh` and `scripts/hold-check.sh`) no longer hang at exit when tee never sees end of input, which GitHub's macOS runners do about once in 11,000 runs of that plumbing: tee gets 10 s after the script closes its pipe, then is stopped. Measured before and after in one run of ten macOS jobs: 18 hangs in 203,256 runs without the change, 0 in 106,795 with it (docs/dev/macos-hang.md). A rug-pull check test that times out now prints the script's whole output and its processes.
+
 ## 0.3.0 (preview, released Oct 24, 2026)
 
 - The README is restructured and about half as long: the setup moved to docs/SETUP.md, the directory listing and the test notes to CONTRIBUTING.md, the credits to docs/related.md, and the how-it-works picture replaces the text diagram. Its install lines name the newest release; `tests/test_readme.py` and `tests/test_drill_guide.py` check them against the newest released heading here, and `tests/test_readme_rules.py` holds the README to its length, dash, placeholder and wording rules.
@@ -9,7 +13,6 @@
 - A release workflow checks that a published release's tag names the version in pyproject.toml and builds the wheel and sdist (docs/dev/releasing.md). Publishing to PyPI was set up in it, never used, and dropped; the README installs the wheel from the GitHub release.
 - CLAUDE.md's read-first list is the milestones and the one spec a task touches, the machine-specific guard notes moved to docs/dev/guard.md, and a Testing section says pytest already sets `-q`.
 - docs/dev/QUICKSTART-DRAFT.md and docs/dev/PUSHING.md are removed; both are readable at tag v0.2.0.
-- The manual check scripts (`scripts/rugpull-check.sh`, `scripts/m1a-check.sh` and `scripts/hold-check.sh`) no longer hang at exit when tee never sees end of input, which macOS does about once in 10,000 runs: tee gets 10 s after the script closes its pipe, then is stopped (docs/dev/macos-hang.md). A rug-pull check test that times out now prints the script's whole output and its processes.
 
 ## 0.2.0 (preview, released Oct 11, 2026)
 

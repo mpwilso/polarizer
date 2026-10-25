@@ -118,7 +118,7 @@ The four slow runs (13.3, 17.3, 17.9 and 18.2 s) are the bug happening and the b
 
 Branch `ci-scratch/fix-suite` (commit 00dd797, the fix commit plus a workflow), run 38190748936: one macOS job, the whole suite and then the rug-pull file 20 times in one pytest process, twice (round 1: 1606 passed in 2,059 s; round 2: 1606 passed in 1,998 s), about 340 script runs, none failed and none of the rug-pull tests other than the stuck-tee one took over 12 s.
 
-## Finishing the comparison: the plan (written 2026-10-24, not run)
+## Finishing the comparison: the plan (written 2026-10-24, run on 2026-10-25 as iteration 9)
 
 What iteration 8 left open: its control job saw 0 hangs in 33,985 runs, where iteration 7's rate (14 in 179,774, about 1 in 12,800) predicts about 2.6, so a zero there has about a 7% chance even if nothing changed. The fix's four runs over 5 s, each with the whole output, look like the bug ending under the bound, but without hangs in a control from the same run and image, the before and after have not been compared.
 
@@ -131,3 +131,18 @@ The harness is `ci-synth/drive.py` and `ci-synth/skeleton.sh` at commit 0be47b5 
 5. Stop condition: one run. If it is inconclusive, the log says so and the branch merges on the stand-in tests, with the live comparison recorded as unfinished.
 
 Cost: the repository is public, and GitHub bills no minutes for its standard runners on public repositories; check the account's billing page on the day. The cost is about 400 macOS job minutes of the account's concurrency and the 1.5 hours.
+
+### 9. The comparison, run (2026-10-25)
+
+Run 40229916656 on branch `ci-scratch/fifo-synth` (commit 66c15cc): ten macos-latest jobs listed alternately, five `orig` and five `fix`, three drivers each for 40 minutes, as the plan says. The runner handed out two image versions: jobs 1 to 4 and 10 got 20261021.0445.8, jobs 5 to 9 got 20261013.0424.1, both macOS 26.6.2 on arm64.
+
+| Variant | Jobs | Runs | Hangs | Runs over 5 s |
+| --- | --- | --- | --- | --- |
+| orig | 5 | 203,256 | 18 | 0 |
+| fix | 5 | 106,795 | 0 | 8, all with the whole output |
+
+Per job, `orig` had 4, 0, 8, 1 and 5 hangs in 33,257, 37,364, 45,325, 46,508 and 40,802 runs; `fix` had 1, 2, 1, 1 and 3 runs over 5 s in 23,946, 20,569, 20,015, 20,905 and 21,360 runs. Both images hung in the control: 5 hangs on the newer image, 13 on the older.
+
+All 18 hangs are the state iteration 5 caught: the output ends on the script's last line, bash's call graph ends in `wait4`, tee's in `read`, and no process holds the fifo's write end. The control's rate is about 1 in 11,300. At that rate the fix's 106,795 runs meet the bug about 9.5 times; 8 of them took 16.6 to 19.5 s and finished with the whole output, which is the bound ending it. By the plan's reading (control at least 5, fix 0, slow runs within a factor of three of 9.5), the fix removes the hang on these runners.
+
+Not looked at: why the kernel loses the end of input, and whether the bound could cut off a tee that is slow rather than stuck. None of the 8 slow runs lost output, and a real tee has milliseconds of work left when the script closes its end.
