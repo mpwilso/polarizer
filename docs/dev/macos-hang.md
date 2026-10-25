@@ -117,3 +117,17 @@ Branch `ci-scratch/fifo-synth` (commit 0be47b5), run 38190721824: the plumbing o
 The four slow runs (13.3, 17.3, 17.9 and 18.2 s) are the bug happening and the bound ending it: 100 polls of 0.1 s take 13 to 18 s on a busy runner, as each `sleep` is a process. The fix variant runs fewer times in 40 minutes because each exit waits for at least one 0.1 s poll. The control job happened to see no hang this time; at iteration 7's rate about 3 were expected.
 
 Branch `ci-scratch/fix-suite` (commit 00dd797, the fix commit plus a workflow), run 38190748936: one macOS job, the whole suite and then the rug-pull file 20 times in one pytest process, twice (round 1: 1606 passed in 2,059 s; round 2: 1606 passed in 1,998 s), about 340 script runs, none failed and none of the rug-pull tests other than the stuck-tee one took over 12 s.
+
+## Finishing the comparison: the plan (written 2026-10-24, not run)
+
+What iteration 8 left open: its control job saw 0 hangs in 33,985 runs, where iteration 7's rate (14 in 179,774, about 1 in 12,800) predicts about 2.6, so a zero there has about a 7% chance even if nothing changed. The fix's four runs over 5 s, each with the whole output, look like the bug ending under the bound, but without hangs in a control from the same run and image, the before and after have not been compared.
+
+The harness is `ci-synth/drive.py` and `ci-synth/skeleton.sh` at commit 0be47b5 (local branch `ci-scratch/fifo-synth`; its copy on GitHub was deleted on 2026-10-24, so push the branch again before the run).
+
+1. One workflow run, a matrix of ten macos-latest jobs, 40 minutes and three drivers each: five `orig` and five `fix`, listed alternately so both variants share the time window and the image version. This account runs five macOS jobs at a time, so the run takes two waves, about 1.5 hours of wall clock. Each job prints `sw_vers` and the runner's `ImageVersion` at its start.
+2. Expected counts at iteration 7's rate: the control at about 34,000 runs per job gives about 170,000 runs and about 13 hangs; the chance of 0 is e to the minus 13. The fix at about 18,000 runs per job (each exit waits for at least one poll) gives about 90,000 runs and about 7 bug events, which should show as runs over 5 s with the whole output, and 0 hangs.
+3. Reading the result. The fix is shown to work on this image if the control has at least 5 hangs, the fix has 0, and the fix's slow runs are within a factor of three of the control's hang rate times the fix's run count. A control at 0 again means the image has changed and the bug may have gone with it: compare its version with iteration 7's (macOS 26.6.2, image 20260907.0351.1) and write that down instead of a verdict. Any other outcome is written as it is.
+4. Afterwards: iteration 9 in this log with the table, a CHANGELOG line, and the merge of `macos-hang-2` (six commits, merging clean onto master as of 2026-10-24). The stand-in tests already show the three scripts stop waiting for a tee that never exits; the comparison is the separate claim that the real bug on macOS is what they catch, and the docs say which of the two was measured.
+5. Stop condition: one run. If it is inconclusive, the log says so and the branch merges on the stand-in tests, with the live comparison recorded as unfinished.
+
+Cost: the repository is public, and GitHub bills no minutes for its standard runners on public repositories; check the account's billing page on the day. The cost is about 400 macOS job minutes of the account's concurrency and the 1.5 hours.
