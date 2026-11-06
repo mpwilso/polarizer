@@ -1,0 +1,1 @@
+torn tail: 167 bytes after line 12 (seq 11); run polarizer repair

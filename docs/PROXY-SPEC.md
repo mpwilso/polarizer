@@ -206,7 +206,7 @@ polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--ar
 polarizer repair (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
-M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax, and M2a adds one flag to it: `polarizer serve --config <absolute path> [--no-holds]`. `--no-holds` turns the hold rules off for that process, is never the default, has no config key, and is recorded in `policy.loaded` at every start (HOLD-SPEC.md, section 2). M2a's `holds`, `allow` and `deny` are in HOLD-SPEC.md, section 8.
+M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax, and M2a adds one flag to it: `polarizer serve --config <absolute path> [--no-holds]`. `--no-holds` turns the hold rules off for that process, is never the default, has no config key, and is recorded in `policy.loaded` at every start (HOLD-SPEC.md, section 2). M2a's `holds`, `allow` and `deny` are in HOLD-SPEC.md, section 8. `drill`, `drill report` and `stats` are in MEASURE-SPEC.md, sections 9 and 10.
 
 ```
 polarizer pending (--config <absolute path> | --ledger-dir <absolute path>) [--upstream <prefix>]

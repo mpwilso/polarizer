@@ -1,0 +1,27 @@
+stats: 80 holds; 2 sessions with holds, 0 without
+
+session a1a1a1a1a1a1a1a1 started 2026-10-06T09:59:59.000Z
+  holds 40: allowed 38, denied 2, expired 0, abandoned 0, open 0
+  approval: allowed 38 of 40 decided, 95% (95% interval 83% to 99%)
+  time to decision: median about 19 s, from 40 decisions
+
+session b2b2b2b2b2b2b2b2 started 2026-10-06T10:59:59.000Z
+  holds 40: allowed 20, denied 20, expired 0, abandoned 0, open 0
+  approval: allowed 20 of 40 decided, 50% (95% interval 35% to 65%)
+  time to decision: median about 4 s, from 40 decisions
+
+all sessions
+  holds 80: allowed 58, denied 22, expired 0, abandoned 0, open 0
+  approval: allowed 58 of 80 decided, 73% (95% interval 61% to 82%)
+  time to decision: median about 4 s, from 80 decisions
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+by tool and rule
+  fs__write_file outside-roots: allowed 58 of 80 decided
+
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
+
+trend, with provisional thresholds (40 and 40 decisions, half the time, 6 s)
+  last 40 decisions: median about 4 s, allowed 20 of 40
+  the 40 before: median about 19 s, allowed 38 of 40

@@ -1,0 +1,33 @@
+stats: 9 holds; 3 sessions with holds, 1 without
+
+session a1a1a1a1a1a1a1a1 started 2026-10-06T09:59:59.000Z
+  holds 5: allowed 3, denied 1, expired 1, abandoned 0, open 0
+  approval: allowed 3 of 4 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 20 s, from 4 decisions
+
+session b2b2b2b2b2b2b2b2 started 2026-10-06T10:59:59.000Z
+  holds 3: allowed 2, denied 0, expired 0, abandoned 1, open 0
+  approval: allowed 2 of 2 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 0 s, from 2 decisions
+
+session c3c3c3c3c3c3c3c3 started 2026-10-06T11:59:59.000Z
+  holds 1: allowed 0, denied 0, expired 0, abandoned 0, open 1
+  approval: no decisions
+  time to decision: no decisions
+
+all sessions
+  holds 9: allowed 5, denied 1, expired 1, abandoned 1, open 1
+  approval: allowed 5 of 6 decided, 83% (95% interval 43% to 97%)
+  time to decision: median about 10 s, from 6 decisions
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+by tool and rule
+  fs__write_file outside-roots: allowed 4 of 4 decided; 1 open
+  fs__move_file destructive: allowed 1 of 2 decided
+  fs__edit_file write-pattern: none decided; 1 abandoned
+  web__post_comment egress: none decided; 1 expired
+
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
+
+trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has 6

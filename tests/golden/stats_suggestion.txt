@@ -1,0 +1,22 @@
+stats: 40 holds; 1 session with holds, 0 without
+
+session a1a1a1a1a1a1a1a1 started 2026-10-06T09:59:59.000Z
+  holds 40: allowed 40, denied 0, expired 0, abandoned 0, open 0
+  approval: allowed 40 of 40 decided, 100% (95% interval 91% to 100%)
+  time to decision: median about 10 s, from 40 decisions
+
+all sessions
+  holds 40: allowed 40, denied 0, expired 0, abandoned 0, open 0
+  approval: allowed 40 of 40 decided, 100% (95% interval 91% to 100%)
+  time to decision: median about 10 s, from 40 decisions
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+by tool and rule
+  fs__edit_file write-pattern: allowed 20 of 20 decided
+  fs__write_file write-pattern: allowed 20 of 20 decided
+
+suggestions, from a provisional threshold of 20 decided holds, all allowed:
+  fs__write_file held by write-pattern (build/**) was allowed 20 of 20 times; consider whether that pattern still needs a hold.
+
+trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has 40

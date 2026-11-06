@@ -93,9 +93,9 @@ Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, a
 
 - **It sees the calls routed through it.** The agent's shell, its own file tools and servers configured directly in the client are outside it, and an agent whose call is refused can try another route.
 - **Definitions and named paths, not behavior.** A server can change what a tool does without changing its definition, and a path nested inside an argument or written in free text is not checked.
-- **A person who allows without reading.** Polarizer records that you allowed it; drills measure it, under practice conditions, and nothing measures it during real work yet.
+- **A person who allows without reading.** Polarizer records that you allowed it; drills measure it, under practice conditions. `polarizer stats` counts real holds, the approval rate and the time to each decision, and warns when decisions get faster while the rate stays flat, but it can't tell less reading from easier calls.
 
-Not built: statistics over real holds, live planted calls inside a running proxy, holds after the agent reads untrusted content, and an approval page ([docs/milestones.md](docs/milestones.md)). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
+Not built: live planted calls inside a running proxy, holds after the agent reads untrusted content, and an approval page ([docs/milestones.md](docs/milestones.md)). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
 
 ## How it was built
 

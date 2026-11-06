@@ -25,6 +25,7 @@ import anyio.lowlevel
 
 from polarizer import config, defhash, holds, ledgerdir, lock, pins, sidefiles, writer
 from polarizer import drill as drill_mod
+from polarizer import stats as stats_mod
 from polarizer.decisions import Decider, HoldDecider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 
@@ -75,6 +76,7 @@ def _parser() -> argparse.ArgumentParser:
         ("holds", "list the calls held for a decision"),
         ("allow", "allow one held call"),
         ("deny", "deny one held call"),
+        ("stats", "what the ledger's holds came to: counts, approval rate, time to decision"),
     ]:
         sub = commands.add_parser(name, help=text, description=text)
         sub.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
@@ -284,6 +286,8 @@ def main(argv=None) -> int:
         return list_holds(ledger_dir, args.wait, args.bell)
     if args.command in ("allow", "deny"):
         return decide_hold(args, ledger_dir, forbidden)
+    if args.command == "stats":
+        return stats_mod.run(ledger_dir)
     return repair(ledger_dir, forbidden)
 
 

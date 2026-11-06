@@ -800,6 +800,15 @@ Observed by the owner on GitHub Actions and given in the brief of the cold-read 
 - **What changed since d50da88:** only `docs/milestones.md` and `docs/verified-facts.md` (`git diff --stat d50da88 7afd4e1`, checked in this repo).
 - **Not recorded:** the per-job times and test counts, and a local run at that commit.
 
+## Stage 9 (Nov 5, 2026, UTC)
+
+Run in this session on Windows 11 (native, not WSL2), Python 3.12.10, uv 0.12.2, with the repo's `.venv` from `uv sync --locked`. Nothing was fetched past that sync and no model was run. docs/dev/STAGE9-NOTES.md has the details.
+
+- **Section 10's fixture:** the ledger built from its table (`tests/helpers/statsledger.py`) printed section 10's expected output byte for byte on the first run of `tests/test_stats.py::test_stats_fixture`, which compares `polarizer stats`' stdout with the spec's text copied into the test, not only with the golden file.
+- **The trend warning's numbers:** 40 decisions at 19 s with 36 allowed, then 40 at 4 s with 37 allowed, print section 10's five trend lines exactly; with 38 then 20 allowed the three number lines print alone, Newcombe's high for 20 of 40 minus 38 of 40 being -0.26 (section 7's vector); with the earlier median at 5 s, below the 6 s floor, no warning.
+- **Read-only:** paths, sizes and mtimes under the fixture's directory were unchanged by `stats`, and no lock file was created (`test_stats_is_read_only`).
+- **The development guard** (`scripts/dev/guard.sh`) was not run: it needs the gitignored `.guard-paths` of the author's WSL2 machine, which this machine doesn't have, and the script says it is of no use elsewhere. No other repository or directory was written in the session; the only writes were under `C:\Users\blued\repos\polarizer`, the venv included, and pytest's temporary directories.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.

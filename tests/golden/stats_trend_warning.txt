@@ -1,0 +1,29 @@
+stats: 80 holds; 2 sessions with holds, 0 without
+
+session a1a1a1a1a1a1a1a1 started 2026-10-06T09:59:59.000Z
+  holds 40: allowed 36, denied 4, expired 0, abandoned 0, open 0
+  approval: allowed 36 of 40 decided, 90% (95% interval 76% to 97%)
+  time to decision: median about 19 s, from 40 decisions
+
+session b2b2b2b2b2b2b2b2 started 2026-10-06T10:59:59.000Z
+  holds 40: allowed 37, denied 3, expired 0, abandoned 0, open 0
+  approval: allowed 37 of 40 decided, 93% (95% interval 80% to 98%)
+  time to decision: median about 4 s, from 40 decisions
+
+all sessions
+  holds 80: allowed 73, denied 7, expired 0, abandoned 0, open 0
+  approval: allowed 73 of 80 decided, 91% (95% interval 83% to 96%)
+  time to decision: median about 4 s, from 80 decisions
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+by tool and rule
+  fs__write_file outside-roots: allowed 73 of 80 decided
+
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
+
+trend, with provisional thresholds (40 and 40 decisions, half the time, 6 s)
+  last 40 decisions: median about 4 s, allowed 37 of 40
+  the 40 before: median about 19 s, allowed 36 of 40
+  Decisions got faster while the approval rate did not fall. That can mean less
+  reading, or calls that became easier to judge; a drill can tell the two apart.
