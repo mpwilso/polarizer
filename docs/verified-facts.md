@@ -808,6 +808,7 @@ Run in this session on Windows 11 (native, not WSL2), Python 3.12.10, uv 0.12.2,
 - **The trend warning's numbers:** 40 decisions at 19 s with 36 allowed, then 40 at 4 s with 37 allowed, print section 10's five trend lines exactly; with 38 then 20 allowed the three number lines print alone, Newcombe's high for 20 of 40 minus 38 of 40 being -0.26 (section 7's vector); with the earlier median at 5 s, below the 6 s floor, no warning.
 - **Read-only:** paths, sizes and mtimes under the fixture's directory were unchanged by `stats`, and no lock file was created (`test_stats_is_read_only`).
 - **The development guard** (`scripts/dev/guard.sh`) was not run: it needs the gitignored `.guard-paths` of the author's WSL2 machine, which this machine doesn't have, and the script says it is of no use elsewhere. No other repository or directory was written in the session; the only writes were under `C:\Users\blued\repos\polarizer`, the venv included, and pytest's temporary directories.
+- **CI run 42147283521 at 2debb2a** (branch `stage9-stats`): all five jobs passed, as read with `gh run view` in this session, which can see CI runs through the GitHub CLI where earlier sessions could not. `scripts/test.sh` locally at the same tree: 1 failed, 1292 passed, 79 skipped; the failure is the guide's offline install test, reproduced on master, environmental (docs/dev/STAGE9-NOTES.md, Runs).
 
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
