@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (preview, released Nov 5, 2026)
 
 - `polarizer stats` (stage 9 of the measure spec, docs/MEASURE-SPEC.md, section 10) reads a serve ledger and prints what its holds came to: per session and over all, the holds by ending (allowed, denied, expired, abandoned, open), the approval rate over decided holds with its 95% interval, and the median time to decision, a wall-clock difference in whole seconds that the output calls approximate; then each tool and rule's counts, a suggestion line for a tool and rule allowed 20 of 20 times or more (never for a built-in pattern, Polarizer's own files or a path rule that fails closed), and the trend warning when the last 40 decisions got twice as fast as the 40 before while the approval rate did not fall. It is read-only and takes `--config` or `--ledger-dir`, as `holds` does. The thresholds are provisional and the lines that use them say so. 30 new tests, with golden files for section 9's `stats` rows.
 - The manual check scripts (`scripts/rugpull-check.sh`, `scripts/m1a-check.sh` and `scripts/hold-check.sh`) no longer hang at exit when tee never sees end of input, which GitHub's macOS runners do about once in 11,000 runs of that plumbing: tee gets 10 s after the script closes its pipe, then is stopped. Measured before and after in one run of ten macOS jobs: 18 hangs in 203,256 runs without the change, 0 in 106,795 with it (docs/dev/macos-hang.md). A rug-pull check test that times out now prints the script's whole output and its processes.
