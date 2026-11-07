@@ -38,6 +38,11 @@ egress call whose URLs all name a listed host runs as a grant; and the first ans
 open-world call, or its first progress notification, waits until session.tainted is recorded
 and fsynced. From then on, for the rest of the Claude Code session (the client session, read
 from CLAUDE_CODE_SESSION_ID by serve), every egress call is held.
+
+Spans (docs/EXPORT-SPEC.md, section 2): the SDK's server middleware is replaced by
+telemetry.SpanMiddleware, and a tools/call span gets Polarizer's attributes as the call goes:
+the decision, class and rule, the hold and its ending, the outcome, and the seq and hash of the
+call's entries. Never an argument, a result or a reason.
 """
 
 import asyncio
@@ -58,7 +63,7 @@ from mcp.server.subscriptions import InMemorySubscriptionBus, ListenHandler
 from mcp.shared.subscriptions import ToolsListChanged
 from mcp_types import CLIENT_INFO_META_KEY, CONNECTION_CLOSED, PROTOCOL_VERSION_META_KEY
 
-from polarizer import __version__, defhash, lock, pins
+from polarizer import __version__, defhash, lock, pins, telemetry
 from polarizer import policy as policy_mod
 from polarizer.canon import MAX_INT, EntryRefused
 from polarizer.holds import SESSIONS, HoldState, session_state
@@ -181,6 +186,7 @@ class Gateway:
         hold_progress_interval: float | None = None,
         client_session: str | None = None,
         client_session_warning: str | None = None,
+        tracer=None,
     ):
         self.writer = writer
         self.client_session = client_session
@@ -237,6 +243,7 @@ class Gateway:
             on_call_tool=self._call_tool,
             on_subscriptions_listen=ListenHandler(self.bus),
         )
+        telemetry.install(self.server, tracer)  # before the client middleware, as the SDK's
         self.server.middleware.append(self._client_middleware)
         self._client_lock = threading.Lock()
         self._client_recorded = False
@@ -505,12 +512,18 @@ class Gateway:
         reported on stderr and returns None; it never takes the gateway down. Its catch-up may
         have adopted a hold's ending, so waiting holds are checked afterwards."""
         try:
-            return await self.writer.append_async(kind, data)
+            appended = await self.writer.append_async(kind, data)
         except (Stopped, EntryRefused) as e:
             log(f"polarizer: could not record {kind}: {e}")
             return None
         finally:
             self._wake_holds()
+        if kind in ("call.returned", "call.refused"):  # the call's last entry, for its span
+            note = {"ledger.seq": appended.seq, "ledger.hash": appended.hash}
+            if kind == "call.returned":
+                note.update(outcome=data.get("outcome"), latency_ms=data.get("latency_ms"))
+            _note(**note)
+        return appended
 
     async def _client_middleware(self, ctx, call_next):
         """session.client, written once per process: from the first initialize (older era)
@@ -948,11 +961,14 @@ class Gateway:
         return _text_result(f"polarizer: {clip(name, 4096)} is not available: {why}")
 
     async def _call_tool(self, ctx, params: types.CallToolRequestParams):
+        _note(session=self.session, chain_id=self.writer.chain_id, tool=clip(params.name, 256))
         await self._catch_up()
         if self.writer.stopped:
+            _note(decision="unrecordable")
             return self._unrecordable(params.name, self.writer.stopped)
         upstream, tool, why, definition = await self._route(params.name)
         if upstream is None:
+            _note(decision="not-routed")
             return await self._refuse_route(params.name, tool, why)
         # The rule function (HOLD-SPEC.md, section 4) on a worker thread, since it resolves
         # paths; shielded, so a call the client cancels meanwhile is still decided and recorded.
@@ -962,6 +978,7 @@ class Gateway:
         )  # fmt: skip
         with anyio.CancelScope(shield=True):
             verdict = await anyio.to_thread.run_sync(evaluate)
+        _note(decision=verdict.action, rule=verdict.rule, **{"class": verdict.cls})
         trigger = await self._plan(upstream.prefix, tool, params, definition, verdict)
         if verdict.action == "deny":
             return await self._denied(params, verdict)
@@ -1037,6 +1054,7 @@ class Gateway:
                 if hold is not None:
                     data["hold"] = hold
                 sent = await self.writer.append_async("call.sent", data)
+                _note(**{"ledger.sent_seq": sent.seq})
                 if trigger is not None:
                     trigger.mark(sent.seq)
         except (Stopped, EntryRefused, OSError) as e:
@@ -1150,6 +1168,7 @@ class Gateway:
         """A call the rules hold: record it, wait for its ending, and act on that."""
         name = params.name
         if len(self._open) >= MAX_OPEN_HOLDS:
+            _note(**{"hold.ending": "too-many-holds"})
             await self._append(
                 "call.refused", {"session": self.session, "tool": clip(name), "reason": TOO_MANY}
             )
@@ -1175,6 +1194,7 @@ class Gateway:
                     if self.planter.on:  # every hold of a planting session commits
                         waiter.salt, data["plant_commit"] = self.planter.commitment("real")
                     created = await self.writer.append_async("hold.created", data)
+                    _note(hold=waiter.hold, **{"ledger.hold_seq": created.seq})
                     if trigger is not None:
                         trigger.mark(created.seq)
             except (Stopped, EntryRefused, OSError) as e:
@@ -1187,12 +1207,14 @@ class Gateway:
                 ending = await self._await_ending(waiter, ctx)
                 if ending is None:
                     return self._unrecordable(name, self.writer.stopped or "the writer stopped")
+                _note(**{"hold.ending": _ending_name(ending)})
                 await self._reveal_real(waiter)  # before anything else is done for it
                 if _allows(ending) and self.before_forward is not None:
                     await self.before_forward(waiter.hold)  # tests hold the forward back here
             except anyio.get_cancelled_exc_class():
                 # The client's cancel, or shutdown, which sets its flag before it cancels
                 # anything. Recorded in a shielded scope, best effort, then re-raised.
+                _note(**{"hold.ending": "shutdown" if self.shutting_down else "cancelled"})
                 with anyio.CancelScope(shield=True):
                     if self.shutting_down:
                         await self._cancelled(waiter, name, SHUTDOWN_HOLD, SHUTDOWN_BEFORE_FORWARD)
@@ -1356,6 +1378,19 @@ class _Waiter:
         self.salt: bytes | None = None  # with planting on: kept in memory until the reveal
         self.revealed = False
         self.cls: str | None = None  # the verdict's class: an open-world call taints once allowed
+
+
+def _note(**attributes) -> None:
+    """Polarizer's attributes on the current span, each under "polarizer." (EXPORT-SPEC.md,
+    section 2)."""
+    telemetry.note({f"polarizer.{key}": value for key, value in attributes.items()})
+
+
+def _ending_name(ending) -> str:
+    """A hold's ending as its span names it."""
+    if ending.kind == "hold.decided":
+        return ending.decision
+    return "abandoned" if ending.kind == "hold.abandoned" else "expired"
 
 
 def _allows(ending) -> bool:

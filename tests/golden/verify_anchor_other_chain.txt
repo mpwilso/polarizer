@@ -1,0 +1,5 @@
+intact: 13 entries, 1 sessions, 3 calls
+chain 0123456789abcdef0123456789abcdef, head 91f60639522093e36feae23ff0adadc43134cfca9ef93ed2066afb270278244c at seq 12
+ledger.head: missing; serve will rebuild it
+anchor: checkpoint of chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3 at seq 8, head 4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074
+anchor: other chain: the ledger's chain is 0123456789abcdef0123456789abcdef

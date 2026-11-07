@@ -18,7 +18,7 @@ The ledger is a UTF-8 file with one entry per line. Each line is the entry's can
 | `prev` | the previous entry's `hash`; 64 zeros for the genesis entry |
 | `hash` | 64 lowercase hex characters, defined below |
 
-Any other top-level key makes the entry invalid. The key `sig` is reserved for a later version, which will exclude it from the hash the way `hash` is excluded. Who acted and why go in `data.actor` and `data.reason` when an entry has them.
+Any other top-level key makes the entry invalid. The key `sig` is reserved for a later version, which will exclude it from the hash the way `hash` is excluded. Checkpoints are signed outside the chain, in a commit trailer (EXPORT-SPEC.md, section 4), so they leave `sig` reserved. Who acted and why go in `data.actor` and `data.reason` when an entry has them.
 
 Verify does not require `ts` to be in order, because clocks move. The chain does not prove when anything happened.
 
@@ -109,6 +109,8 @@ New kinds can be added without changing the version, as long as their `data` sta
 | `truncated` | 6 | `ledger.head` records a later seq than the ledger's last entry. |
 | (locked) | 7 | The ledger lock was still held after 2 seconds; nothing was checked (Part 2). |
 | (side file tampered) | 8 | `verify --args` only: a side file's bytes don't match its name (Part 3). |
+| (anchor not extended) | 9 | `verify --anchor` only: the ledger does not extend the checkpoint: it names another chain, the ledger ends before its seq, or the entry at its seq has another hash (EXPORT-SPEC.md, section 4). |
+| (anchor signature) | 10 | `verify --anchor` only: the checkpoint's signature does not match, or the key to check it is missing or not a key (EXPORT-SPEC.md, section 4). |
 
 **Precedence.** The first of these that applies decides the status. Both verifiers implement exactly this order.
 1. **Per-line problems**, in file order. Within one v1 line: structure (`invalid`), then `seq`, then `prev`, then `hash` (`tampered`), then canonical bytes (`not canonical`). Structure means the line is valid UTF-8 and JSON, is an object of the same version as the first line, is at most 16 KiB, has exactly the v1 keys with the right types, stays inside the subset, and is the one genesis at line 1. v0 lines have their own order (below).
@@ -163,6 +165,7 @@ The exact messages are in PROXY-SPEC.md, Startup.
 | `args/` | argument side files (Part 3) |
 | `ledger.jsonl.torn-*` | bytes removed by repair |
 | `defs/` | approved tool definitions (M1a) |
+| `checkpoint.key` | the key that signs checkpoints, created by `polarizer checkpoint` the first time it runs (EXPORT-SPEC.md, section 4) |
 | `sessions/` | one empty lock file per `serve` process, held while it runs, so another process can tell whether a session's holds can still be decided (M2a; HOLD-SPEC.md, section 7; created by `serve` at start, before `session.started`) |
 
 ### The lock
@@ -208,7 +211,7 @@ A second process starting at the same moment waits for the lock, then finds a no
 2. append `ledger.head_rebuilt` with the verified head's seq and hash, and fsync it;
 3. write `ledger.head` pointing at that new entry.
 
-This weakens the lost-tail check. Anyone who can delete `ledger.head` can also remove lines from the end, and the rebuilt head will match. As before, an attacker with write access to `ledger_dir` is out of scope until anchoring. The `ledger.head_rebuilt` entry at least makes each rebuild visible.
+This weakens the lost-tail check. Anyone who can delete `ledger.head` can also remove lines from the end, and the rebuilt head will match. As before, an attacker with write access to `ledger_dir` is out of scope for the chain alone; a checkpoint anchored in a pushed commit (EXPORT-SPEC.md, section 4) is what catches a ledger rewound past it. The `ledger.head_rebuilt` entry at least makes each rebuild visible.
 
 ### fsync policy
 
@@ -235,7 +238,7 @@ It only moves forward: the writer skips the update if the recorded head is valid
 
 That fails safe: a lagging `ledger.head` can only miss a truncation, never report a false one. The security entry itself is already durable in the ledger. A test on the Windows CI runner holds `ledger.head` open from a second handle, triggers an update, and checks that the writer doesn't crash, the ledger entry is intact, and `ledger.head` catches up once the handle closes.
 
-**Startup and verify.** If `ledger.head` records a seq greater than the ledger's last seq, the status is `truncated`. If its seq is at or before the last entry but its hash differs from that entry's hash, the status is `tampered`. The order of these checks is under Statuses. At startup a missing `ledger.head` is rebuilt (see First run); `verify` only reports it. This catches whole lines lost from the end, for example a restored backup, which the chain alone can't see. It doesn't stop someone who can write both files; that needs anchoring.
+**Startup and verify.** If `ledger.head` records a seq greater than the ledger's last seq, the status is `truncated`. If its seq is at or before the last entry but its hash differs from that entry's hash, the status is `tampered`. The order of these checks is under Statuses. At startup a missing `ledger.head` is rebuilt (see First run); `verify` only reports it. This catches whole lines lost from the end, for example a restored backup, which the chain alone can't see. It doesn't stop someone who can write both files; `verify --anchor` against a checkpoint in a pushed commit does (EXPORT-SPEC.md, section 4).
 
 ### Torn tail and repair
 

@@ -4,7 +4,7 @@ import make_fixtures
 from conftest import CONFORMANCE
 
 # Committed files the generator reads or never writes.
-NOT_GENERATED = {"reference_verify.py", make_fixtures.V0_FILE}
+NOT_GENERATED = {"reference_verify.py", "reference_anchor.py", make_fixtures.V0_FILE}
 
 
 def files(root):

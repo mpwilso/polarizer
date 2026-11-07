@@ -111,6 +111,14 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 
 ## The ledger
 
-- Someone who can write to the ledger directory can rewrite the ledger and its head together. There is no anchoring or signature yet.
+- Someone who can write to the ledger directory can rewrite the ledger and its head together. A checkpoint anchored in a commit you have pushed catches a ledger rewound or rewritten past it, but only when you run `polarizer verify --anchor`, and only back to the last checkpoint you anchored; nothing anchors itself.
+- The checkpoint key is an HMAC key kept beside the ledger, readable by you. Anyone who can read it can sign a checkpoint, so it shows who made a checkpoint only as far as the key stayed private; the anchor's strength is the pushed commit, which someone on the machine can't change. Checking an anchor on another machine needs a copy of the key.
 - Call arguments are kept in side files in plain text, protected only by file permissions (0600 in a 0700 directory). Deleting one removes it, and the chain still verifies.
 - Each entry's time is the wall clock. The chain proves order, not when anything happened.
+
+## Spans and OCSF export
+
+- Spans are off by default, and exporting them needs the optional `otel` extra. With export on and the extra missing, `serve` warns once and runs without spans.
+- Only OTLP over HTTP and the console are supported, and a collector that isn't running costs up to 1 s at shutdown; spans still waiting then are dropped. Spans are not a record: the ledger is.
+- A held call's span lasts as long as its hold, and a call still held when `serve` stops ends its span then. Planted calls have no span.
+- `polarizer export --ocsf` maps the seven call kinds only, and leaves out every reason and error text, so an event says that a hold was made and by which rule, not why in words. Its OCSF names were checked against schema 1.9.0 by name, not with an OCSF validator.

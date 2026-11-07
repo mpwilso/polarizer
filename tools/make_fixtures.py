@@ -21,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "conformance"))
+import reference_anchor  # noqa: E402
 import reference_verify as ref  # noqa: E402
 
 V0_COMMIT = "22ef60083b56683ab5abda19bb224309d07fee88"
@@ -830,7 +831,61 @@ def fixtures(v0_data):
             expect("invalid", v0_lines + 1, None, "structure"),
         ),
     }
+    # The anchor ledgers (docs/EXPORT-SPEC.md, section 4): intact chains, each checked against
+    # a checkpoint of valid/session.
+    for name, entries in anchor_ledgers(s).items():
+        out[f"anchors/{name}"] = (
+            text(entries),
+            None,
+            expect("intact", len(entries), len(entries) - 1),
+        )
     return out
+
+
+# Anchors (docs/EXPORT-SPEC.md, section 4). The key is a fixed test value, never a real one;
+# signatures come from conformance/reference_anchor.py, never from Polarizer's code.
+
+ANCHOR_KEY = bytes(range(0x40, 0x60))
+OTHER_KEY = bytes(range(0x60, 0x80))
+
+
+def anchor_ledgers(s):
+    """valid/session cut back past seq 8 (rewound), changed from seq 7 on and re-linked under
+    the same chain id (rewritten), and the same entries under another chain id."""
+    rewritten = copy(s)
+    rewritten[7]["data"]["meta_dropped"] = ["x-rewritten"]
+    relink(rewritten, 7)
+    other = copy(s)
+    other[0]["data"]["chain_id"] = OTHER_CHAIN
+    relink(other, 0)
+    return {"rewound": s[:6], "rewritten": rewritten, "other_chain": other}
+
+
+def trailer(entries, seq, key=ANCHOR_KEY, flip=False):
+    size, head = seq + 1, entries[seq]["hash"]
+    sig = reference_anchor.sign(key, CHAIN, size, head)
+    if flip:
+        sig = sig[:-1] + ("0" if sig[-1] != "0" else "1")
+    return f"Polarizer-Checkpoint: {CHAIN}:{size}:{head}:{sig}"
+
+
+def anchors():
+    """name -> the ledger fixture, the trailer, and the result both anchor checks must give."""
+    s = session_chain()
+    at8 = trailer(s, 8)
+
+    def case(ledger, trailer_line, result, seq=8):
+        return {"ledger": ledger, "trailer": trailer_line, "result": result, "seq": seq}
+
+    return {
+        "extends": case("valid/session", at8, "extends"),
+        "at_head": case("valid/session", trailer(s, len(s) - 1), "extends", len(s) - 1),
+        "rewound": case("anchors/rewound", at8, "rewound"),
+        "rewritten": case("anchors/rewritten", at8, "rewritten"),
+        "other_chain": case("anchors/other_chain", at8, "other chain"),
+        "bad_signature": case("valid/session", trailer(s, 8, flip=True), "bad signature"),
+        "other_key": case("valid/session", trailer(s, 8, key=OTHER_KEY), "bad signature"),
+    }
 
 
 def write(out_dir):
@@ -852,7 +907,10 @@ def write(out_dir):
         "check. head says whether <name>.head exists. Written by tools/make_fixtures.py.",
         "v0_source": {"repo": "parallax", "file": "parallax/ledger.py", "commit": V0_COMMIT},
         "fixtures": expected,
+        "anchors": anchors(),
     }
+    (out_dir / "anchors").mkdir(parents=True, exist_ok=True)
+    (out_dir / "anchors" / "checkpoint.key").write_bytes(ANCHOR_KEY.hex().encode() + b"\n")
     # Bytes, not text: text mode would write \r\n on Windows and break the byte-for-byte check.
     text = json.dumps(doc, indent=1, sort_keys=True) + "\n"
     (out_dir / "expected.json").write_bytes(text.encode("utf-8"))

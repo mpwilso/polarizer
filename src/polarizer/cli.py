@@ -1,8 +1,8 @@
 """The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md),
 pending, approve and reject (docs/PIN-SPEC.md, section 7), holds, allow and deny
 (docs/HOLD-SPEC.md, section 8), drill and drill report (docs/MEASURE-SPEC.md, section 9), card
-(docs/CARD-SPEC.md, section 2), and init (docs/PROXY-SPEC.md, Starting from an existing MCP
-config).
+(docs/CARD-SPEC.md, section 2), init (docs/PROXY-SPEC.md, Starting from an existing MCP
+config), and export, checkpoint and verify --anchor (docs/EXPORT-SPEC.md, sections 3 and 4).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
 The other commands print results to stdout. Usage errors, config errors, unreadable files,
@@ -29,6 +29,8 @@ from polarizer import drill as drill_mod
 from polarizer import stats as stats_mod
 from polarizer.decisions import Decider, HoldDecider, Refusal, fold_reason
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
+
+NEWLINE = chr(10)
 
 
 class UsageError(Exception):
@@ -79,6 +81,8 @@ def _parser() -> argparse.ArgumentParser:
         ("deny", "deny one held call"),
         ("stats", "what the ledger's holds came to: counts, approval rate, time to decision"),
         ("card", "a local page to read and decide held calls, on 127.0.0.1"),
+        ("export", "write the ledger's call events as OCSF JSON lines, on stdout"),
+        ("checkpoint", "print a signed checkpoint of the ledger as a commit trailer line"),
     ]:
         sub = commands.add_parser(name, help=text, description=text)
         sub.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
@@ -87,6 +91,14 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("--no-holds", action="store_true", help=argparse.SUPPRESS)
         if name == "verify":
             sub.add_argument("--args", action="store_true", help="also check side files")
+            sub.add_argument(
+                "--anchor",
+                metavar="TRAILER_OR_REF",
+                help="also check a checkpoint: a Polarizer-Checkpoint line, or a git ref whose "
+                "history carries one",
+            )
+        if name == "export":
+            sub.add_argument("--ocsf", action="store_true", help="OCSF 1.9.0 API Activity")
         if name == "card":
             sub.add_argument("--port", metavar="N", help="1 to 65535 (default: a free port)")
             sub.add_argument(
@@ -288,6 +300,8 @@ def main(argv=None) -> int:
             _check_decision_args(args)
         if args.command == "card":
             port = _check_card_args(args)
+        if args.command == "export" and not args.ocsf:
+            raise UsageError("export needs --ocsf (the only format so far)")
     except UsageError as e:
         return _err(f"polarizer: {e}")
     classes = None  # with --config, pending and approve show each tool's class
@@ -303,7 +317,11 @@ def main(argv=None) -> int:
     else:
         ledger_dir, forbidden = Path(args.ledger_dir), ledgerdir.always_forbidden()
     if args.command == "verify":
-        return verify(ledger_dir, args.args)
+        return verify(ledger_dir, args.args, args.anchor)
+    if args.command == "export":
+        return export_ocsf(ledger_dir)
+    if args.command == "checkpoint":
+        return checkpoint(ledger_dir, forbidden)
     if args.command == "pending":
         return pending(ledger_dir, args.upstream, classes)
     if args.command in ("approve", "reject"):
@@ -319,8 +337,24 @@ def main(argv=None) -> int:
     return repair(ledger_dir, forbidden)
 
 
-def verify(ledger_dir: Path, with_args: bool) -> int:
-    """Read-only: creates, deletes and modifies nothing."""
+def verify(ledger_dir: Path, with_args: bool, anchor_arg: str | None = None) -> int:
+    """Read-only: creates, deletes and modifies nothing. With `anchor_arg`, the checkpoint is
+    read first (a bad one is a usage error, before any output), then checked after the chain
+    and side files (docs/EXPORT-SPEC.md, section 4)."""
+    from polarizer import anchor
+
+    cp = None
+    if anchor_arg is not None:
+        try:
+            cp = anchor.from_argument(anchor_arg)
+        except anchor.AnchorError as e:
+            return _err(str(e))
+    found = {}
+
+    def at_checkpoint(entry: dict) -> None:
+        if entry["seq"] == cp.seq:
+            found["hash"] = entry["hash"]
+
     try:
         data, head = read_files(ledger_dir)
     except Locked:
@@ -331,7 +365,7 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
     if not data:
         print(f"no ledger at {ledger_dir}")
         return 2
-    result = verify_bytes(data, head)
+    result = verify_bytes(data, head, at_checkpoint if cp is not None else None)
     for line in result.output_lines():
         print(line)
     code = result.exit_code
@@ -346,7 +380,114 @@ def verify(ledger_dir: Path, with_args: bool) -> int:
             print(line)
         if report.tampered:
             code = 8
+    if cp is None:
+        return code
+    if result.status != "intact" or result.version != 1:
+        print("anchor: not checked; the ledger is not intact")
+        return code
+    print(anchor.first_line(cp))
+    try:
+        key = anchor.read_key(ledger_dir)
+    except anchor.KeyProblem as problem:
+        outcome = anchor.key_outcome(problem)
+    else:
+        state = result.state
+        outcome = anchor.check(cp, key, state.chain_id, result.seq, found.get("hash"))
+    print(outcome.line)
+    return code or outcome.exit_code
+
+
+def _err_code(line: str, code: int) -> int:
+    print(line, file=sys.stderr)
     return code
+
+
+def _read_intact(ledger_dir: Path, needs: str, refuse_v0: str, on_entry=None):
+    """(result, None) for an intact v1 ledger, or (None, exit code) after one refusal line on
+    stderr: export's and checkpoint's reading, read-only as verify's is. `needs` ends the
+    refusal for a ledger that isn't intact, and `refuse_v0` ends a v0 ledger's."""
+    try:
+        data, head = read_files(ledger_dir)
+    except Locked:
+        return None, _err_code(f"polarizer: {LOCKED_LINE}", 7)
+    except OSError as e:
+        return None, _err(
+            f"polarizer: cannot read {e.filename or ledger_dir / LEDGER}: {e.strerror}"
+        )
+    if not data:
+        return None, _err(f"polarizer: no ledger at {ledger_dir}")
+    result = verify_bytes(data, head, on_entry)
+    if result.status != "intact":
+        return None, _err_code(f"polarizer: {result.message}; {needs}", result.exit_code)
+    if result.version == 0:
+        line = f"polarizer: ledger at {ledger_dir} is v0 (Parallax's format); {refuse_v0}"
+        return None, _err_code(line, 3)
+    return result, None
+
+
+def export_ocsf(ledger_dir: Path) -> int:
+    """polarizer export --ocsf (docs/EXPORT-SPEC.md, section 3): read-only, as verify is; the
+    events on stdout, everything else on stderr."""
+    from polarizer import export
+
+    entries = []
+    result, code = _read_intact(
+        ledger_dir, "export needs an intact ledger", "export reads only v1", entries.append
+    )
+    if result is None:
+        return code
+    exporter = export.Exporter()
+    for entry in entries:
+        event = exporter.event(entry)
+        if event is not None:
+            sys.stdout.write(export.line(event) + NEWLINE)
+    sys.stdout.flush()
+    print(export.summary(exporter), file=sys.stderr)
+    return 0
+
+
+def checkpoint(ledger_dir: Path, forbidden: list[Path]) -> int:
+    """polarizer checkpoint (docs/EXPORT-SPEC.md, section 4): the trailer line on stdout. It
+    reads the ledger as verify does, and writes nothing but the key, the first time."""
+    from polarizer import anchor
+
+    try:
+        warning = ledgerdir.check_location(ledger_dir, forbidden)
+    except ledgerdir.ForbiddenPath as e:
+        return _err(str(e))
+    if warning:
+        print(warning, file=sys.stderr)
+    result, code = _read_intact(
+        ledger_dir, "a checkpoint needs an intact ledger", "a checkpoint needs v1"
+    )
+    if result is None:
+        return code
+    created = False
+    try:
+        key = anchor.read_key(ledger_dir, check_mode=True)
+    except anchor.KeyProblem as problem:
+        if problem.kind != "missing":
+            return _err(anchor.key_line(problem))
+        try:
+            key = anchor.create_key(ledger_dir)
+        except OSError as e:
+            return _err(f"polarizer: cannot create {anchor.key_path(ledger_dir)}: {e.strerror}")
+        created = key is not None
+        if key is None:  # another checkpoint created it a moment ago
+            try:
+                key = anchor.read_key(ledger_dir, check_mode=True)
+            except anchor.KeyProblem as again:
+                return _err(anchor.key_line(again))
+    state = result.state
+    cp = anchor.make(key, state.chain_id, state.lines, state.last_hash)
+    print(cp.trailer())
+    if created:
+        print(
+            f"polarizer: created the checkpoint key {anchor.key_path(ledger_dir)}; keep a copy: "
+            "verify --anchor needs it",
+            file=sys.stderr,
+        )
+    return 0
 
 
 def pending(ledger_dir: Path, upstream: str | None, classes=None) -> int:
@@ -619,6 +760,13 @@ def serve(config_path: Path, no_holds: bool = False) -> int:
     from polarizer.upstream import install_log_handler
 
     install_log_handler()  # the SDK's log records, through safe(), never raw upstream text
+    from polarizer import telemetry
+
+    exporters, source, lines = telemetry.choose(cfg.telemetry.traces, os.environ)
+    if exporters:  # docs/EXPORT-SPEC.md, section 2: off unless the config or OTEL_* says so
+        lines += telemetry.start(exporters, source)[1]
+    for line in lines:
+        print(line, file=sys.stderr)
     if no_holds:
         print("polarizer: warning: started with --no-holds; no call is held", file=sys.stderr)
     from polarizer import taint
@@ -791,6 +939,9 @@ async def _serve(
 
                 log(f"polarizer: could not close the ledger: {describe(e)}")
                 _exit_now(1)
+            from polarizer import telemetry
+
+            await anyio.to_thread.run_sync(telemetry.flush)  # at most 1 s (EXPORT-SPEC.md, 2)
         _exit_now()
 
 

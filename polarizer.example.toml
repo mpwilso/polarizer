@@ -11,6 +11,14 @@
 # Directories the ledger must never be written to, such as your other repositories. Optional.
 # ledger_forbidden_paths = ["~/code/some-project"]
 
+# Spans from serve, one per tool call, carrying the call's ledger seq and hash, for a trace viewer
+# such as Jaeger (docs/EXPORT-SPEC.md, section 2). Off by default, and it needs the otel extra.
+# "otlp" sends them to http://localhost:4318/v1/traces unless the standard OTEL_EXPORTER_OTLP_*
+# variables say otherwise; "console" writes them to serve's stderr. No span holds a call's
+# arguments or results.
+# [telemetry]
+# traces = "otlp"
+
 # Which calls are held for you. A local-write call runs without a hold only when every path it
 # names resolves inside a workspace root and matches no hold pattern; destructive and egress
 # calls, and calls to tools with no class, are always held. Each root must exist when serve

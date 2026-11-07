@@ -1,6 +1,71 @@
 {
  "about": "Expected verify result for each fixture. line and seq are null where they don't apply (head problems have no line; v0 has no seq). check names the failing check. head says whether <name>.head exists. Written by tools/make_fixtures.py.",
+ "anchors": {
+  "at_head": {
+   "ledger": "valid/session",
+   "result": "extends",
+   "seq": 12,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:13:7bceec9be84724ba651d3bcd64afc80fb2cfea18852643fe4f3b8974155d9ddb:1068df7bd9513a8fc64a1495d9b9eac0483a067393188e8418a6b43879f718c0"
+  },
+  "bad_signature": {
+   "ledger": "valid/session",
+   "result": "bad signature",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967980"
+  },
+  "extends": {
+   "ledger": "valid/session",
+   "result": "extends",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+  },
+  "other_chain": {
+   "ledger": "anchors/other_chain",
+   "result": "other chain",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+  },
+  "other_key": {
+   "ledger": "valid/session",
+   "result": "bad signature",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:7bf9dc28058315e1ea19aa89a576311b6970ca1479613ee16e9ce136dda3921b"
+  },
+  "rewound": {
+   "ledger": "anchors/rewound",
+   "result": "rewound",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+  },
+  "rewritten": {
+   "ledger": "anchors/rewritten",
+   "result": "rewritten",
+   "seq": 8,
+   "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+  }
+ },
  "fixtures": {
+  "anchors/other_chain": {
+   "check": null,
+   "head": false,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
+  "anchors/rewound": {
+   "check": null,
+   "head": false,
+   "line": 6,
+   "seq": 5,
+   "status": "intact"
+  },
+  "anchors/rewritten": {
+   "check": null,
+   "head": false,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
   "broken/bad_chain_id": {
    "check": "structure",
    "head": false,

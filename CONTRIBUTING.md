@@ -4,8 +4,8 @@ Polarizer is a one-person portfolio project, and issues and pull requests are we
 
 ## Layout
 
-- `src/polarizer/`: the proxy, the ledger, pins, the scanner, holds, argument rules and taint, drills, stats, the card and the command line; `src/polarizer/scenarios/` holds the drill scenarios, and `src/polarizer/card_page/` the card's page.
-- `conformance/`: the ledger fixtures and the separately written reference verifier.
+- `src/polarizer/`: the proxy, the ledger, pins, the scanner, holds, argument rules and taint, drills, stats, the card, spans, the OCSF export, checkpoints and the command line; `src/polarizer/scenarios/` holds the drill scenarios, and `src/polarizer/card_page/` the card's page.
+- `conformance/`: the ledger and anchor fixtures, and the separately written reference verifier and reference anchor check.
 - `tests/`: every test; `tests/test_readme.py` runs the commands in README.md and docs/SETUP.md, and `tests/test_readme_rules.py` holds the README to its rules (below).
 - `docs/`: the five specs, [the setup](docs/SETUP.md), [the drill guide](docs/DRILL-GUIDE.md), [the evidence](docs/EVIDENCE.md), [the limits](docs/LIMITS.md), [related projects and credits](docs/related.md) and [the verified facts](docs/verified-facts.md). `docs/dev/` is the build log, and [docs/dev/releasing.md](docs/dev/releasing.md) says how a release is cut.
 - `docs/brand/`: the logo, drawn by `scripts/brand.py`. The parallel lines are calls that line up with what you approved; the one turned out of line is held ([what the mark means](docs/brand/README.md)).

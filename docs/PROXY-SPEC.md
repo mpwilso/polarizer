@@ -52,7 +52,7 @@ env = { NOTES_TOKEN = "${NOTES_TOKEN}", NOTES_MODE = "read-only" }
   - `env`: table of strings, default empty;
   - `connect_timeout_seconds`: number from 1 to 20, default 10.
 - **Unknown keys** at either level are an error.
-- **(M2a)** A top-level `[policy]` table (`workspace_roots`, `hold_timeout_seconds`, `write_hold_patterns`, `read_hold_patterns`), and two per-upstream keys, `trust_annotations` and a `tools` table giving each tool its `class` and `path_args`. The schema, the defaults and the error lines are in HOLD-SPEC.md, section 2. A config without them loads, and every call to an unclassified tool is held. **(M2b)** Each `tools` entry may also have `url_args`, `domains` and `deny_values`, and `serve` reads `CLAUDE_CODE_SESSION_ID` from its environment as the Claude Code session it belongs to; TAINT-SPEC.md, sections 2 and 7, are their contract.
+- **(M2a)** A top-level `[policy]` table (`workspace_roots`, `hold_timeout_seconds`, `write_hold_patterns`, `read_hold_patterns`), and two per-upstream keys, `trust_annotations` and a `tools` table giving each tool its `class` and `path_args`. The schema, the defaults and the error lines are in HOLD-SPEC.md, section 2. A config without them loads, and every call to an unclassified tool is held. **(M2b)** Each `tools` entry may also have `url_args`, `domains` and `deny_values`, and `serve` reads `CLAUDE_CODE_SESSION_ID` from its environment as the Claude Code session it belongs to; TAINT-SPEC.md, sections 2 and 7, are their contract. **(Stretch)** A top-level `[telemetry]` table with one key, `traces` (`"off"`, `"otlp"` or `"console"`), turns on exporting serve's spans, as do the standard `OTEL_*` variables; EXPORT-SPEC.md, section 2, is its contract.
 - **Relative paths:** `command` and `args` are passed to the operating system as written. Relative paths resolve against Polarizer's working directory, which Claude Code sets, so use absolute paths.
 
 **The prefix** is the table name. It must be 1 to 32 characters of letters, digits, `-` and `_`, with no `__` anywhere and no `_` at the start or end. `__` is the separator in exposed names, so a prefix that contains it or ends in `_` would split ambiguously.
@@ -146,7 +146,7 @@ Everything below happens before the proxy answers Claude Code's first message. C
 **Argument rules and taint (M2b).** Before any hold, a call whose arguments match a `deny_values` pattern is refused at once, with `call.refused` and its `rule`. An egress call whose URLs all name a host in its tool's `domains` runs as a grant. An open-world call's first answer or progress notification waits until `session.tainted` is recorded and fsynced, and from then on, for the rest of the Claude Code session, every egress call is held. Full contract: TAINT-SPEC.md, sections 4 to 7.
 
 **Request `_meta`.**
-- **Forwarded:** `traceparent` and `tracestate`.
+- **Forwarded:** `traceparent` and `tracestate`. (Stretch) The SDK's client injects the current trace context into each upstream request, so with span export on, the upstream's parent is Polarizer's span for the call, in the client's trace; with it off, the client's own context goes on unchanged (EXPORT-SPEC.md, section 2).
 - **Recorded:** `call.sent` records the names of all other dropped keys in `meta_dropped`, except `io.modelcontextprotocol/*`, which every 2026-07-28 request carries. It records the value of `claudecode/toolUseId` as `client_call_id`, or `null` when the client didn't send one. Its `tool` is the full exposed name, `<prefix>__<tool>`.
 - `params.meta` is a plain dict, and over stdio the SDK presents the progress token there as `progress_token`. Polarizer never reads the token.
 
@@ -204,11 +204,11 @@ Everything else arrives as the upstream sent it, at every level: text, image, au
 ## Command line
 
 ```
-polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--args]
+polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--args] [--anchor <trailer or git ref>]
 polarizer repair (--config <absolute path> | --ledger-dir <absolute path>)
 ```
 
-M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax, and M2a adds one flag to it: `polarizer serve --config <absolute path> [--no-holds]`. `--no-holds` turns the hold rules off for that process, is never the default, has no config key, and is recorded in `policy.loaded` at every start (HOLD-SPEC.md, section 2). M2a's `holds`, `allow` and `deny` are in HOLD-SPEC.md, section 8. `drill`, `drill report` and `stats` are in MEASURE-SPEC.md, sections 9 and 10. M3's `card` is in CARD-SPEC.md, section 2.
+M1a adds these; their output, refusals and golden files are in PIN-SPEC.md, section 7. `serve` keeps its M0 syntax, and M2a adds one flag to it: `polarizer serve --config <absolute path> [--no-holds]`. `--no-holds` turns the hold rules off for that process, is never the default, has no config key, and is recorded in `policy.loaded` at every start (HOLD-SPEC.md, section 2). M2a's `holds`, `allow` and `deny` are in HOLD-SPEC.md, section 8. `drill`, `drill report` and `stats` are in MEASURE-SPEC.md, sections 9 and 10. M3's `card` is in CARD-SPEC.md, section 2. `export --ocsf`, `checkpoint` and `verify --anchor` are in EXPORT-SPEC.md, sections 3 and 4.
 
 ```
 polarizer pending (--config <absolute path> | --ledger-dir <absolute path>) [--upstream <prefix>]

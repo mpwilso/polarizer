@@ -1,0 +1,5 @@
+intact: 13 entries, 1 sessions, 3 calls
+chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3, head 7349bb94efc3263df2f656cd1f4bc622fd0aa4f7dbe3736111ea75e9a61a3990 at seq 12
+ledger.head: missing; serve will rebuild it
+anchor: checkpoint of chain 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3 at seq 8, head 4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074
+anchor: rewritten: the ledger's entry at seq 8 is 79b2db1ca2a1b66a299b2ca3b6d5b2a6a25b6da7c092ac381bb4c5a42ba25429, not the anchored head

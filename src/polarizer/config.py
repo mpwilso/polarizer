@@ -22,7 +22,8 @@ from polarizer.text import safe
 
 PREFIX = re.compile(r"(?!_)(?!.*__)[A-Za-z0-9_-]{1,32}(?<!_)")
 WHOLE_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-TOP_KEYS = ("ledger_dir", "ledger_forbidden_paths", "upstream", "policy")
+TOP_KEYS = ("ledger_dir", "ledger_forbidden_paths", "upstream", "policy", "telemetry")
+TRACES = ("off", "otlp", "console")  # [telemetry] traces (docs/EXPORT-SPEC.md, section 2)
 UPSTREAM_KEYS = (
     "command",
     "args",
@@ -95,6 +96,13 @@ class PolicyConfig:
 
 
 @dataclass(frozen=True)
+class TelemetryConfig:
+    """[telemetry] (docs/EXPORT-SPEC.md, section 2): which exporter serve's spans go to."""
+
+    traces: str = "off"
+
+
+@dataclass(frozen=True)
 class Config:
     path: Path
     sha256: str
@@ -102,6 +110,7 @@ class Config:
     ledger_forbidden_paths: tuple[Path, ...]  # always includes Parallax's two directories
     upstreams: tuple[Upstream, ...]
     policy: PolicyConfig = PolicyConfig()
+    telemetry: TelemetryConfig = TelemetryConfig()
 
 
 def load(path: Path, *, require_env: bool = True, environ: dict | None = None) -> Config:
@@ -167,7 +176,24 @@ def load(path: Path, *, require_env: bool = True, environ: dict | None = None) -
         ledger_forbidden_paths=tuple(forbidden),
         upstreams=tuple(upstreams),
         policy=_policy(doc, fail),
+        telemetry=_telemetry(doc, fail),
     )
+
+
+def _telemetry(doc: dict, fail) -> TelemetryConfig:
+    """The [telemetry] table. With none, export is off."""
+    if "telemetry" not in doc:
+        return TelemetryConfig()
+    table = doc["telemetry"]
+    if not isinstance(table, dict):
+        fail('"telemetry" must be a table')
+    for key in table:
+        if key != "traces":
+            fail(f'[telemetry] unknown key "{safe(key)}"')
+    traces = table.get("traces", "off")
+    if traces not in TRACES or not isinstance(traces, str):
+        fail('[telemetry] traces must be "off", "otlp" or "console"')
+    return TelemetryConfig(traces)
 
 
 def _policy(doc: dict, fail) -> PolicyConfig:

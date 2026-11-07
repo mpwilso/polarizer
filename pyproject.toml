@@ -31,6 +31,16 @@ dependencies = [
     # Imported directly (proxy.py catches its ValidationError); the version mcp 2.2.0 resolved.
     "pydantic==2.14.1",
     "rfc8785==0.1.4",
+    # Imported directly (telemetry.py, for serve's spans); the version mcp 2.2.0 resolved.
+    "opentelemetry-api==1.45.1",
+]
+
+[project.optional-dependencies]
+# Exporting spans (docs/EXPORT-SPEC.md, section 2): the SDK and its OTLP over HTTP exporter, at
+# the release that matches opentelemetry-api above. Without them serve's spans go nowhere.
+otel = [
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
 ]
 
 [project.urls]
@@ -46,6 +56,9 @@ polarizer = "polarizer.cli:main"
 dev = [
     "pytest==9.1.1",
     "ruff==0.17.2",
+    # The otel extra, so the tests can use the SDK's in-memory exporter and build the OTLP one.
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
 ]
 
 [build-system]

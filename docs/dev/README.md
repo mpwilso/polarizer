@@ -1,6 +1,6 @@
 # The build log
 
-These files are the record of how Polarizer was built, kept as they were written. They are not user documentation: start with README.md at the repo root, and the specs in docs/. Where a file here disagrees with a spec in docs/ (LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md, MEASURE-SPEC.md, CARD-SPEC.md, TAINT-SPEC.md, SCAN-SPEC.md) or with docs/verified-facts.md, those win.
+These files are the record of how Polarizer was built, kept as they were written. They are not user documentation: start with README.md at the repo root, and the specs in docs/. Where a file here disagrees with a spec in docs/ (LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md, MEASURE-SPEC.md, CARD-SPEC.md, TAINT-SPEC.md, SCAN-SPEC.md, EXPORT-SPEC.md) or with docs/verified-facts.md, those win.
 
 The work went in stages: a spec round for each milestone, then implementation stages, each with tests written first, a claims table (what was claimed, the command that checks it, and whether it was run), and a review before the next stage. "The owner" in these files is the project's author, who ran the interactive checks.
 
@@ -14,6 +14,7 @@ The work went in stages: a spec round for each milestone, then implementation st
 - **STAGE11-NOTES.md:** M3, the card (docs/CARD-SPEC.md): `polarizer card`, its page and its checks, deciding with `elapsed_ms`, and the headless check on real Claude Code. It is numbered 11 because stage 10, live planted calls, was named before it and is built after it.
 - **STAGE12-NOTES.md:** M2b, argument rules and taint (docs/TAINT-SPEC.md): `domains`, `url_args` and `deny_values`, the deny tier, grants, taint recorded before the answer and kept across a restart of serve in one Claude Code session, what `holds`, the card and `stats` show, and the headless check on real Claude Code.
 - **STAGE13-NOTES.md:** M1b, scanning and review (docs/SCAN-SPEC.md): the scanner and its rules, the poisoned fixtures, flags in `pending` and `approve`, the card's review view, `meta_allowlist` and `POLARIZER-TOOLDEF/2`, upstream instructions pinned and served, the false flags on the reference servers, and the headless check on real Claude Code.
+- **STAGE14-NOTES.md:** three stretch milestones in one stage (docs/EXPORT-SPEC.md): OpenTelemetry spans from `serve` that carry each call's ledger seq and hash, `polarizer export --ocsf`, and signed checkpoints anchored in a commit trailer, checked by `polarizer verify --anchor`, with a second, standard-library anchor check in `conformance/`.
 - **releasing.md:** the steps for a GitHub release, and what the release workflow checks. Polarizer is not on PyPI. Kept current.
 - **guard.md:** what `scripts/dev/guard.sh` records and compares on the development machine, moved here from CLAUDE.md after v0.2.0. Unlike the rest of this directory, it is kept current.
 - **macos-hang.md:** the hunt for a rare hang of the rug-pull check's test on macOS CI.
