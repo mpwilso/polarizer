@@ -1,7 +1,8 @@
 """The polarizer command line: serve, verify [--args] and repair (docs/PROXY-SPEC.md),
 pending, approve and reject (docs/PIN-SPEC.md, section 7), holds, allow and deny
-(docs/HOLD-SPEC.md, section 8), drill and drill report (docs/MEASURE-SPEC.md, section 9), and
-init (docs/PROXY-SPEC.md, Starting from an existing MCP config).
+(docs/HOLD-SPEC.md, section 8), drill and drill report (docs/MEASURE-SPEC.md, section 9), card
+(docs/CARD-SPEC.md, section 2), and init (docs/PROXY-SPEC.md, Starting from an existing MCP
+config).
 
 serve's stdout is the protocol channel: everything it says to the person goes to stderr.
 The other commands print results to stdout. Usage errors, config errors, unreadable files,
@@ -77,6 +78,7 @@ def _parser() -> argparse.ArgumentParser:
         ("allow", "allow one held call"),
         ("deny", "deny one held call"),
         ("stats", "what the ledger's holds came to: counts, approval rate, time to decision"),
+        ("card", "a local page to read and decide held calls, on 127.0.0.1"),
     ]:
         sub = commands.add_parser(name, help=text, description=text)
         sub.add_argument("--config", metavar="PATH", help="absolute path to polarizer.toml")
@@ -85,6 +87,13 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("--no-holds", action="store_true", help=argparse.SUPPRESS)
         if name == "verify":
             sub.add_argument("--args", action="store_true", help="also check side files")
+        if name == "card":
+            sub.add_argument("--port", metavar="N", help="1 to 65535 (default: a free port)")
+            sub.add_argument(
+                "--allow-no-terminal",
+                action="store_true",
+                help="run although stdin is not a terminal (for scripts)",
+            )
         if name in ("approve", "reject", "allow", "deny"):
             meta = "HOLD_ID" if name in ("allow", "deny") else "PREFIX TOOL DEF_HASH"
             sub.add_argument("names", nargs="*", metavar=meta)
@@ -180,6 +189,21 @@ def _check_decision_args(args) -> None:
         raise UsageError(f"{args.command} needs a terminal: a person decides holds and approvals")
 
 
+def _check_card_args(args) -> int:
+    """card's own argument rules, then the terminal check. Returns the port (0: a free one).
+    Raises UsageError."""
+    port = 0
+    if args.port is not None:
+        if not re.fullmatch("[0-9]{1,5}", args.port) or not 1 <= int(args.port) <= 65535:
+            raise UsageError("--port must be a whole number from 1 to 65535")
+        port = int(args.port)
+    if not args.allow_no_terminal and not _stdin_is_terminal():
+        # As for allow and deny, the line doesn't name the flag: an agent that started the
+        # card itself would read the token it prints.
+        raise UsageError("card needs a terminal: a person decides holds and approvals")
+    return port
+
+
 _SEED = re.compile("[0-9a-f]{32}")
 
 
@@ -262,6 +286,8 @@ def main(argv=None) -> int:
             raise UsageError(f"{flag} must be an absolute path, got {given}")
         if args.command in ("approve", "reject", "allow", "deny"):
             _check_decision_args(args)
+        if args.command == "card":
+            port = _check_card_args(args)
     except UsageError as e:
         return _err(f"polarizer: {e}")
     classes = None  # with --config, pending and approve show each tool's class
@@ -288,6 +314,8 @@ def main(argv=None) -> int:
         return decide_hold(args, ledger_dir, forbidden)
     if args.command == "stats":
         return stats_mod.run(ledger_dir)
+    if args.command == "card":
+        return open_card(ledger_dir, forbidden, classes, port)
     return repair(ledger_dir, forbidden)
 
 
@@ -463,6 +491,21 @@ def decide_hold(args, ledger_dir: Path, forbidden: list[Path]) -> int:
         return 1
     finally:
         decider.close()
+
+
+def open_card(ledger_dir: Path, forbidden: list[Path], policy, port: int) -> int:
+    """polarizer card after its argument checks: the location as allow checks it, then the
+    card itself (docs/CARD-SPEC.md, section 2). `policy` is the config's, for showing the paths
+    a call would touch, or None with --ledger-dir."""
+    try:
+        warning = ledgerdir.check_location(ledger_dir, forbidden)
+    except ledgerdir.ForbiddenPath as e:
+        return _err(str(e))
+    if warning:
+        print(warning, file=sys.stderr)
+    from polarizer import card
+
+    return card.run(ledger_dir, policy, port, terminal=_stdin_is_terminal())
 
 
 def decide(args, ledger_dir: Path, forbidden: list[Path], classes=None) -> int:

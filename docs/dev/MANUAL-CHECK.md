@@ -1,4 +1,4 @@
-# Manual check (M0, M1a and M2a)
+# Manual check (M0, M1a, M2a and M3)
 
 **Which code this checks.** Steps 1 to 8 describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run steps 1 to 8 as written, check out commit 4eaa61a. The M1a and M2a sections at the end run on the current code: M1a's is a headless, scripted rug-pull check that asks nothing; M2a's is an interactive session with a script that finds each hold for you.
 
@@ -165,3 +165,14 @@ What it does not show:
 - **Esc during a hold.** `tests/test_hold_restart.py` checks it with the two signals Claude Code was seen to send; the interactive check does not ask you to press Esc while a call is held.
 - **Claude Code's own limits** on a call that waits for many minutes: the hold timeout here is 300 seconds at most, under the idle timeout read from the binary (docs/HOLD-SPEC.md, section 9).
 - **Other servers and other platforms.** Only the pinned Filesystem server and the probe, on the machine you run it on.
+
+## M3: the card (not run yet)
+
+The owner's interactive check of the card; nothing in this section has been run. The headless check, `.venv/bin/python scripts/card_check.py`, drives the card with curl on real Claude Code (docs/verified-facts.md, Card check, headless); this one is a person, a browser and an interactive session.
+
+1. **Terminal B:** `scripts/hold-check.sh reset`, as in M2a, step 1.
+2. **Terminal C:** `polarizer card --config ~/code/polarizer/polarizer.toml`. It prints one line, `open http://127.0.0.1:<port>/?t=<token>`; open that link in a browser on the same machine. The page should say `Nothing is held right now.`
+3. **Terminal A:** `claude --mcp-config "$PWD/manual/mcp.json" --strict-mcp-config`, then ask Claude to write a new file under `/tmp/polarizer-manual/.git/hooks` with the polarizer tool. Within about 2 seconds the page should show the held call: the tool, `write-pattern` and its reason, the path it would touch, the definition unchanged since its approval, the recommendation to deny, and the exact call as `polarizer holds` prints it. Note how long the page took to show it and whether every label read plainly.
+4. **Deny** on the page. The page should say `denied hold <id> at seq <q>` and list the hold under `Ended while this card was open`; Claude Code should show `polarizer: fs__write_file was not allowed`. Ask Claude to try again, and **Allow** the new hold on the page; the file should be written.
+5. Ask for one more write and leave it on the page for more than 2 minutes: the note `probably moved to the background by Claude Code` should appear at 120 s, and Claude Code should move the call to the background at about 123 s. Allow it, and note what Claude Code shows.
+6. **Terminal C:** Ctrl+C ends the card. Then `polarizer verify` and `polarizer stats` with `--config ~/code/polarizer/polarizer.toml`: the decisions from the page carry `elapsed_ms`, and `stats` says how many were timed on one clock. Then `scripts/hold-check.sh finish` in terminal B.

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="polarizer-nonce" content="{{NONCE}}">
+<title>Polarizer: held calls</title>
+<link rel="stylesheet" href="/card.css">
+<script src="/card.js" defer></script>
+</head>
+<body>
+<header class="top">
+<h1>Held calls</h1>
+<p class="where">Polarizer's card for the ledger in <code>{{LEDGER}}</code>. It checks for held calls every 1.5 seconds.</p>
+<p id="status" class="status">Loading.</p>
+</header>
+<main>
+<section id="stale" class="problem" hidden>
+<p>This page is out of date or the card has stopped. Open the link polarizer card printed again.</p>
+</section>
+<section id="problem" class="problem" hidden></section>
+<section id="result" class="result" hidden aria-live="polite">
+<h2>Last decision</h2>
+<pre id="result-lines"></pre>
+</section>
+<section class="queue" aria-labelledby="queue-heading">
+<h2 id="queue-heading">Waiting for you</h2>
+<p id="empty" class="empty">Nothing is held right now.</p>
+<div id="queue"></div>
+</section>
+<section class="ended" aria-labelledby="ended-heading">
+<h2 id="ended-heading">Ended while this card was open</h2>
+<p id="ended-empty" class="empty">None yet.</p>
+<ul id="ended"></ul>
+</section>
+</main>
+<footer>
+<p>Allow and Deny are recorded in the ledger exactly as <code>polarizer allow</code> and <code>polarizer deny</code> record them. The recommendation is written by Polarizer's code from the rule that held the call, never by a model, and nothing acts on it but you.</p>
+</footer>
+</body>
+</html>

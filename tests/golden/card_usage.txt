@@ -1,0 +1,8 @@
+polarizer: card needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: card needs exactly one of --config <absolute path> or --ledger-dir <absolute path>
+polarizer: --ledger-dir must be an absolute path, got relative
+polarizer: --port must be a whole number from 1 to 65535
+polarizer: --port must be a whole number from 1 to 65535
+polarizer: --port must be a whole number from 1 to 65535
+polarizer: --no-holds goes with serve
+polarizer: card needs a terminal: a person decides holds and approvals

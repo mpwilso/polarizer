@@ -41,7 +41,18 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - In Claude Code 2.1.289, a call still running after about 123 seconds is moved to the background, and the agent keeps working. It can make other calls, or ask for the same call again, which is a new hold. The first hold is unchanged: nothing runs until you allow it, and it is refused at the timeout. This was observed once and may differ in other versions.
 - Claude Code's own permission prompt for an MCP tool comes before the call reaches Polarizer, so a held call may be approved twice: once in Claude Code, without the details, and once with `polarizer allow`.
 - If `MCP_TOOL_TIMEOUT` is set below the hold timeout, Claude Code cancels the call first.
-- There is no page or notification for holds yet. Run `polarizer holds --wait` in another terminal.
+- There is no notification for holds outside a terminal or the card's page. Run `polarizer holds --wait` in another terminal, or keep `polarizer card`'s page open; nothing calls you to either.
+
+## The card
+
+- The card shows what the ledger says. A call the rules let through never appears on it.
+- The paths it shows are resolved when it first shows a hold, not when the call arrived, so a symbolic link changed in between shows on the card and not in the hold's reason.
+- Its recommendation follows the rule that held the call and nothing else. "No recommendation" is not a statement that the call is safe.
+- A program running as you can read the card's token from its terminal, the page from the browser, or the card's memory, and decide through it. The token is also in the browser's history for as long as that card runs.
+- Another web server on 127.0.0.1 that your browser visits receives the card's cookie, since browsers send cookies to every port of a host. The cookie alone opens nothing but the page's script and style; the token and a page's nonce are needed for anything else.
+- The note that a call has probably moved to the background appears at 120 s, from one observed version of Claude Code (2.1.289, about 123 s).
+- The card's time to decision (`elapsed_ms`) starts when the card first sends a hold to a page, not when you first look at it, and a page left in a background tab counts as showing it.
+- The card was checked headless on real Claude Code, with its endpoints driven by curl; its page in a person's browser has been checked only by a test in a headless Chromium.
 
 ## People
 

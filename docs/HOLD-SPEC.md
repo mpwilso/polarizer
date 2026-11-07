@@ -593,7 +593,7 @@ Every row gets a file under `tests/golden/`, on a ledger built by a deterministi
 - whether an interactive session applies the idle timeout, and whether it honors progress there;
 - whether anything else in Claude Code ends a call that waits for 20 minutes.
 
-**Open question for M3:** should the card show that a held call has probably been moved to the background, once its age passes about 120 s, so the person knows the agent may already have gone on (and may have asked again)? The 123 s is Claude Code's, observed once, and may change between versions.
+**Open question for M3:** should the card show that a held call has probably been moved to the background, once its age passes about 120 s, so the person knows the agent may already have gone on (and may have asked again)? The 123 s is Claude Code's, observed once, and may change between versions. (Decided for M3 by the owner: yes, at 120 s; docs/CARD-SPEC.md, section 4.)
 
 ## 10. Failing closed
 

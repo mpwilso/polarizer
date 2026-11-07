@@ -1,6 +1,6 @@
 # The build log
 
-These files are the record of how Polarizer was built, kept as they were written. They are not user documentation: start with README.md at the repo root, and the specs in docs/. Where a file here disagrees with a spec in docs/ (LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md, MEASURE-SPEC.md) or with docs/verified-facts.md, those win.
+These files are the record of how Polarizer was built, kept as they were written. They are not user documentation: start with README.md at the repo root, and the specs in docs/. Where a file here disagrees with a spec in docs/ (LEDGER-SPEC.md, PROXY-SPEC.md, PIN-SPEC.md, HOLD-SPEC.md, MEASURE-SPEC.md, CARD-SPEC.md) or with docs/verified-facts.md, those win.
 
 The work went in stages: a spec round for each milestone, then implementation stages, each with tests written first, a claims table (what was claimed, the command that checks it, and whether it was run), and a review before the next stage. "The owner" in these files is the project's author, who ran the interactive checks.
 
@@ -10,10 +10,11 @@ The work went in stages: a spec round for each milestone, then implementation st
 - **STAGE6-NOTES.md and STAGE7-NOTES.md:** M2a, classes, path rules and holds, then session lifetime, progress and `holds --wait`, and the CI follow-ups for Windows and macOS.
 - **STAGE8-NOTES.md:** the first slice of measurement: the hold-check test fix, the owner's answers to the measure spec, and drills (the statistics, the scenario set, `polarizer drill`, `drill report` and the export, and docs/DRILL-GUIDE.md), then the shortcut audit, the guided condition, the release round (the shape audit, the README, the CI install check and the public-readiness review), the release fixes (the fence test, the CI record and the install step's PATH) and the animated logo, with a cold-read review of the README, then the lockups' fix for a first frame with no lines.
 - **STAGE9-NOTES.md:** the second slice of measurement, `polarizer stats` over real holds: what was built, the guesses the spec left open, and the runs.
+- **STAGE11-NOTES.md:** M3, the card (docs/CARD-SPEC.md): `polarizer card`, its page and its checks, deciding with `elapsed_ms`, and the headless check on real Claude Code. It is numbered 11 because stage 10, live planted calls, was named before it and is built after it.
 - **releasing.md:** the steps for a GitHub release, and what the release workflow checks. Polarizer is not on PyPI. Kept current.
 - **guard.md:** what `scripts/dev/guard.sh` records and compares on the development machine, moved here from CLAUDE.md after v0.2.0. Unlike the rest of this directory, it is kept current.
 - **macos-hang.md:** the hunt for a rare hang of the rug-pull check's test on macOS CI.
-- **MANUAL-CHECK.md:** the interactive checks the owner ran with Claude Code, for M0, M1a and M2a. Their results are in docs/verified-facts.md.
+- **MANUAL-CHECK.md:** the interactive checks the owner ran with Claude Code, for M0, M1a and M2a, and the card's check for M3, which the owner has not run yet. Their results are in docs/verified-facts.md.
 - **QUICKSTART-DRAFT.md and PUSHING.md** (removed after v0.2.0; read them at tag v0.2.0): the draft that README.md replaced, and the owner's steps for the first push to GitHub. The older notes still name them.
 
 File names written without a directory in these files (such as HOLD-SPEC.md) mean the file in docs/ or here, whichever has it. Two files were renamed for v0.1, and records made before then use the old names: `scripts/guard.sh` is now `scripts/dev/guard.sh`, and the manual check's config, `polarizer.example.toml`, is now `manual/polarizer.manual.toml` (`polarizer.example.toml` became the example for users).

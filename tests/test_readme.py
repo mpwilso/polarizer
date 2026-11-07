@@ -619,7 +619,8 @@ OLD_LIMITS = (
     "In Claude Code 2.1.289, a call still running after about 123",
     "Claude Code's own permission prompt for an MCP tool comes be",
     "If `MCP_TOOL_TIMEOUT` is set below the hold timeout, Claude",
-    "There is no page or notification for holds yet. Run `polariz",
+    # M3 built the page (docs/CARD-SPEC.md), so this limit now names only the notification.
+    "There is no notification for holds outside a terminal or the card",
     "A hold is only as good as the person reading it. If you allo",
     "An agent that can run commands as you can also run `polarize",
     "Someone who can write to the ledger directory can rewrite th",

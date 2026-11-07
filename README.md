@@ -40,6 +40,8 @@ polarizer drill --calls 10 --condition guided
 
 That installs the v0.4.1 release. For the latest code instead, install with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. `polarizer init` writes a config from the MCP config you already use; from the install to a held call in Claude Code: [docs/SETUP.md](docs/SETUP.md).
 
+To read and decide held calls in your browser, run `polarizer card --config <path>` and open the link it prints. The page shows each held call, what it would touch and a recommendation, and its Allow and Deny are recorded as `polarizer allow` and `polarizer deny` record them.
+
 ## Try a drill
 
 A drill shows you invented agent calls one at a time, under the task the agent was given, and you allow or deny each; some were changed to be wrong on purpose, and after each answer you see whether you were right and why. People who approve prompt after prompt stop reading ([sources](docs/MEASURE-SPEC.md#2-sources)); a drill measures how well you still catch a planted call. It runs offline: no agent, no account, no MCP server, nothing sent anywhere.
@@ -97,7 +99,7 @@ Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, a
 - **Definitions and named paths, not behavior.** A server can change what a tool does without changing its definition, and a path nested inside an argument or written in free text is not checked.
 - **A person who allows without reading.** Polarizer records that you allowed it; drills measure it, under practice conditions. `polarizer stats` counts real holds, the approval rate and the time to each decision, and warns when decisions get faster while the rate stays flat, but it can't tell less reading from easier calls.
 
-Not built: live planted calls inside a running proxy, holds after the agent reads untrusted content, and an approval page ([docs/milestones.md](docs/milestones.md)). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
+Not built: live planted calls inside a running proxy, and holds after the agent reads untrusted content ([docs/milestones.md](docs/milestones.md)). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
 
 ## How it was built
 

@@ -822,6 +822,39 @@ Run in this session on Windows 11 (native, not WSL2), Python 3.12.10, uv 0.12.2,
 - **The review fixes on CI:** commit 639761e passed on all five jobs on branch `review-fixes` in run 42332456292, and again on master in run 42333107189 after the owner's `~/merge-branch.sh` fast-forwarded master to it, as read with `gh run view`. Run 42333107189 is the latest master run recorded as passing on all five jobs. The 0.4.1 release commit's own runs come after this record and are not in it.
 - **The development guard** was not run, for Stage 9's reason. The only writes were under `C:\Users\blued\repos\polarizer`, the session's scratch directory and pytest's temporary directories, and the GitHub release body of v0.4.0.
 
+## Stage 11, the card (Nov 7, 2026, UTC)
+
+Built on Windows 11 (native), Python 3.12.10, uv 0.12.2, on branch `m3-card` from 38d9438 (v0.4.1). docs/dev/STAGE11-NOTES.md has the details.
+
+- **`tests/test_card.py` on Windows:** 30 passed, 2 skipped (the symbolic-link case, for want of the symlink privilege, and the browser test, which tests/helpers/chromium.py can't drive on Windows).
+- **`tests/test_card.py` in WSL2** (the `parallax` distro, Linux, with the repo's `.venv` after `uv sync --locked`), on a copy of the same working tree in `/tmp/pz-m3`, checked by the sha256 of `src/polarizer/card.py` on both sides: 32 passed in 6.85 s, the browser test included, with the headless Chromium that Playwright left in `~/.cache/ms-playwright` (`chromium_headless_shell-1243`). Nothing was fetched for it.
+- **The development guard** was not run, for Stage 9's reason. The writes were under `C:/Users/blued/repos/polarizer`, the session's scratch directory, pytest's temporary directories, and in WSL `/tmp/pz-m3` and `/tmp/polarizer-card-check.s34qwq5r`. Copying the tree to WSL ran `rm -rf /tmp/pz-m3` before that directory existed, so nothing was removed; the command broke CLAUDE.md's rule 10 (deletes only inside ~/code/polarizer) and was not repeated.
+
+## Card check (Nov 7, 2026, UTC, headless, Claude Code 2.1.310)
+
+`scripts/card_check.py`, run once in this session in WSL2 (the `parallax` distro), from `/tmp/pz-m3`, a copy of the `m3-card` working tree before its commit, as `.venv/bin/python scripts/card_check.py`, at 2026-11-07T04:23:03Z. `claude auth status` showed a claude.ai login before the run. No `CLAUDE_*` or `ANTHROPIC_*` variable was set. The script ran one `claude -p` with `--model claude-haiku-4-5-20251001`, `--max-budget-usd 1`, `--strict-mcp-config`, `--mcp-config <tmp>/mcp.json` (only `polarizer serve --config <tmp>/polarizer.toml`, whose ledger was `<tmp>/ledger` and whose one upstream was the pinned Filesystem server, `npx -y @modelcontextprotocol/server-filesystem@2026.8.31 <tmp>/work`, already in the npx cache from earlier checks), `--allowedTools=mcp__pz__fs__write_file`, `--permission-mode default`, `--no-session-persistence` and `--output-format json`, stdin from `/dev/null`, `MCP_TOOL_TIMEOUT` unset. The prompt asked for a write to `<tmp>/work/.git/hooks/card-check.txt`, and one retry if it was not allowed. The card was started as `polarizer card --config <tmp>/polarizer.toml --allow-no-terminal` and driven with curl only. Every check passed:
+
+| Check | Result |
+|---|---|
+| The page loads with the token, and has a nonce | PASS |
+| 403 for the page without the token, with a wrong token, and with Host `evil.example:<port>`; for the state without the cookie and without the nonce; for a decision without `Origin` | PASS, all six |
+| The write was held and shown on the card | PASS: hold 1e14b531097ebab3, `write-pattern`, `matches .git/hooks/**`, with the recommendation to deny |
+| Deny through the card | PASS: `denied hold 1e14b531097ebab3 at seq 37`; the file was not written |
+| The retry was a new hold; allow through the card | PASS: hold b4d0535c934a2758, `allowed hold b4d0535c934a2758 at seq 40` |
+| Both decisions carry `elapsed_ms` | PASS: 4 and 3 ms (curl decided as soon as the state showed each hold), each with `terminal: false`, from `--allow-no-terminal` |
+| The denied call was refused and never forwarded; the allowed one was forwarded and returned `ok` | PASS |
+| The file holds what was allowed | PASS |
+| Both holds in the card's ended list | PASS: `allowed at seq 40`; `denied at seq 37: card check: deny` |
+| `polarizer verify` | PASS: `intact: 43 entries, 2 sessions, 1 calls` |
+| `polarizer stats` | PASS: `2 of 2 decisions were timed on one clock, from the card that showed the hold.` |
+| The card stops on SIGTERM with exit 0 and nothing more on stdout | PASS |
+
+- **The model replied** (not used for pass or fail): "File written successfully to `/tmp/polarizer-card-check.s34qwq5r/work/.git/hooks/card-check.txt` after the initial call was denied."
+- **Cost,** from Claude Code's own `total_cost_usd`: 0.0321061 USD.
+- **Bookkeeping:** `~/.claude.json` went from 102,647 bytes (mtime 01:32:49Z) to 103,025 bytes (04:23:06Z) during the run, Claude Code's own update. The script only stats it.
+- **What it shows:** with Claude Code 2.1.310, headless, a write held by `.git/hooks/**` appears in the card's state within a poll; a deny through the card's HTTP endpoints is recorded and the call never reaches the server; the agent's retry is a new hold; an allow through the card forwards exactly that call; and both `hold.decided` entries carry `elapsed_ms`.
+- **What it does not show:** a person reading the page in a browser (the browser test is a headless Chromium, and the client here is a script); the background note on real Claude Code; Windows or macOS. The interactive check (docs/dev/MANUAL-CHECK.md, M3) is still the owner's to run.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.

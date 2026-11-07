@@ -1,6 +1,6 @@
 """Decisions: on tool definitions, approve one, approve a group, reject (docs/PIN-SPEC.md,
-section 7); on holds, allow and deny (docs/HOLD-SPEC.md, section 8). The command line and the
-test helpers share this code.
+section 7); on holds, allow and deny (docs/HOLD-SPEC.md, section 8). The command line, the card
+(docs/CARD-SPEC.md, section 6) and the test helpers share this code.
 
 Each decision is a tool.approved, tool.rejected or hold.decided entry with actor "person",
 fsynced with ledger.head updated before the call returns. A decision made without a terminal
@@ -194,8 +194,11 @@ class HoldDecider:
         out: Callable[[str], None],
         err: Callable[[str], None],
         now: datetime,
+        elapsed_ms: int | None = None,
     ) -> None:
-        """Steps 4 to 7 of `allow` (decision "allow") or `deny`. Raises Refusal."""
+        """Steps 4 to 7 of `allow` (decision "allow") or `deny`. Raises Refusal. The card
+        gives `elapsed_ms`, its monotonic time from showing the hold to the click, recorded
+        as one more field; nothing else of the entry differs (docs/CARD-SPEC.md, section 6)."""
         found = self.holds.get(hold_id)
         side_problem = None
         if found is not None:
@@ -235,6 +238,8 @@ class HoldDecider:
             "actor": ACTOR,
             "reason": reason,
         }
+        if elapsed_ms is not None:
+            data["elapsed_ms"] = elapsed_ms
         data = _marked(data, self.terminal)
         done = self.writer.append("hold.decided", data, check=check).result()
         held = self.holds.get(hold_id)
