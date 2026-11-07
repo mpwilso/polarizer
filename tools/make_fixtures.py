@@ -575,6 +575,31 @@ def taint_chain():
     )  # fmt: skip
 
 
+def scan_chain():
+    """What M1b adds (docs/SCAN-SPEC.md, section 9): an upstream's instructions seen and
+    approved under the reserved tool name ":instructions", a definition hashed under
+    POLARIZER-TOOLDEF/2 approved in the same group, and a flagged definition approved by name
+    with the rule ids of its flags."""
+    lab = {"session": SESSION, "upstream": "lab"}
+    group = "6" * 64
+    return build(
+        [
+            ("session.started", {"session": SESSION, "polarizer_version": "0.5.0",
+                                 "config_sha256": "7" * 64}),
+            ("tool.seen", {**lab, "tool": ":instructions", "def_hash": "1" * 64}),
+            ("tool.seen", {**lab, "tool": "clock", "def_hash": "2" * 64}),
+            ("tool.seen", {**lab, "tool": "lookup", "def_hash": "3" * 64}),
+            ("tool.approved", {"upstream": "lab", "tool": ":instructions", "def_hash": "1" * 64,
+                               "actor": "person", "group": group}),
+            ("tool.approved", {"upstream": "lab", "tool": "clock", "def_hash": "2" * 64,
+                               "actor": "person", "group": group}),
+            ("tool.approved", {"upstream": "lab", "tool": "lookup", "def_hash": "3" * 64,
+                               "actor": "person", "group": None,
+                               "flags": ["conceal-from-user", "instruction-tag"]}),
+        ]
+    )  # fmt: skip
+
+
 def fixtures(v0_data):
     s = session_chain()
     n = len(s)  # 13 entries, seq 0 to 12
@@ -584,6 +609,7 @@ def fixtures(v0_data):
     d = drills_chain()
     planted = planted_chain()
     t = taint_chain()
+    sc = scan_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -607,6 +633,8 @@ def fixtures(v0_data):
         ),
         # ledger.head at the restarted serve's policy.loaded, the last security entry.
         "valid/taint": (text(t), head_of(t[11]), expect("intact", len(t), len(t) - 1)),
+        # ledger.head at the flagged approval, the last security entry.
+        "valid/scan": (text(sc), head_of(sc[7]), expect("intact", len(sc), len(sc) - 1)),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (
@@ -641,6 +669,12 @@ def fixtures(v0_data):
             change_data(t, 6, {"tool": "web__other"}, rehash=False),
             None,
             expect("tampered", 7, 6, "hash"),
+        ),
+        # A flagged approval whose flags were edited away, not re-hashed.
+        "broken/scan_edit_flags": (
+            change_data(sc, 7, {"flags": ["instruction-tag"]}, rehash=False),
+            None,
+            expect("tampered", 8, 7, "hash"),
         ),
         "broken/holds_rehashed_decision": (
             change_data(h, 8, {"decision": "allow"}),

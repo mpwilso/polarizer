@@ -22,7 +22,8 @@ connection's era expects: ToolsListChanged() on the listen bus for 2026-07-28, o
 send_tool_list_changed() on the session that last listed it for 2025-11-25. Tests call it
 directly, so no tool call through the proxy is needed.
 
-`definitions=` serves those fixed Tool objects instead of the generated ones (for the
+`instructions=` are the server's instructions (docs/SCAN-SPEC.md, section 7); tests may change
+`server.instructions` between starts. `definitions=` serves those fixed Tool objects instead of the generated ones (for the
 definition hash tests); `fakes.from_env` reads them from the JSON file named by
 FAKE_DEFINITIONS, so modern_server.py can serve them over stdio.
 """
@@ -84,6 +85,7 @@ class FakeUpstream:
         listen=True,
         log=None,
         definitions=None,
+        instructions=None,
     ):
         self.definitions = list(definitions) if definitions is not None else None
         if self.definitions is not None:
@@ -108,6 +110,7 @@ class FakeUpstream:
         self.server = Server(
             "fake",
             version="1",
+            instructions=instructions,
             cache_hints=hints,
             on_list_tools=self._list,
             on_call_tool=self._call,

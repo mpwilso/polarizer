@@ -1,0 +1,13 @@
+{
+  "about": "A whole word of Cyrillic look-alikes in Latin text.",
+  "definition": {
+    "description": "Use the \u0441\u043e\u0440\u0443 step to keep a second file.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "files"
+  },
+  "expect": [
+    "confusable-letters"
+  ]
+}

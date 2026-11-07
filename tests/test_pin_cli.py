@@ -69,9 +69,9 @@ def test_group_is_bound_to_what_was_printed(tmp_path, capsys, fake_home):
         members, _ = decider.pending_group()
     finally:
         decider.close()
-    # probe/fail (rejected before), every/echo (approved before) and probe/rich (bad copy)
-    # are left out.
-    assert [(b.upstream, b.tool) for b in members] == [("probe", "note"), ("probe", "wait")]
+    # probe/fail (rejected before), every/echo (approved before), probe/rich (bad copy) and
+    # probe/note (flagged by the scanner: a zero-width space; docs/SCAN-SPEC.md) are left out.
+    assert [(b.upstream, b.tool) for b in members] == [("probe", "wait")]
 
 
 def test_group_skips_tools_with_several_waiting_hashes(tmp_path, capsys, fake_home):
@@ -88,9 +88,10 @@ def test_group_skips_tools_with_several_waiting_hashes(tmp_path, capsys, fake_ho
         header = lines.index(f"new probe__echo {h}")
         assert lines[header + 1] == SEVERAL
     assert lines[lines.index(f"new probe__wait {wait}") + 1] == "{"
+    # probe/echo's second definition sends to a host, so it is flagged (docs/SCAN-SPEC.md).
     assert lines[-1].endswith(
-        "covers the 1 new definitions above for tools with no decision yet and one definition "
-        "waiting"
+        "covers the 1 unflagged new definitions above for tools with no decision yet and one "
+        "definition waiting"
     )
     decider = Decider.open(directory)
     try:
@@ -242,8 +243,9 @@ def test_decisions_need_a_ledger(tmp_path, capsys, fake_home):
 def test_group_writer_fails_partway(tmp_path, capsys, fake_home, monkeypatch):
     """The lines already printed stand, stderr says how many were approved, and the exit code
     is the writer error's own."""
-    directory = pinledger.mixed(tmp_path / "ledger")
+    directory = pinledger.classes(tmp_path / "ledger")  # a group of three
     printed = group_id(directory, capsys)
+    first = entries(directory)[-1]["seq"] + 1
     real = Decider._record
     calls = []
 
@@ -256,12 +258,12 @@ def test_group_writer_fails_partway(tmp_path, capsys, fake_home, monkeypatch):
     monkeypatch.setattr(Decider, "_record", failing)
     assert run("approve", "--ledger-dir", str(directory), "--group", printed) == 1
     out, err = capsys.readouterr()
-    assert out == f"approved probe__note {pinledger.hashed('note')} at seq 16\n"
+    assert out == f"approved probe__post {pinledger.hashed('post')} at seq {first}\n"
     assert err == (
         "polarizer: could not record an approval: polarizer: stopped writing the ledger: test; "
-        "run polarizer verify; 1 of 2 were approved\n"
+        "run polarizer verify; 1 of 3 were approved\n"
     )
-    assert [e["kind"] for e in entries(directory)].count("tool.approved") == 3
+    assert [e["kind"] for e in entries(directory)].count("tool.approved") == 4
 
 
 def _python(*args, **kwargs):

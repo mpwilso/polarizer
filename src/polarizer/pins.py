@@ -1,5 +1,7 @@
 """Pin state: a fold over the verified ledger, the states a tool can be in, and what
-`pending` lists (docs/PIN-SPEC.md, sections 3, 4 and 7).
+`pending` lists (docs/PIN-SPEC.md, sections 3, 4 and 7), with each definition's flags from the
+scanner (docs/SCAN-SPEC.md, section 5). An upstream's instructions are pinned under the
+reserved tool name INSTRUCTIONS, through the same fold.
 
 Nothing that decides exposure lives only in memory: every process builds the same state from
 the ledger alone. The fold is fed entries in seq order, from the verification pass and then from
@@ -14,7 +16,8 @@ from pathlib import Path
 
 import rfc8785
 
-from polarizer import defhash
+from polarizer import defhash, scan
+from polarizer.scan import INSTRUCTIONS
 from polarizer.text import printable
 
 CAP = 16  # distinct live hashes recorded per tool between decisions
@@ -23,6 +26,7 @@ GROUP_PREFIX = b"POLARIZER-GROUP/1\n"
 DECISIONS = ("tool.approved", "tool.rejected")
 NOT_IN_GROUP = "not in a group, because this tool has a decision; approve it by name"
 SEVERAL = "more than one definition waits for this tool; approve one by name"
+FLAGGED = "flagged by the scanner; read it, then approve it by name"
 BLOCK_KINDS = ("new", "changed", "unservable")
 
 # state -> (the reason after `upstream <p> tool "<t>" ` in call.refused, the client's <why>)
@@ -178,18 +182,24 @@ class Block:
     copy_problem: str | None = None  # why the stored copy failed its check
     decided: bool = False  # the tool has a decision, so it is never grouped
     several: bool = False  # no decision, and more than one definition waits: never grouped
+    flags: list = field(default_factory=list)  # the scanner's flags on the stored copy
 
     @property
     def groupable(self) -> bool:
         return (
-            self.kind == "new" and not self.decided and not self.several and self.copy is not None
+            self.kind == "new"
+            and not self.decided
+            and not self.several
+            and self.copy is not None
+            and not self.flags
         )
 
 
 def blocks(pins: PinState, ledger_dir: Path, upstream: str | None = None) -> list[Block]:
     """Every block `pending` prints, sorted by prefix, tool name, then the seq of its record."""
     found = []
-    for key in pins.keys():
+    every = pins.keys()
+    for key in every:
         if upstream is not None and key[0] != upstream:
             continue
         tp = pins.get(*key)
@@ -207,6 +217,8 @@ def blocks(pins: PinState, ledger_dir: Path, upstream: str | None = None) -> lis
                 block.copy = defhash.read_copy(ledger_dir, def_hash)
             except defhash.CopyProblem as e:
                 block.copy_problem = str(e)
+            else:
+                block.flags = scan.scan(block.copy, scan.context_names(every, *key))
             found.append(block)
         shown = set()
         for def_hash, problem, seq in tp.unservable:
@@ -235,9 +247,11 @@ def group(found: list[Block]) -> tuple[list[Block], str | None]:
 
 def render(found: list[Block], class_line=None) -> list[str]:
     """`pending`'s stdout for an intact ledger, line by line. Every name, hash and problem
-    taken from the ledger goes through printable(). `class_line(prefix, tool, copy)`, given
-    with --config, adds each new or changed block's class line after its header lines, when
-    its stored copy passes (docs/HOLD-SPEC.md, section 8)."""
+    taken from the ledger goes through printable(). Each new or changed block whose stored
+    copy passes lists its flags after its header lines and its class line (docs/SCAN-SPEC.md,
+    section 5). `class_line(prefix, tool, copy)`, given with --config, adds each such tool
+    block's class line after its header lines (docs/HOLD-SPEC.md, section 8); instructions
+    have none."""
     if not found:
         return ["pending: nothing waits for a decision"]
     new, changed, unservable = (sum(b.kind == k for b in found) for k in BLOCK_KINDS)
@@ -249,17 +263,11 @@ def render(found: list[Block], class_line=None) -> list[str]:
         if b.kind == "unservable":
             lines.append(f"unservable {name} {def_hash}: {printable(b.problem)}")
             continue
-        if b.kind == "changed":
-            lines.append(f"changed {name} {def_hash}, approved {printable(b.approved)}")
-        elif b.rejected is not None:
-            lines.append(f"new {name} {def_hash}, after rejecting {printable(b.rejected)}")
-            lines.append(NOT_IN_GROUP)
-        else:
-            lines.append(f"new {name} {def_hash}")
-            if b.several:
-                lines.append(SEVERAL)
-        if b.copy is not None and class_line is not None:
+        lines.extend(header(b))
+        if b.copy is not None and class_line is not None and b.tool != INSTRUCTIONS:
             lines.append(class_line(b.upstream, b.tool, b.copy))
+        if b.copy is not None:
+            lines.extend(scan.lines(b.flags))
         if b.copy is not None:
             lines.extend(defhash.render(b.copy).split("\n"))
         else:
@@ -268,8 +276,29 @@ def render(found: list[Block], class_line=None) -> list[str]:
     members, group_id = group(found)
     if members:
         lines.append("")
-        lines.append(
-            f"group {group_id} covers the {len(members)} new definitions above "
-            "for tools with no decision yet and one definition waiting"
-        )
+        lines.append(group_line(found, members, group_id))
     return lines
+
+
+def header(b: Block) -> list[str]:
+    """A new or changed block's header line, and its line on grouping if it has one."""
+    name = printable(f"{b.upstream}__{b.tool}")
+    def_hash = printable(b.def_hash or "-")
+    if b.kind == "changed":
+        return [f"changed {name} {def_hash}, approved {printable(b.approved)}"]
+    if b.rejected is not None:
+        return [f"new {name} {def_hash}, after rejecting {printable(b.rejected)}", NOT_IN_GROUP]
+    if b.several:
+        return [f"new {name} {def_hash}", SEVERAL]
+    if b.flags:
+        return [f"new {name} {def_hash}", FLAGGED]
+    return [f"new {name} {def_hash}"]
+
+
+def group_line(found: list[Block], members: list[Block], group_id: str) -> str:
+    """The group line; it says "unflagged" only when a block is flagged (SCAN-SPEC.md, 5)."""
+    what = "unflagged new definitions" if any(b.flags for b in found) else "new definitions"
+    return (
+        f"group {group_id} covers the {len(members)} {what} above "
+        "for tools with no decision yet and one definition waiting"
+    )

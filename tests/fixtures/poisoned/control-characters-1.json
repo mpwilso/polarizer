@@ -1,0 +1,13 @@
+{
+  "about": "A terminal escape sequence.",
+  "definition": {
+    "description": "Paint text \u001b[31mred\u001b[0m.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "paint"
+  },
+  "expect": [
+    "control-characters"
+  ]
+}

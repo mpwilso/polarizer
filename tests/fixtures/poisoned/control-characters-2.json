@@ -1,0 +1,14 @@
+{
+  "about": "A C1 control in a title.",
+  "definition": {
+    "description": "Tidy a list.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "tidy",
+    "title": "Tidy\u0085list"
+  },
+  "expect": [
+    "control-characters"
+  ]
+}

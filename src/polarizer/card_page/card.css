@@ -56,3 +56,11 @@ button.allow { color: var(--allow); border-color: var(--allow); }
 button.deny { color: var(--deny); border-color: var(--deny); }
 button:disabled { opacity: 0.4; cursor: default; }
 #ended li { margin: 0.2rem 0; overflow-wrap: anywhere; }
+.definition { border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem 1rem; margin: 0 0 1.5rem; }
+.definition.flagged { border-color: var(--deny); }
+.definition h3 { margin: 0 0 0.25rem; font-size: 1.1rem; word-break: break-all; }
+.flags { background: var(--deny-panel); border-left: 4px solid var(--deny); padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+.flags .line { margin: 0.2rem 0; overflow-wrap: anywhere; }
+.flag-note { font-weight: 600; }
+.group { margin: 0.5rem 0 1rem; }
+.label { margin: 0.75rem 0 0.25rem; font-weight: 600; }

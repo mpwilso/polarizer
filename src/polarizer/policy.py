@@ -403,6 +403,8 @@ def classes_section(policy: Policy, pin_state, ledger_dir: Path, upstream=None) 
     for prefix, tool in pin_state.keys():
         if upstream is not None and prefix != upstream or prefix not in policy.upstreams:
             continue
+        if tool == ":instructions":  # an upstream's instructions have no class (SCAN-SPEC.md)
+            continue
         tp = pin_state.get(prefix, tool)
         if tp.decision != "approved" or tp.drifted:
             continue

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from polarizer import defhash, sidefiles
+from polarizer import defhash, scan, sidefiles
 from polarizer.holds import HoldState, listener, reveal_checks, session_state, warning
 from polarizer.holds import block as hold_block
 from polarizer.ledger import LEDGER
@@ -81,7 +81,9 @@ class Decider:
         self, prefix: str, tool: str, def_hash: str, out: Callable[[str], None], classes=None
     ):
         """Steps 4 to 7 of `approve` for one definition. Raises Refusal. With `classes` (the
-        config's policy, given --config), the class line follows the printed definition."""
+        config's policy, given --config), the class line follows the printed definition. A
+        flagged definition's flag lines follow, and tool.approved records its rule ids as
+        `flags` (docs/SCAN-SPEC.md, sections 5 and 9)."""
         name = f"{prefix}__{tool}"
         tp = self.pins.get(prefix, tool)
         if def_hash not in tp.seen_ever and def_hash not in tp.approved_ever:
@@ -96,11 +98,16 @@ class Decider:
             return
         for line in defhash.render(obj).split("\n"):
             out(line)
-        if classes is not None:
+        if classes is not None and tool != scan.INSTRUCTIONS:
             from polarizer.policy import class_line
 
             out(class_line(classes, prefix, tool, obj))
+        flags = scan.scan(obj, scan.context_names(self.pins.keys(), prefix, tool))
+        for line in scan.lines(flags):
+            out(line)
         data = {"upstream": prefix, "tool": tool, "def_hash": def_hash, "group": None}
+        if flags:
+            data["flags"] = scan.rule_ids(flags)
         done = self._record("tool.approved", data)
         out(f"approved {name} {def_hash} at seq {done.seq}")
 

@@ -199,3 +199,15 @@ The owner's interactive check of taint; nothing in this section has been run. Th
 6. **Terminal C:** Ctrl+C. **Terminal B:** the printed `polarizer verify --config ...`, then `polarizer stats` with the same `--config`: its taint section should count the tainted sessions and the holds taint caused. Every `policy.loaded` of the first Claude Code session should carry the same `client_session`; a different one, the new session's.
 
 If step 4's new hold is by `egress` and its reason names no taint, or the post runs, the restart did not keep `CLAUDE_CODE_SESSION_ID`; note it, since taint across Esc then fails open (docs/TAINT-SPEC.md, section 11).
+
+## M1b: scanning and review (not run yet)
+
+The owner's interactive check of the scanner and the card's review view; nothing in this section has been run. The headless one is `.venv/bin/python scripts/scan_check.py` (docs/verified-facts.md, Scan check), driven with curl; this one has a person read the review view in a browser and approve from it, which nothing else checks. It uses the repository's stand-in server (`tests/helpers/lab_stub.py`: `add` and `echo` are clean, `lookup`'s description is poisoned on purpose and the tool reads no file, and its instructions are clean) and its own ledger under `.repro/`.
+
+1. **Terminal B,** in `~/code/polarizer`: `uv sync --locked`, then `.venv/bin/python scripts/scan_check.py --setup`. It writes a directory under `.repro/`, records what the stand-in lists with no approval (no model), and prints the commands for terminals A, B and C.
+2. **Terminal B:** the printed `polarizer pending --config ...`. `lab__lookup` should say `flagged by the scanner; read it, then approve it by name`, with four flag lines, and the group line should cover the 3 unflagged definitions: `lab__:instructions`, `lab__add` and `lab__echo`.
+3. **Terminal C:** the printed `polarizer card --config ...`; open its link. Under `Tool definitions waiting for approval`, read each box: `lab__lookup`'s flags should sit beside its definition, in the marked box, and its box should say to approve it on its own. Note whether the flags and the definition are readable without scrolling sideways, and whether anything on the page could be misread as approval of `lookup`.
+4. Click `Approve all unflagged (3)`. The `Last decision` box should list three `approved` lines and `approved 3 definitions as group <id>`.
+5. **Terminal A:** the printed `claude --mcp-config ... --strict-mcp-config`. Type `/mcp`: `add` and `echo` should be listed, `lookup` not. Ask Claude for the lab pass phrase; note whether it answers `pelican-42`, which only the approved instructions give.
+6. **Terminal C:** click `Approve this definition` on `lab__lookup`, after reading it. Then, in terminal A, type `/mcp` without reconnecting and note whether `lookup` is listed; if not, reconnect the server and check again. Do not ask Claude to call `lookup`.
+7. **Terminal C:** Ctrl+C. **Terminal B:** the printed `polarizer verify --config ...`; the ledger should hold three approvals with one group id and `lookup`'s alone, with `flags`.

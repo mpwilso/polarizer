@@ -12,7 +12,7 @@ This is the behavior contract for M3: the card, a local approval page for held c
 
 **Not in M3:**
 - live planted calls (stage 10, MEASURE-SPEC.md, section 11), built after M3; section 8 says what the card does once they exist;
-- argument rules and taint (M2b), built after M3: docs/TAINT-SPEC.md, section 9 adds a `Session taint` row and a recommendation for rule `tainted`; and scanning (M1b);
+- argument rules and taint (M2b), built after M3: docs/TAINT-SPEC.md, section 9 adds a `Session taint` row and a recommendation for rule `tainted`; and scanning (M1b), built after M3: docs/SCAN-SPEC.md, section 6 adds a review view of the tool definitions waiting for approval, with `GET /review` and `POST /approve`;
 - any decision the card makes by itself: the recommendation is a line of text, and nothing is ever allowed or denied without a person's click;
 - a notification outside the page (sound, desktop notification). `polarizer holds --wait --bell` stays the way to be told in a terminal.
 

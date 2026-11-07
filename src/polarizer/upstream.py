@@ -92,6 +92,15 @@ def install_log_handler() -> None:
         root.addHandler(SafeLog(logging.WARNING))
 
 
+def _instructions(client: Client) -> str | None:
+    """The upstream's instructions, or None when it sent none or an empty text."""
+    try:
+        text = client.instructions
+    except Exception:
+        return None
+    return text if isinstance(text, str) and text else None
+
+
 class ListingLimit(Exception):
     """An upstream listed more than MAX_PAGES pages or MAX_TOOLS tools."""
 
@@ -115,12 +124,14 @@ async def list_all(client: Client) -> list[types.Tool]:
 class UpstreamSpec:
     """How to reach one upstream. `target` is anything mcp.Client accepts: serve passes
     StdioServerParameters, and tests may pass an in-memory Server. `mode` is the Client's
-    negotiation mode; serve always uses "auto"."""
+    negotiation mode; serve always uses "auto". `meta_allow` is the upstream's meta_allowlist:
+    the _meta keys of its tools that are served (docs/SCAN-SPEC.md, section 8)."""
 
     prefix: str
     target: Any
     connect_timeout: float
     mode: str = "auto"
+    meta_allow: tuple = ()
 
 
 Callback = Callable[["Upstream"], Awaitable[None]]
@@ -137,6 +148,7 @@ class Upstream:
         self.lost: str | None = None  # why a connected upstream went away
         self.list_error: str | None = None  # why its latest refresh failed; None after a success
         self.protocol_version: str | None = None
+        self.instructions: str | None = None  # from initialize or server/discover
         self.tools: dict[str, types.Tool] = {}  # the upstream's own name -> its tool, in order
         self.skipped: list[str] = []
         self._on_change = on_change
@@ -182,6 +194,7 @@ class Upstream:
                     listed = await list_all(client)
                     if self.error is None:
                         self._absorb(listed)
+                        self.instructions = _instructions(client)
                         self.protocol_version = client.protocol_version
                         self.client = client
                     self._ready.set()

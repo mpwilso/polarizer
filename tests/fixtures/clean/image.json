@@ -1,0 +1,9 @@
+{
+  "definition": {
+    "description": "Return a small image as base64 encoded data, with its MIME type.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "tiny_image"
+  }
+}

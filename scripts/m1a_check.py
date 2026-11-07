@@ -17,7 +17,7 @@ import os
 import re
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # How many tools each upstream of manual/polarizer.manual.toml lists (docs/dev/MANUAL-CHECK.md,
@@ -25,10 +25,11 @@ from pathlib import Path
 EXPECTED_TOOLS = {"probe": 7, "fs": 14}
 NOTHING = "pending: nothing waits for a decision"
 HEX = "[0-9a-f]{64}"
+FLAG_COUNT = re.compile(r"and \d+ more flags")
 SUMMARY = re.compile(r"pending: (\d+) new, (\d+) changed, (\d+) unservable\Z")
 NEW = re.compile(rf"new (\S+) ({HEX})(, after rejecting {HEX})?\Z")
 CHANGED = re.compile(rf"changed (\S+) ({HEX}), approved ({HEX})\Z")
-GROUP = re.compile(rf"group ({HEX}) covers the (\d+) new definitions above ")
+GROUP = re.compile(rf"group ({HEX}) covers the (\d+) (?:unflagged )?new definitions above ")
 
 
 def say(text: str = "") -> None:
@@ -83,6 +84,7 @@ class Block:
     problem: str | None = None  # a stored copy that fails its check
     definition: dict | None = None
     cls: str | None = None  # the class line of pending --config
+    flags: list = field(default_factory=list)  # the scanner's flag lines (docs/SCAN-SPEC.md)
 
     @property
     def name(self) -> str:
@@ -106,13 +108,16 @@ def parse(text: str) -> tuple[tuple[int, int, int], list[Block]]:
         kind = header.split(" ", 1)[0]
         pattern = {"new": NEW, "changed": CHANGED, "group": GROUP}.get(kind)
         block = Block(header, kind, pattern.match(header) if pattern else None)
-        # After the header: a note (not in a group, more than one definition), the class
-        # line that pending --config adds (docs/HOLD-SPEC.md, section 8), then the definition
-        # or a stored-copy problem.
-        if rest and not rest[0].startswith(("{", "stored copy ", "class ")):
+        # After the header: a note (not in a group, more than one definition, flagged), the
+        # class line that pending --config adds (docs/HOLD-SPEC.md, section 8), the scanner's
+        # flag lines (docs/SCAN-SPEC.md, section 5), then the definition or a stored-copy
+        # problem.
+        if rest and not rest[0].startswith(("{", "stored copy ", "class ", "flag ")):
             block.note = rest.pop(0)
         if rest and rest[0].startswith("class "):
             block.cls = rest.pop(0)
+        while rest and (rest[0].startswith("flag ") or FLAG_COUNT.fullmatch(rest[0])):
+            block.flags.append(rest.pop(0))
         if rest and rest[0].startswith("stored copy "):
             block.problem = rest.pop(0)
         if rest:

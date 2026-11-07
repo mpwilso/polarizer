@@ -224,6 +224,7 @@ def test_reference_tools_hash_and_serve(servers, tmp_path):
         seen = {
             (e["data"]["upstream"], e["data"]["tool"]): e["data"]["def_hash"]
             for e in rig.kinds(ledger_dir, "tool.seen")
+            if e["data"]["tool"] != ":instructions"  # an upstream's instructions (SCAN-SPEC.md)
         }
         unservable = [e["data"] for e in rig.kinds(ledger_dir, "tool.unservable")]
         runs.append((cfg, ledger_dir, seen, unservable))
@@ -234,6 +235,7 @@ def test_reference_tools_hash_and_serve(servers, tmp_path):
     approved = {
         (e["data"]["upstream"], e["data"]["tool"]): e["data"]["def_hash"]
         for e in rig.kinds(ledger_dir, "tool.approved")
+        if e["data"]["tool"] != ":instructions"
     }
     assert approved == seen
 
@@ -271,3 +273,34 @@ def test_reference_tools_hash_and_serve(servers, tmp_path):
     }
     assert unservable == unservable2
     print("\nreference report: " + json.dumps(report, sort_keys=True))
+
+
+def test_reference_scan(servers):
+    """The scanner over every tool of the pinned servers, and their instructions, as serve
+    stores them (docs/SCAN-SPEC.md, section 11). Prints every flag, and the counts that go in
+    docs/EVIDENCE.md: definitions scanned, definitions flagged, flags by rule. It asserts no
+    count: every flag here is a false flag to report, not to tune away."""
+    from collections import Counter
+
+    from polarizer import config, pins
+    from polarizer.decisions import Decider
+
+    done = rig.run_serve(servers["cfg"])
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    ledger_dir = config.load(servers["cfg"], require_env=False).ledger_dir
+    decider = Decider.open(ledger_dir)
+    try:
+        found = [b for b in pins.blocks(decider.pins, ledger_dir) if b.kind == "new"]
+    finally:
+        decider.close()
+    by_rule = Counter(f.rule for b in found for f in b.flags)
+    flagged = [b for b in found if b.flags]
+    tools = [b for b in found if b.tool != ":instructions"]
+    print()
+    print(f"scanned: {len(tools)} tools and {len(found) - len(tools)} instructions")
+    print(f"flagged: {len(flagged)} definitions, {sum(by_rule.values())} flags")
+    print(f"by rule: {dict(sorted(by_rule.items()))}")
+    for b in flagged:
+        for flag in b.flags:
+            print(f"  {b.upstream}__{b.tool}: {flag.line}")
+    assert all(b.copy is not None for b in found)

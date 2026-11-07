@@ -9,8 +9,8 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - Tried only with Claude Code, on Linux (WSL2). CI runs the tests on Windows and macOS; no live check has.
 - Tools only. Resources, prompts and completions from upstream servers are not exposed.
 - Requests from an upstream server to the client (elicitation, sampling, roots) are not passed on, and the tool call fails.
-- No scanning of tool descriptions. A call that no rule holds goes straight through, recorded in the ledger.
-- Results pass through the MCP Python SDK, which drops fields the protocol doesn't define and turns a result it can't parse into an error. Tools are served in the 2026-07-28 form, without `execution` or `_meta`. [docs/PROXY-SPEC.md](PROXY-SPEC.md#results) lists each change.
+- A call that no rule holds goes straight through, recorded in the ledger.
+- Results pass through the MCP Python SDK, which drops fields the protocol doesn't define and turns a result it can't parse into an error. Tools are served in the 2026-07-28 form, without `execution`, and with only the `_meta` keys that `meta_allowlist` names. [docs/PROXY-SPEC.md](PROXY-SPEC.md#results) lists each change.
 - Each upstream starts once per session. One that fails to start stays off until the client restarts Polarizer. An upstream whose tool listing fails has its tools hidden until a listing succeeds again (Polarizer retries after 30 seconds, then less often, up to every 5 minutes); one whose process exits stays hidden until Polarizer restarts.
 
 ## Definitions, not behavior
@@ -19,6 +19,14 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - If you approve a poisoned definition without reading it, Polarizer keeps serving exactly that definition.
 - A class is your statement about a tool. Polarizer can't check it, and a tool can reach files in ways that never appear in its arguments (its own configuration, its working directory, a path it computes, a process it starts).
 - A decision is not instant. A call already under way when you reject its tool is not stopped.
+
+## Scanning
+
+- The scanner reads patterns, not meaning. A paraphrase, a synonym, another language, a misspelling, text split across fields or broken by a character no rule names, or an instruction spread over several sentences matches no rule. A definition with no flag is not a definition that is safe.
+- A benign definition says nothing about behavior. A server whose descriptions are clean can still do anything when called, and return text that steers the agent. The scanner, like pins, reads what the model is shown before a call, not what the server does.
+- The rules flag ordinary text too: the pinned reference servers' definitions get false flags, counted in [EVIDENCE.md](EVIDENCE.md). A flag asks you to read; it is not a verdict.
+- An upstream's instructions reach the client once, when it connects, so approving or rejecting them takes effect the next time Claude Code starts `polarizer serve` (reconnect the server in `/mcp`). That Claude Code puts served instructions in front of the model was seen once, headless, with Claude Code 2.1.310 ([verified-facts.md](verified-facts.md#scan-check-nov-7-2026-utc-headless-claude-code-21310)).
+- The scanner's knowledge of other tools, which it uses to see one tool steering another, is the tools this ledger has seen, not servers configured directly in the client.
 
 ## Paths
 

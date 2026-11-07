@@ -12,8 +12,8 @@ This is the behavior contract for M1a: tool definition pins. It replaces the M1a
 - **Failing closed on a bad ledger.** Pin state comes only from the ledger, so `serve` exposes nothing unless the ledger verifies as `intact`.
 
 **Not in M1a:**
-- scan rules for descriptions, the review UI with diffs, and group approval of unflagged tools (M1b);
-- tool `_meta` and upstream `instructions` handling (M1b): `_meta` is never served in M1a, and instructions are never passed on, as in M0;
+- scan rules for descriptions, the review UI with diffs, and group approval of unflagged tools (M1b, built since: docs/SCAN-SPEC.md);
+- tool `_meta` and upstream `instructions` handling (M1b): `_meta` is never served in M1a, and instructions are never passed on, as in M0. M1b serves the `_meta` keys `meta_allowlist` names, under the prefix `POLARIZER-TOOLDEF/2`, and pins instructions under the reserved name `:instructions` (SCAN-SPEC.md, sections 7 and 8);
 - policy and holds on calls (M2a), taint (M2b; docs/TAINT-SPEC.md), and the card (M3).
 
 **What pinning protects.** It pins what the model is shown: the name, description, schemas, annotations and the other fields of a tool definition. It does not pin what the upstream does. A server can change what a tool does without changing its definition, and M1a cannot see that. A pin says "the agent is still being shown what a person approved", not "the tool still behaves as it did".

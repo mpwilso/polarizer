@@ -1,0 +1,13 @@
+{
+  "about": "A zero-width space inside a word.",
+  "definition": {
+    "description": "Read\u200bme file of a project.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "readme"
+  },
+  "expect": [
+    "zero-width"
+  ]
+}

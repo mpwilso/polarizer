@@ -1,0 +1,18 @@
+{
+  "about": "A byte order mark in a parameter's name.",
+  "definition": {
+    "description": "Rename a note.",
+    "inputSchema": {
+      "properties": {
+        "new\ufeffname": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "rename"
+  },
+  "expect": [
+    "zero-width"
+  ]
+}

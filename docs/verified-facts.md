@@ -920,6 +920,45 @@ Built on Windows 11 (native), Python 3.12.10, uv 0.12.2, on branch `m2b-taint` f
 - **What it shows:** with Claude Code 2.1.310, headless, an egress call to a listed host runs as a grant; an open-world call taints the session, recorded before its answer; the same egress call is then held by `tainted` with the source named on the card, and decided there; a new serve started for the resumed session is tainted from its start by the ledger, with the same source; and a new Claude Code session starts clean.
 - **What it does not show:** the restart that follows Esc in an interactive session (docs/dev/MANUAL-CHECK.md, M2b, the owner's to run); `deny_values` and the tricky hosts on real Claude Code (tests cover them); a real web or mail server; Windows or macOS.
 
+## Stage 13, scanning and review (Nov 7, 2026, UTC)
+
+Built on Windows 11 (native), Python 3.12.10, uv 0.12.2, on branch `m1b-scan` from f936031 (master at v0.5.0). docs/dev/STAGE13-NOTES.md has the details.
+
+- **`scripts/test.sh` on Windows,** on the final tree: ruff, the format check and `scripts/check_docs.py` clean; 1511 passed, 82 skipped in 322.19 s.
+- **`scripts/test.sh` in WSL2** (the `parallax` distro), in a worktree, `~/code/polarizer-m1b`, of origin/master with the final tree applied as a `git diff` (the distro mounts no Windows drive): the same checks clean; 1578 passed, 15 skipped in 424.91 s.
+
+- **The reference servers under the scanner** (`POLARIZER_REFERENCE=1 .venv/bin/python -m pytest -s tests/test_reference.py`, run once in WSL2, the `parallax` distro, in a worktree of the uncommitted stage 13 tree, `~/code/polarizer-m1b`, carried in as a `git diff` and checked by `git status`): the four reference tests passed in 16.57 s. `test_reference_scan` scanned 27 tools and 1 set of instructions. No tool was flagged. Everything 2026.8.31 returns instructions from `initialize`, 1,574 characters beginning `# Everything Server` and an en dash, and they were flagged once, by `long-text`; Filesystem 2026.8.31 returns none. `test_reference_tools_hash_and_serve` reported 27 tools hashed, none with `_meta`, none unservable, the largest integer 10, as at stage 4. The servers ran with the pinned commands under Pinned fetches, already in npx's cache (`~/.npm/_npx/68b53d3fd47bf8db` and `a705c79b42eea4c8`); nothing new was pinned.
+- **Upstream instructions on the two eras' handshakes:** the SDK's `Client.instructions` held them from `initialize` (2025-11-25, both reference servers and the stand-ins) and from a 2026-07-28 in-memory gateway's `server/discover`, which `tests/test_instructions.py` reads in both modes.
+
+## Scan check (Nov 7, 2026, UTC, headless, Claude Code 2.1.310)
+
+`scripts/scan_check.py`, run once in WSL2 (the `parallax` distro), from `~/code/polarizer-m1b`, the stage 13 tree before its commit (so the script printed master's commit, f936031), as `.venv/bin/python scripts/scan_check.py`, at 2026-11-07T22:14:53Z. `claude auth status` showed a claude.ai login before the run. No `CLAUDE_*` or `ANTHROPIC_*` variable was set. The check's directory was `~/code/polarizer-m1b/.repro/scan-check.w4ekkh7t`, under the gitignored `.repro/`, with its ledger inside it; nothing was written to `~/.local/share/polarizer` or `polarizer-drills`. The only upstream was `tests/helpers/lab_stub.py` (the repository's own stand-in: `add` and `echo` clean, `lookup`'s description poisoned on purpose, and clean instructions with the pass phrase `pelican-42`; it reads no file and touches no network), each tool classed `local-read`. Each run was `claude -p` with `--model claude-haiku-4-5-20251001`, `--max-budget-usd 1`, `--strict-mcp-config`, `--mcp-config <dir>/mcp.json` (only `polarizer serve --config <dir>/polarizer.toml`), `--allowedTools=mcp__pz__lab__add`, `--permission-mode default`, `--no-session-persistence`, `--output-format stream-json` and `--verbose`, stdin from `/dev/null`, `MCP_TOOL_TIMEOUT` unset. The card was started as `polarizer card --config <dir>/polarizer.toml --allow-no-terminal` and driven with curl only. Every check passed:
+
+| Check | Result |
+|---|---|
+| serve with stdin closed recorded the server with no approval | PASS: `polarizer: 3 tools wait for approval` and `the instructions of 1 upstreams wait for approval` |
+| `pending` flags lookup and leaves it out of the group | PASS: `new lab__lookup fecc0353...`, then `flagged by the scanner; read it, then approve it by name`, then four flags: `conceal-from-user` ("Do not tell the user"), `read-before-use` ("Before using this tool"), `secret-path` (".ssh") and `instruction-tag` ("<IMPORTANT>") |
+| The group line covers the three unflagged definitions | PASS: `group b18efdb3... covers the 3 unflagged new definitions above ...` |
+| The card's page loads with the token and has a nonce | PASS |
+| The review view shows lookup's four flags beside its definition, `in_group` false | PASS |
+| The review's group covers `lab__:instructions`, `lab__add` and `lab__echo` | PASS |
+| `Approve all unflagged` through the card | PASS: approvals at seq 8, 9 and 10, each with `group` `b18efdb3...` and `terminal: false`, then `approved 3 definitions as group b18efdb3...` |
+| Run 1: Claude Code's start event lists add and echo, not lookup | PASS: `mcp__pz__lab__add`, `mcp__pz__lab__echo`; `pz` connected |
+| Run 1: add was called through Polarizer | PASS: one `call.sent` for `lab__add` |
+| After the group, only lookup waits, still flagged | PASS: `pending: 1 new, 0 changed, 0 unservable` |
+| lookup approved alone through the card | PASS: the definition, its four flag lines, then `approved lab__lookup fecc0353... at seq 17`; `tool.approved` with `group` null and `flags` `["conceal-from-user", "instruction-tag", "read-before-use", "secret-path"]` |
+| Run 2: the start event now lists lookup | PASS: `mcp__pz__lab__add`, `mcp__pz__lab__echo`, `mcp__pz__lab__lookup` |
+| lookup was never called | PASS: no `call.sent` for it, and the stub's log of lookup calls is empty |
+| `polarizer verify` | PASS: `intact: 22 entries, 3 sessions, 1 calls` |
+| The card stops on SIGTERM with exit 0 and nothing more on stdout | PASS |
+
+- **The approved instructions reached the model.** Asked for the lab pass phrase "if this session's MCP server instructions give one", run 1's model replied `Sum: 5; mcp__pz__lab__lookup is not available; lab pass phrase: pelican-42.` The phrase is only in the stand-in's instructions, which Polarizer served under its header line once the group approved them. So Claude Code 2.1.310, headless, on a 2026-07-28 connection, put a stdio MCP server's instructions in front of the model. This was recorded as an observation, not a pass or fail check, and was seen once.
+- **The model replied** in run 2: `ready`.
+- **Cost,** from Claude Code's own `total_cost_usd`: 0.0316414 and 0.0175314 USD, 0.0491728 in total.
+- **Bookkeeping:** `~/.claude.json` went from 104,220 bytes (mtime 21:54:52Z) to 104,265 bytes (22:15:02Z), Claude Code's own update; the script only stats it. With `--no-session-persistence`, no session was kept.
+- **What it shows:** with Claude Code 2.1.310, headless, a poisoned definition is flagged in `pending` and on the card's review view and left out of the group; the card's group approval records what `approve --group` records and exposes the clean tools and the instructions, while the poisoned tool stays out of Claude Code's tool list; and it appears only after it is approved alone, with its flags recorded.
+- **What it does not show:** a person reading the review view in a browser (docs/dev/MANUAL-CHECK.md, M1b, the owner's to run); the diff on real Claude Code (no definition changed in the run; `tests/test_scan_review.py::test_card_diff` covers it); `_meta` served to Claude Code (the stand-in has none; `tests/test_meta.py` covers it with SDK clients); whether interactive Claude Code re-lists after the card's approval without a reconnect; a third-party server; Windows or macOS.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.

@@ -34,6 +34,11 @@ hold_timeout_seconds = 300
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "/home/you/projects/demo"]
 connect_timeout_seconds = 20
+# The _meta keys of this server's tools that may reach the agent. By default none does. A key
+# listed here becomes part of each tool's approved definition (hashed as POLARIZER-TOOLDEF/2),
+# so adding or removing one hides those tools until you approve them again. This server's tools
+# have no _meta. docs/SCAN-SPEC.md, section 8, has the rules.
+# meta_allowlist = ["vendor/key"]
 
 # A class for each of the 14 tools this version of the server lists. Reads run; writes outside
 # the workspace root, or into .git/hooks and the other built-in patterns, are held; move_file is

@@ -23,7 +23,16 @@ from polarizer.text import safe
 PREFIX = re.compile(r"(?!_)(?!.*__)[A-Za-z0-9_-]{1,32}(?<!_)")
 WHOLE_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 TOP_KEYS = ("ledger_dir", "ledger_forbidden_paths", "upstream", "policy")
-UPSTREAM_KEYS = ("command", "args", "env", "connect_timeout_seconds", "trust_annotations", "tools")
+UPSTREAM_KEYS = (
+    "command",
+    "args",
+    "env",
+    "connect_timeout_seconds",
+    "trust_annotations",
+    "tools",
+    "meta_allowlist",
+)
+MAX_META_KEYS = 32  # meta_allowlist entries per upstream (docs/SCAN-SPEC.md, section 8)
 POLICY_KEYS = (
     "workspace_roots",
     "hold_timeout_seconds",
@@ -71,6 +80,7 @@ class Upstream:
     connect_timeout_seconds: float
     trust_annotations: bool = False
     tools: dict = field(default_factory=dict)  # upstream tool name -> ToolRule
+    meta_allowlist: tuple[str, ...] = ()  # the tools' _meta keys served (SCAN-SPEC.md, 8)
 
 
 @dataclass(frozen=True)
@@ -245,7 +255,19 @@ def _upstream(prefix, table, fail, require_env, environ) -> Upstream:
     if not isinstance(trust, bool):
         fail(f'{here} "trust_annotations" must be true or false')
     tools = _tools(prefix, table.get("tools", {}), fail)
-    return Upstream(prefix, command, tuple(args), resolved, float(timeout), trust, tools)
+    meta = table.get("meta_allowlist", [])
+    if (
+        not isinstance(meta, list)
+        or len(meta) > MAX_META_KEYS
+        or not all(isinstance(k, str) and 1 <= len(k) <= 256 for k in meta)
+    ):
+        fail(
+            f'{here} "meta_allowlist" must be a list of at most {MAX_META_KEYS} strings of 1 to '
+            "256 characters"
+        )
+    return Upstream(
+        prefix, command, tuple(args), resolved, float(timeout), trust, tools, tuple(meta)
+    )
 
 
 def _tools(prefix: str, given, fail) -> dict:

@@ -755,6 +755,7 @@ async def _serve(
             prefix=u.prefix,
             target=StdioServerParameters(command=u.command, args=list(u.args), env=dict(u.env)),
             connect_timeout=u.connect_timeout_seconds,
+            meta_allow=tuple(u.meta_allowlist),
         )
         for u in cfg.upstreams
     ]

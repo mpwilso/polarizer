@@ -1,5 +1,7 @@
 // The card's page (docs/CARD-SPEC.md, sections 7 and 9). It asks the card for the state every
-// 1.5 s, shows each open hold, and sends Allow and Deny. Every text it shows was built by the
+// 1.5 s, shows each open hold, and sends Allow and Deny. With each state it asks for the review
+// (docs/SCAN-SPEC.md, section 6): the tool definitions waiting for approval, their flags and
+// diffs, and sends Approve for one, or for the group of unflagged ones. Every text it shows was built by the
 // card; it is placed with textContent, never parsed as HTML. No inline script or style: the
 // Content-Security-Policy is default-src 'self'.
 "use strict";
@@ -16,6 +18,13 @@
   var result = document.getElementById("result");
   var resultLines = document.getElementById("result-lines");
   var status = document.getElementById("status");
+  var definitions = document.getElementById("definitions");
+  var reviewEmpty = document.getElementById("review-empty");
+  var groupBox = document.getElementById("group");
+  var groupButton = document.getElementById("group-approve");
+  var groupNames = document.getElementById("group-names");
+  var groupId = null;
+  var approveButtons = [];
   var cards = {};
   var stopped = false;
   var busy = false;
@@ -50,6 +59,63 @@
       record.allow.disabled = busy || stopped || !record.canAllow;
       record.deny.disabled = busy || stopped;
     });
+    approveButtons.forEach(function (item) {
+      item.button.disabled = busy || stopped || !item.canApprove;
+    });
+    groupButton.disabled = busy || stopped || groupId === null;
+  }
+
+  function section(parent, label, lines, className) {
+    if (!lines.length) {
+      return;
+    }
+    parent.appendChild(make("h4", "label", label));
+    var box = make("pre", className);
+    box.textContent = lines.join("\n");
+    parent.appendChild(box);
+  }
+
+  function renderReview(review) {
+    clear(definitions);
+    approveButtons = [];
+    var defs = review.status === "intact" ? review.definitions : [];
+    defs.forEach(function (data) {
+      var box = make("article", data.flags.length ? "definition flagged" : "definition");
+      box.appendChild(make("h3", null, data.name));
+      fill(box.appendChild(make("div", "header")), data.header);
+      if (data.flags.length) {
+        var flags = make("div", "flags");
+        flags.appendChild(make("p", "flag-note", "Flagged: approve it on its own, after reading it."));
+        data.flags.forEach(function (line) {
+          flags.appendChild(make("div", "line", line));
+        });
+        box.appendChild(flags);
+      }
+      section(box, "What changed", data.diff, "block");
+      section(box, "The definition the agent would be shown", data.definition, "block");
+      var button = make("button", "allow", "Approve this definition");
+      button.type = "button";
+      button.addEventListener("click", function () {
+        approve({ upstream: data.upstream, tool: data.tool, def_hash: data.def_hash });
+      });
+      var actions = make("div", "actions");
+      actions.appendChild(button);
+      box.appendChild(actions);
+      approveButtons.push({ button: button, canApprove: data.can_approve });
+      definitions.appendChild(box);
+    });
+    reviewEmpty.hidden = defs.length > 0;
+    var group = review.status === "intact" ? review.group : null;
+    groupId = group ? group.id : null;
+    groupBox.hidden = !group;
+    clear(groupNames);
+    if (group) {
+      groupButton.textContent = "Approve all unflagged (" + group.count + ")";
+      group.names.forEach(function (name) {
+        groupNames.appendChild(make("li", null, name));
+      });
+    }
+    setButtons();
   }
 
   function build(data) {
@@ -194,6 +260,23 @@
         if (state) {
           render(state);
           status.textContent = "Checked at " + new Date().toLocaleTimeString() + ".";
+          return fetch("/review", {
+            headers: { "X-Polarizer-Nonce": nonce },
+            cache: "no-store",
+            credentials: "same-origin"
+          }).then(function (response) {
+            if (response.status === 403) {
+              goStale();
+              return null;
+            }
+            return response.ok ? response.json() : null;
+          });
+        }
+        return null;
+      })
+      .then(function (review) {
+        if (review) {
+          renderReview(review);
         }
       })
       .catch(function () {
@@ -248,6 +331,51 @@
         setButtons();
       });
   }
+
+  function approve(body) {
+    if (busy || stopped) {
+      return;
+    }
+    busy = true;
+    setButtons();
+    fetch("/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Polarizer-Nonce": nonce },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify(body)
+    })
+      .then(function (response) {
+        if (response.status === 403) {
+          goStale();
+          return null;
+        }
+        return response.json();
+      })
+      .then(function (answer) {
+        if (!answer) {
+          return;
+        }
+        if (answer.ok) {
+          showResult(answer.lines, false);
+        } else {
+          showResult((answer.lines || []).concat([answer.error]), true);
+        }
+      })
+      .catch(function () {
+        showResult(["The card did not answer. Run polarizer pending before approving again."], true);
+      })
+      .then(function () {
+        busy = false;
+        setButtons();
+      });
+  }
+
+  groupButton.addEventListener("click", function () {
+    if (groupId !== null) {
+      approve({ group: groupId });
+    }
+  });
 
   poll();
 })();

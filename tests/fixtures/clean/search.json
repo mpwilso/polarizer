@@ -1,0 +1,20 @@
+{
+  "definition": {
+    "description": "Search for files whose names match a pattern, below a folder. Results are paths, one per line.",
+    "inputSchema": {
+      "properties": {
+        "exclude": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "search"
+  }
+}

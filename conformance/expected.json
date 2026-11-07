@@ -225,6 +225,13 @@
    "seq": 4,
    "status": "not canonical"
   },
+  "broken/scan_edit_flags": {
+   "check": "hash",
+   "head": false,
+   "line": 8,
+   "seq": 7,
+   "status": "tampered"
+  },
   "broken/second_genesis": {
    "check": "structure",
    "head": false,
@@ -377,6 +384,13 @@
    "head": true,
    "line": 11,
    "seq": 10,
+   "status": "intact"
+  },
+  "valid/scan": {
+   "check": null,
+   "head": true,
+   "line": 8,
+   "seq": 7,
    "status": "intact"
   },
   "valid/session": {

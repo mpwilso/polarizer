@@ -111,22 +111,36 @@ def modern(env: dict | None = None) -> StdioServerParameters:
     return StdioServerParameters(command=sys.executable, args=[str(MODERN)], env=env)
 
 
-def spec(prefix: str, target, timeout: float = 10, mode: str = "auto") -> UpstreamSpec:
-    return UpstreamSpec(prefix=prefix, target=target, connect_timeout=timeout, mode=mode)
+def spec(
+    prefix: str, target, timeout: float = 10, mode: str = "auto", meta_allow=()
+) -> UpstreamSpec:
+    return UpstreamSpec(
+        prefix=prefix, target=target, connect_timeout=timeout, mode=mode, meta_allow=meta_allow
+    )
 
 
 def approve_all(ledger_dir: Path, upstream: str | None = None) -> int:
     """Approve the group `polarizer pending` would print now (the new definitions of tools
-    with no decision), as `polarizer approve --group` does. Returns how many were approved."""
+    with no decision), as `polarizer approve --group` does, then each new definition the group
+    leaves out only because the scanner flagged it, by name, as a person would after reading it
+    (docs/SCAN-SPEC.md, section 5). Returns how many were approved."""
+    from polarizer.pins import blocks
+
     decider = Decider.open(ledger_dir)
     try:
         members, group_id = decider.pending_group(upstream)
-        if group_id is None:
-            return 0
-        errors = []
-        code = decider.approve_group(group_id, upstream, lambda line: None, errors.append)
-        assert code == 0, errors
-        return len(members)
+        flagged = [
+            b
+            for b in blocks(decider.pins, ledger_dir, upstream)
+            if b.kind == "new" and not b.decided and not b.several and b.copy and b.flags
+        ]
+        if group_id is not None:
+            errors = []
+            code = decider.approve_group(group_id, upstream, lambda line: None, errors.append)
+            assert code == 0, errors
+        for b in flagged:
+            decider.approve_one(b.upstream, b.tool, b.def_hash, lambda line: None)
+        return len(members) + len(flagged)
     finally:
         decider.close()
 

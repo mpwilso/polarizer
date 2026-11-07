@@ -28,6 +28,11 @@ Lifetime (section 7): the gateway holds a lock on sessions/<session>.lock for it
 other processes can tell whether its holds can still be decided. At start, the open holds of
 every session proven ended are recorded as hold.abandoned.
 
+M1b (docs/SCAN-SPEC.md, sections 7 and 8): a tool's _meta keys that its upstream's
+meta_allowlist names are part of its hashed form and served; an upstream's instructions are
+pinned under the reserved name ":instructions", like a tool, and the approved ones become this
+server's own instructions at the end of startup.
+
 M2b (docs/TAINT-SPEC.md): a call the deny tier refuses records call.refused with its rule; an
 egress call whose URLs all name a listed host runs as a grant; and the first answer from an
 open-world call, or its first progress notification, waits until session.tainted is recorded
@@ -60,6 +65,7 @@ from polarizer.holds import SESSIONS, HoldState, session_state
 from polarizer.ledgerdir import make_private
 from polarizer.pins import PinState
 from polarizer.planted import DISCLOSURE, Planter
+from polarizer.scan import INSTRUCTIONS
 from polarizer.sidefiles import ArgsProblem, read_args, write_args
 from polarizer.taint import Taint
 from polarizer.text import safe
@@ -82,6 +88,16 @@ WATCH_INTERVAL = 1.0  # seconds between catch-ups with the ledger
 HOLD_WATCH_INTERVAL = 0.25  # the same while any hold of this process is open
 MAX_OPEN_HOLDS = 16  # per process; a further call that would be held is refused at once
 TOO_MANY = f"too many held calls: {MAX_OPEN_HOLDS} already wait in this session"
+# serve's start lines for M1b (docs/SCAN-SPEC.md, sections 7 and 8).
+INSTRUCTIONS_WAIT = (
+    "polarizer: the instructions of {n} upstreams wait for approval; run polarizer pending"
+)
+META_MIGRATION = (
+    "polarizer: {n} tools changed form because meta_allowlist changed what _meta they serve "
+    "(POLARIZER-TOOLDEF/2 serves _meta, /1 none); each is hidden until approved again; run "
+    "polarizer pending"
+)
+INSTRUCTIONS_HEADER = "Instructions from upstream {prefix}, whose tools are named {prefix}__<tool>:"
 CANCELLED_BEFORE_FORWARD = "the client cancelled the call before it was forwarded"
 # hold.expired's reason when shutdown ends a held call, and call.refused's when shutdown comes
 # after an allow but before the call was forwarded (HOLD-SPEC.md, section 6, Shutdown).
@@ -199,6 +215,7 @@ class Gateway:
         # problem is in _live_problem).
         self._live: dict[str, dict[str, str | None]] = {}
         self._live_problem: dict[tuple[str, str], str] = {}
+        self._live_meta: set[tuple[str, str]] = set()  # listed tools whose form serves _meta
         self._unservable_recorded: set = set()  # (prefix, tool, def_hash, problem), per process
         self._failing: set[str] = set()  # prefixes in a run of failed refreshes, recorded
         self._observe_lock = anyio.Lock()
@@ -278,6 +295,13 @@ class Gateway:
         waiting = self._count_waiting()
         if waiting:
             log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
+        migrated = self._count_migrated()
+        if migrated:
+            log(META_MIGRATION.format(n=migrated))
+        waiting = self._count_waiting(instructions=True)
+        if waiting:
+            log(INSTRUCTIONS_WAIT.format(n=waiting))
+        self.server.instructions = await self.served_instructions()
         self._log_unclassified()
         if self.planter.on:
             log(DISCLOSURE.format(n=self.planter.limit))
@@ -707,50 +731,66 @@ class Gateway:
 
     async def _observe(self, upstream: Upstream) -> None:
         """After a successful listing: hash each tool, store copies that are missing, and record
-        what PIN-SPEC.md section 3 asks for, in list order, one upstream at a time."""
+        what PIN-SPEC.md section 3 asks for, in list order, one upstream at a time; then the
+        same for the upstream's instructions, under INSTRUCTIONS (SCAN-SPEC.md, section 7)."""
         async with self._observe_lock:
             if self.writer.stopped:
                 return
             prefix = upstream.prefix
             self._failing.discard(prefix)
             live: dict[str, str | None] = {}
+            meta_allow = upstream.spec.meta_allow
             for name, tool in upstream.tools.items():
-                try:
-                    def_hash, canon = defhash.definition(tool)
-                except defhash.Unhashable as e:
-                    live[name] = None
-                    problem = f"cannot be hashed: {e}"
-                    self._live_problem[(prefix, name)] = problem
-                    await self._unservable(prefix, name, None, problem)
-                    continue
-                if len(canon) > defhash.MAX_DEFINITION_BYTES:
-                    # Never stored, seen or counted toward the cap; recorded once, hidden.
-                    live[name] = None
-                    self._live_problem[(prefix, name)] = defhash.TOO_LARGE
-                    await self._unservable(prefix, name, def_hash, defhash.TOO_LARGE)
-                    continue
-                live[name] = def_hash
-                tp = self.pins.get(prefix, name)
-                action = pins.what_to_record(tp, def_hash)
-                if action == "cap":
-                    await self._unservable(prefix, name, def_hash, pins.CAP_PROBLEM)
-                    continue
-                if pins.state(tp, def_hash)[1] == pins.CAP_PROBLEM:
-                    continue  # beyond the cap: neither stored nor recorded
-                try:
-                    defhash.write_copy(self.writer.ledger_dir, def_hash, canon)
-                except OSError as e:
-                    why = e.strerror or describe(e)
-                    await self._unservable(
-                        prefix, name, def_hash, f"stored copy could not be written: {why}"
-                    )
-                base = {"session": self.session, "upstream": prefix, "tool": name}
-                if action == "seen":
-                    await self._append("tool.seen", {**base, "def_hash": def_hash})
-                elif action == "drift":
-                    drift = {"approved_hash": tp.decided_hash, "live_hash": def_hash}
-                    await self._append("tool.drift", {**base, **drift})
+                if defhash.served_meta(tool, meta_allow):
+                    self._live_meta.add((prefix, name))
+                else:
+                    self._live_meta.discard((prefix, name))
+                live[name] = await self._observe_one(
+                    prefix, name, lambda tool=tool: defhash.definition(tool, meta_allow)
+                )
+            text = upstream.instructions
+            if text is not None:
+                live[INSTRUCTIONS] = await self._observe_one(
+                    prefix, INSTRUCTIONS, lambda: defhash.instructions_definition(text)
+                )
             self._live[prefix] = live
+
+    async def _observe_one(self, prefix: str, name: str, compute) -> str | None:
+        """One definition of a listing: its live hash, or None when it can't be served at all.
+        `compute` returns (def_hash, canonical bytes) or raises Unhashable."""
+        try:
+            def_hash, canon = compute()
+        except defhash.Unhashable as e:
+            problem = f"cannot be hashed: {e}"
+            self._live_problem[(prefix, name)] = problem
+            await self._unservable(prefix, name, None, problem)
+            return None
+        if len(canon) > defhash.MAX_DEFINITION_BYTES:
+            # Never stored, seen or counted toward the cap; recorded once, hidden.
+            self._live_problem[(prefix, name)] = defhash.TOO_LARGE
+            await self._unservable(prefix, name, def_hash, defhash.TOO_LARGE)
+            return None
+        tp = self.pins.get(prefix, name)
+        action = pins.what_to_record(tp, def_hash)
+        if action == "cap":
+            await self._unservable(prefix, name, def_hash, pins.CAP_PROBLEM)
+            return def_hash
+        if pins.state(tp, def_hash)[1] == pins.CAP_PROBLEM:
+            return def_hash  # beyond the cap: neither stored nor recorded
+        try:
+            defhash.write_copy(self.writer.ledger_dir, def_hash, canon)
+        except OSError as e:
+            why = e.strerror or describe(e)
+            await self._unservable(
+                prefix, name, def_hash, f"stored copy could not be written: {why}"
+            )
+        base = {"session": self.session, "upstream": prefix, "tool": name}
+        if action == "seen":
+            await self._append("tool.seen", {**base, "def_hash": def_hash})
+        elif action == "drift":
+            drift = {"approved_hash": tp.decided_hash, "live_hash": def_hash}
+            await self._append("tool.drift", {**base, **drift})
+        return def_hash
 
     async def _tool_state(self, prefix: str, name: str) -> tuple[str, str | None, dict | None]:
         """(state, problem, stored copy) for a listed tool of an upstream whose list is known.
@@ -775,16 +815,51 @@ class Gateway:
             return []
         return list(upstream.tools)
 
-    def _count_waiting(self) -> int:
-        """Listed tools that wait for a decision: pending or changed."""
+    def _count_waiting(self, instructions: bool = False) -> int:
+        """Listed tools that wait for a decision: pending or changed; or, with
+        `instructions`, upstreams whose instructions do."""
         count = 0
         for upstream in self.upstreams.values():
-            for name in self._listed(upstream):
-                live = self._live[upstream.prefix].get(name)
+            names = self._listed(upstream)
+            if instructions:
+                known = upstream.prefix in self._live and upstream.list_known
+                names = [INSTRUCTIONS] if known else []
+            for name in names:
+                live = self._live.get(upstream.prefix, {}).get(name)
                 if live is not None:
                     st, _ = pins.state(self.pins.get(upstream.prefix, name), live)
                     count += st in ("pending", "changed")
         return count
+
+    def _count_migrated(self) -> int:
+        """Listed tools that are changed because their form gained or lost _meta: their
+        approved copy and their live form differ in having it (SCAN-SPEC.md, section 8)."""
+        count = 0
+        for upstream in self.upstreams.values():
+            for name in self._listed(upstream):
+                live = self._live[upstream.prefix].get(name)
+                tp = self.pins.get(upstream.prefix, name)
+                if live is None or pins.state(tp, live)[0] != "changed":
+                    continue
+                try:
+                    approved = defhash.read_copy(self.writer.ledger_dir, tp.decided_hash)
+                except defhash.CopyProblem:
+                    continue
+                count += ("_meta" in approved) != ((upstream.prefix, name) in self._live_meta)
+        return count
+
+    async def served_instructions(self) -> str | None:
+        """This server's own instructions: every upstream's approved instructions, in config
+        order, each under its header line, or None (SCAN-SPEC.md, section 7)."""
+        parts = []
+        for upstream in self.upstreams.values():
+            if not upstream.list_known or INSTRUCTIONS not in self._live.get(upstream.prefix, {}):
+                continue
+            st, _, obj = await self._tool_state(upstream.prefix, INSTRUCTIONS)
+            if st == "approved" and defhash.is_instructions(obj):
+                header = INSTRUCTIONS_HEADER.format(prefix=upstream.prefix)
+                parts.append(f"{header}\n{obj['instructions']}")
+        return "\n\n".join(parts) if parts else None
 
     async def exposed(self) -> list[types.Tool]:
         """The tools served now: approved ones, from their stored copies, in config order of

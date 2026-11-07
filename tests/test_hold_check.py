@@ -433,7 +433,16 @@ def test_group_reads_a_fresh_first_run(capsys):
     nothing = (golden / "pending_nothing.txt").read_text(encoding="utf-8")
     assert hold_check.group(nothing) == 3
     classes = (golden / "pending_classes.txt").read_text(encoding="utf-8")
-    assert hold_check.group(classes) == 0  # pending --config's class lines and section parse
-    assert capsys.readouterr().out.strip() == (
-        "02e5789c4040f97a564af9e1a5b16b96d6a70e5db4ad6b8da88fcb5e48050a65"
+    # pending --config's class lines, flag lines and classes section parse; probe/note is
+    # flagged (docs/SCAN-SPEC.md, section 5), so the group covers 3 of the 4 new definitions
+    # and the ledger does not read as a fresh first run.
+    assert hold_check.group(classes) == 1
+    assert capsys.readouterr().out == ""
+    counts, blocks = hold_check.m1a_check.parse(classes)
+    [group] = [b for b in blocks if b.kind == "group"]
+    assert counts == (4, 0, 0) and group.match.group(2) == "3"
+    assert group.match.group(1) == (
+        "180c9459a3819ca8cd255bf99b034903c32eb842ace370b99fb21380d79a5e1e"
     )
+    [note] = [b for b in blocks if b.name == "probe__note"]
+    assert note.cls is not None and note.flags and note.definition["name"] == "note"

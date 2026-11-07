@@ -1,7 +1,9 @@
 pending: 4 new, 0 changed, 0 unservable
 
 new probe__note be0658abc19a030eae201dbe5823062f3bbd46cb7002c933d3a778d4abdbc767
+flagged by the scanner; read it, then approve it by name
 class none: every call is held; annotations suggest destructive
+flag zero-width in description: "Caf\xe9 note,\u200b with a zero" (a character that shows nothing, so a person reads text the model reads differently)
 {
   "description": "Caf\u00e9 note,\u200b with a zero-width space.",
   "inputSchema": {
@@ -52,7 +54,7 @@ class open-world (from annotations); annotations suggest open-world
   "name": "fetch"
 }
 
-group 02e5789c4040f97a564af9e1a5b16b96d6a70e5db4ad6b8da88fcb5e48050a65 covers the 4 new definitions above for tools with no decision yet and one definition waiting
+group 180c9459a3819ca8cd255bf99b034903c32eb842ace370b99fb21380d79a5e1e covers the 3 unflagged new definitions above for tools with no decision yet and one definition waiting
 
 classes: 1 approved tools have no class, 1 contradict their annotations
 no class probe__add a201ef61c2804ff8a47dbd8397e2d03d16b621c995a2aea943f2e96a2ba0c8c1; annotations suggest destructive

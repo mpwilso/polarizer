@@ -1,0 +1,13 @@
+{
+  "about": "A description longer than 1024 characters.",
+  "definition": {
+    "description": "Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. Each row of the table holds one value. ",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "table"
+  },
+  "expect": [
+    "long-text"
+  ]
+}

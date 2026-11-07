@@ -1,0 +1,5 @@
+{
+  "definition": {
+    "instructions": "This server keeps short notes. Use list_notes to see them and add_note to add one."
+  }
+}

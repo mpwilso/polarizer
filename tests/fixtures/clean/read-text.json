@@ -1,0 +1,18 @@
+{
+  "definition": {
+    "description": "Read the complete text of a file. Use head or tail to read only part of a long file.",
+    "inputSchema": {
+      "properties": {
+        "head": {
+          "type": "number"
+        },
+        "path": {
+          "description": "The file to read.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "read_text"
+  }
+}

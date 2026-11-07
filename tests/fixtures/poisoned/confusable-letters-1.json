@@ -1,0 +1,13 @@
+{
+  "about": "A word that mixes a Cyrillic letter into Latin ones.",
+  "definition": {
+    "description": "Pay the invoice through p\u0430ypal.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "pay"
+  },
+  "expect": [
+    "confusable-letters"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "definition": {
+    "description": "Create a note, or replace an existing one with new text.",
+    "inputSchema": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "write_note"
+  }
+}

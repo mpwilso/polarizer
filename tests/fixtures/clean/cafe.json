@@ -1,0 +1,9 @@
+{
+  "definition": {
+    "description": "Print the caf\u00e9 menu, with prices in euros.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "menu"
+  }
+}

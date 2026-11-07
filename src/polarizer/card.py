@@ -13,8 +13,15 @@ token.
 
 Every line the page shows is built here, from ledger text through printable() and the holds
 renderer; the page's script only places it with textContent.
+
+The review view (docs/SCAN-SPEC.md, section 6): GET /review lists the tool definitions waiting
+for a decision, as `polarizer pending` does, with the scanner's flags and a diff against the
+definition the tool's latest decision names; POST /approve approves one of them, or the group
+of unflagged ones, through decisions.Decider, exactly as `polarizer approve` does. The same
+checks apply as to /state and /decide.
 """
 
+import difflib
 import hmac
 import html
 import json
@@ -33,8 +40,15 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
-from polarizer import holds, lock, paths, pins, sidefiles, stats
-from polarizer.decisions import PLANTED_LINES, HoldDecider, Refusal, fold_reason, reveal_lines
+from polarizer import defhash, holds, lock, paths, pins, sidefiles, stats
+from polarizer.decisions import (
+    PLANTED_LINES,
+    Decider,
+    HoldDecider,
+    Refusal,
+    fold_reason,
+    reveal_lines,
+)
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 from polarizer.text import printable
 from polarizer.writer import LedgerError
@@ -73,6 +87,7 @@ NO_PATH_ARGS = "this tool has no path arguments in polarizer.toml, so the card c
 PATHS_NOTE = "Resolved by the card when it first showed this hold."
 NO_APPROVAL = "no approval for this tool in this ledger"
 NOT_A_DECISION = "polarizer: the request is not a decision"
+NOT_AN_APPROVAL = "polarizer: the request is not an approval"
 TOO_LARGE = "polarizer: the request is too large"
 
 WRITE_DANGER = (
@@ -297,6 +312,8 @@ class Card:
         self._shown: dict[str, float] = {}  # hold id -> monotonic time first sent to a page
         self._watched: set[str] = set()  # holds seen open at some read
         self._paths: dict[str, list[str]] = {}  # hold id -> its path lines, resolved once
+        self._shown_defs: set[tuple[str, str, str]] = set()  # (prefix, tool, hash) on a review
+        self._shown_groups: set[str] = set()  # group ids a review answer showed
 
     @property
     def url(self) -> str:
@@ -514,6 +531,102 @@ class Card:
                 decider.close()
         return 200, {"ok": True, "lines": out, "warnings": err, "reveal": reveal[1:]}
 
+    # The review view (docs/SCAN-SPEC.md, section 6)
+
+    def review(self) -> dict:
+        """GET /review's answer. Every definition and group id it lists counts as shown."""
+        with self._lock:
+            status, problem, _, pinned = self._fold()
+            if status != "intact":
+                return {
+                    "status": status,
+                    "problem": list(problem),
+                    "definitions": [],
+                    "group": None,
+                }
+            found = pins.blocks(pinned, self.ledger_dir)
+            members, group_id = pins.group(found)
+            shown = []
+            for block in found:
+                if block.kind == "unservable":
+                    continue
+                shown.append(self._definition(block, pinned))
+                self._shown_defs.add((block.upstream, block.tool, block.def_hash))
+            group = None
+            if group_id is not None:
+                self._shown_groups.add(group_id)
+                names = [printable(f"{b.upstream}__{b.tool}") for b in members]
+                group = {"id": group_id, "count": len(members), "names": names}
+            return {"status": "intact", "problem": [], "definitions": shown, "group": group}
+
+    def _definition(self, block: pins.Block, pinned: pins.PinState) -> dict:
+        if block.copy is not None:
+            rendered = defhash.render(block.copy).split("\n")
+        else:
+            where = printable(f"{defhash.copy_name(block.def_hash)} {block.copy_problem}")
+            rendered = [f"stored copy {where}; it cannot be approved"]
+        return {
+            "upstream": printable(block.upstream),
+            "tool": printable(block.tool),
+            "def_hash": printable(block.def_hash),
+            "name": printable(f"{block.upstream}__{block.tool}"),
+            "header": pins.header(block),
+            "flags": [f.line for f in block.flags],
+            "diff": diff_lines(block, self.ledger_dir) if block.copy is not None else [],
+            "definition": rendered,
+            "in_group": block.groupable,
+            "can_approve": block.copy is not None,
+        }
+
+    def approve(self, raw: bytes) -> tuple[int, dict]:
+        """POST /approve's body to (HTTP status, answer)."""
+        try:
+            body = json.loads(raw)
+        except (ValueError, RecursionError):
+            return 400, {"ok": False, "error": NOT_AN_APPROVAL}
+        if not _is_approval(body):
+            return 400, {"ok": False, "error": NOT_AN_APPROVAL}
+        group_id = body.get("group")
+        with self._lock:
+            if group_id is not None:
+                known = group_id in self._shown_groups
+                what = f"group {group_id}"
+            else:
+                key = (body["upstream"], body["tool"], body["def_hash"])
+                known = key in self._shown_defs
+                what = f"{body['upstream']}__{body['tool']} {body['def_hash']}"
+        if not known:
+            line = f"polarizer: this card has not shown {printable(what)}; reload the page"
+            return 409, {"ok": False, "error": line}
+        out: list[str] = []
+        err: list[str] = []
+        with self._deciding:
+            try:
+                decider = Decider.open(self.ledger_dir, ops=self._ops)
+            except Refusal as e:
+                return 409, {"ok": False, "error": e.line}
+            except OSError as e:
+                where = e.filename or self.ledger_dir
+                return 409, {"ok": False, "error": f"polarizer: cannot open {where}: {e.strerror}"}
+            decider.terminal = self.terminal
+            try:
+                if group_id is not None:
+                    code = decider.approve_group(group_id, None, out.append, err.append)
+                    if code != 0:
+                        return 409, {"ok": False, "lines": out, "error": " ".join(err)}
+                else:
+                    decider.approve_one(
+                        body["upstream"], body["tool"], body["def_hash"], out.append
+                    )
+            except (Refusal, LedgerError) as e:
+                return 409, {"ok": False, "error": e.line}
+            except OSError as e:
+                line = f"polarizer: could not record the decision: {e.strerror or e}"
+                return 409, {"ok": False, "error": line}
+            finally:
+                decider.close()
+        return 200, {"ok": True, "lines": out}
+
     def wait_for_decisions(self, timeout: float) -> None:
         """Let a decision in progress finish before the process exits."""
         if self._deciding.acquire(timeout=timeout):
@@ -536,6 +649,44 @@ def _ended(hold: holds.Hold, held: holds.HoldState, planted: bool) -> dict:
         else:
             item["reveal"] = [*PLANTED_LINES, f"why: {printable(reveal.why or '')}"]
     return item
+
+
+def diff_lines(block: pins.Block, ledger_dir: Path) -> list[str]:
+    """A unified diff of the definition the tool's latest decision names against the waiting
+    one, both rendered as `pending` renders them (docs/SCAN-SPEC.md, section 6). Empty for a
+    tool with no decision."""
+    if block.kind == "changed":
+        label, other = "approved", block.approved
+    elif block.rejected is not None:
+        label, other = "rejected", block.rejected
+    else:
+        return []
+    try:
+        before = defhash.read_copy(ledger_dir, other)
+    except defhash.CopyProblem as e:
+        return [f"no diff: stored copy {printable(defhash.copy_name(other))} {printable(str(e))}"]
+    return list(
+        difflib.unified_diff(
+            defhash.render(before).split("\n"),
+            defhash.render(block.copy).split("\n"),
+            f"{label} {printable(other)}",
+            f"waiting {printable(block.def_hash)}",
+            n=3,
+            lineterm="",
+        )
+    )
+
+
+def _is_approval(body) -> bool:
+    if not isinstance(body, dict):
+        return False
+    if set(body) == {"group"}:
+        return isinstance(body["group"], str) and defhash.is_hash(body["group"])
+    if set(body) != {"upstream", "tool", "def_hash"}:
+        return False
+    return all(isinstance(body[k], str) and 0 < len(body[k]) <= 256 for k in body) and (
+        defhash.is_hash(body["def_hash"])
+    )
 
 
 def _is_decision(body) -> bool:
@@ -623,12 +774,17 @@ def _handler(card: Card):
                 if not self._nonce_ok():
                     return self._forbid()
                 return self._json(200, card.state())
-            if parts.path == "/decide":
+            if parts.path == "/review":
+                if not self._nonce_ok():
+                    return self._forbid()
+                return self._json(200, card.review())
+            if parts.path in ("/decide", "/approve"):
                 return self._forbid()  # a decision is a POST
             return self._send(404, b"not found")
 
         def do_POST(self):
-            if not self._host_ok() or urlsplit(self.path).path != "/decide":
+            where = urlsplit(self.path).path
+            if not self._host_ok() or where not in ("/decide", "/approve"):
                 return self._forbid()
             if not self._cookie_ok() or not self._nonce_ok():
                 return self._forbid()
@@ -638,17 +794,19 @@ def _handler(card: Card):
             kind = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if kind != "application/json":
                 return self._forbid()
+            malformed = NOT_A_DECISION if where == "/decide" else NOT_AN_APPROVAL
             try:
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
-                return self._json(400, {"ok": False, "error": NOT_A_DECISION})
+                return self._json(400, {"ok": False, "error": malformed})
             if length < 0:
-                return self._json(400, {"ok": False, "error": NOT_A_DECISION})
+                return self._json(400, {"ok": False, "error": malformed})
             if length > BODY_LIMIT:
                 self.rfile.read(min(length, DISCARD_LIMIT))
                 self.close_connection = True
                 return self._json(413, {"ok": False, "error": TOO_LARGE})
-            status, answer = card.decide(self.rfile.read(length))
+            handle = card.decide if where == "/decide" else card.approve
+            status, answer = handle(self.rfile.read(length))
             return self._json(status, answer)
 
         def _refuse(self):

@@ -5,4 +5,5 @@
   },
   "name": "note"
 }
+flag zero-width in description: "Caf\xe9 note,\u200b with a zero" (a character that shows nothing, so a person reads text the model reads differently)
 approved probe__note be0658abc19a030eae201dbe5823062f3bbd46cb7002c933d3a778d4abdbc767 at seq 16

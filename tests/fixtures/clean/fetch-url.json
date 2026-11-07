@@ -1,0 +1,9 @@
+{
+  "definition": {
+    "description": "Fetch a URL and return its text.",
+    "inputSchema": {
+      "type": "object"
+    },
+    "name": "fetch"
+  }
+}

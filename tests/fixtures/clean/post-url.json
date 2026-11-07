@@ -1,0 +1,17 @@
+{
+  "definition": {
+    "description": "Post a short text to a URL.",
+    "inputSchema": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "post"
+  }
+}
