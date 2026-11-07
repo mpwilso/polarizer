@@ -34,7 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 from polarizer import holds, lock, paths, pins, sidefiles, stats
-from polarizer.decisions import HoldDecider, Refusal, fold_reason
+from polarizer.decisions import PLANTED_LINES, HoldDecider, Refusal, fold_reason, reveal_lines
 from polarizer.ledger import LEDGER, LOCKED_LINE, Locked, read_files, verify_bytes
 from polarizer.text import printable
 from polarizer.writer import LedgerError
@@ -363,13 +363,16 @@ class Card:
             now = self._now()
             shown_at = self._monotonic()
             every = held.snapshot()
+            planted = {h for h, hold in every.items() if _planted(hold, held)}
             by_pair: dict[tuple[str, str], list[holds.Hold]] = {}
             for hold in every.values():
-                by_pair.setdefault((hold.tool, hold.rule), []).append(hold)
+                if hold.hold not in planted:  # a revealed planted hold is no one's history
+                    by_pair.setdefault((hold.tool, hold.rule), []).append(hold)
             cards = []
             for hold in held.open_holds():
                 self._watched.add(hold.hold)
-                cards.append(self._card(hold, held, pinned, by_pair[(hold.tool, hold.rule)], now))
+                earlier = by_pair.get((hold.tool, hold.rule), [])
+                cards.append(self._card(hold, held, pinned, earlier, now))
                 self._shown.setdefault(hold.hold, shown_at)
             first = self._first_seq if self._first_seq is not None else -1
             ended = [
@@ -382,10 +385,7 @@ class Card:
                 "status": "intact",
                 "problem": [],
                 "open": cards,
-                "ended": [
-                    {"hold": printable(h.hold), "tool": printable(h.tool), "text": ending_text(h)}
-                    for h in ended[:ENDED_SHOWN]
-                ],
+                "ended": [_ended(h, held, h.hold in planted) for h in ended[:ENDED_SHOWN]],
             }
 
     def _card(self, hold, held, pinned, earlier, now) -> dict:
@@ -469,6 +469,7 @@ class Card:
         folded = (fold_reason(reason) or None) if reason is not None else None
         out: list[str] = []
         err: list[str] = []
+        reveal: list[str] = []
         with self._deciding:
             try:
                 decider = HoldDecider.open(self.ledger_dir, ops=self._ops)
@@ -480,7 +481,14 @@ class Card:
             decider.terminal = self.terminal
             try:
                 decider.decide(
-                    hold_id, decision, folded, out.append, err.append, self._now(), elapsed_ms
+                    hold_id,
+                    decision,
+                    folded,
+                    out.append,
+                    err.append,
+                    self._now(),
+                    elapsed_ms,
+                    reveal_out=reveal.append,
                 )
             except (Refusal, LedgerError) as e:
                 return 409, {"ok": False, "error": e.line}
@@ -489,12 +497,30 @@ class Card:
                 return 409, {"ok": False, "error": line}
             finally:
                 decider.close()
-        return 200, {"ok": True, "lines": out, "warnings": err}
+        return 200, {"ok": True, "lines": out, "warnings": err, "reveal": reveal[1:]}
 
     def wait_for_decisions(self, timeout: float) -> None:
         """Let a decision in progress finish before the process exits."""
         if self._deciding.acquire(timeout=timeout):
             self._deciding.release()
+
+
+def _planted(hold: holds.Hold, held: holds.HoldState) -> bool:
+    """A hold whose reveal checks and says planted (stage 10). Until then it is any hold."""
+    reveal = held.revealed(hold.hold)
+    return reveal is not None and reveal.label == "planted" and holds.reveal_checks(hold, reveal)
+
+
+def _ended(hold: holds.Hold, held: holds.HoldState, planted: bool) -> dict:
+    item = {"hold": printable(hold.hold), "tool": printable(hold.tool), "text": ending_text(hold)}
+    if planted:
+        reveal = held.revealed(hold.hold)
+        ending = hold.ending
+        if ending.kind == "hold.decided":
+            item["reveal"] = reveal_lines(reveal, ending.decision)[1:]
+        else:
+            item["reveal"] = [*PLANTED_LINES, f"why: {printable(reveal.why or '')}"]
+    return item
 
 
 def _is_decision(body) -> bool:

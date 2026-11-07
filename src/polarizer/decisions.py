@@ -9,13 +9,14 @@ terminal key. A hold decision is a conditional append: its check runs under the 
 after catching up, so two processes can never both end one hold. Nothing here creates a ledger.
 """
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from polarizer import defhash, sidefiles
-from polarizer.holds import HoldState, listener, session_state, warning
+from polarizer.holds import HoldState, listener, reveal_checks, session_state, warning
 from polarizer.holds import block as hold_block
 from polarizer.ledger import LEDGER
 from polarizer.pins import PinState, blocks, group
@@ -24,6 +25,23 @@ from polarizer.upstream import one_line
 from polarizer.writer import FileOps, LedgerError, LedgerWriter
 
 ACTOR = "person"
+REVEAL_WAIT = 2.0  # seconds allow and deny wait for a hold.revealed (MEASURE-SPEC.md, section 11)
+REVEAL_POLL = 0.05
+NO_REVEAL = (
+    "polarizer: no reveal for this hold yet; polarizer stats will show it once the session "
+    "reveals it"
+)
+PLANTED_LINES = (
+    "Planted call: Polarizer made this hold to check that held calls are read. The",
+    "agent never made it, and nothing was forwarded.",
+)
+
+
+def reveal_lines(reveal, decision: str) -> list[str]:
+    """What follows a planted hold's result line: a blank line, the two lines, why, and the
+    outcome (MEASURE-SPEC.md, section 11, What allow and deny print)."""
+    outcome = "You allowed it: missed." if decision == "allow" else "You denied it: caught."
+    return ["", *PLANTED_LINES, f"why: {printable(reveal.why or '')}", outcome]
 
 
 class Refusal(Exception):
@@ -195,6 +213,7 @@ class HoldDecider:
         err: Callable[[str], None],
         now: datetime,
         elapsed_ms: int | None = None,
+        reveal_out: Callable[[str], None] | None = None,
     ) -> None:
         """Steps 4 to 7 of `allow` (decision "allow") or `deny`. Raises Refusal. The card
         gives `elapsed_ms`, its monotonic time from showing the hold to the click, recorded
@@ -251,3 +270,26 @@ class HoldDecider:
         warned = warning(state)
         if warned:
             err(warned)
+        if held.plant_commit is not None:
+            self._print_reveal(held, decision, reveal_out or out, err)
+
+    def _print_reveal(self, held, decision: str, out, err) -> None:
+        """A hold with plant_commit: wait up to REVEAL_WAIT for its hold.revealed, for real and
+        planted holds alike, catching up with the ledger every REVEAL_POLL (an fstat; the lock
+        only when it grew). A planted hold's reveal is printed; a real one prints nothing; none
+        in time, or one that doesn't check against the commitment, is NO_REVEAL on stderr."""
+        deadline = time.monotonic() + REVEAL_WAIT
+        reveal = self.holds.revealed(held.hold)
+        while reveal is None and time.monotonic() < deadline:
+            time.sleep(REVEAL_POLL)
+            try:
+                self.writer.catch_up().result()
+            except LedgerError:
+                break
+            reveal = self.holds.revealed(held.hold)
+        if not reveal_checks(held, reveal):
+            err(NO_REVEAL)
+            return
+        if reveal.label == "planted":
+            for line in reveal_lines(reveal, decision):
+                out(line)

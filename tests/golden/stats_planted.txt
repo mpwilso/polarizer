@@ -1,0 +1,31 @@
+stats: 3 holds; 2 sessions with holds, 2 without
+
+session 1111111111111111 started 2026-10-06T09:59:59.000Z
+  holds 2: allowed 2, denied 0, expired 0, abandoned 0, open 0
+  approval: allowed 2 of 2 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 10 s, from 2 decisions
+
+session 2222222222222222 started 2026-10-06T10:59:59.000Z
+  holds 1: allowed 0, denied 1, expired 0, abandoned 0, open 0
+  approval: allowed 0 of 1 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 30 s, from 1 decision
+
+all sessions
+  holds 3: allowed 2, denied 1, expired 0, abandoned 0, open 0
+  approval: allowed 2 of 3 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 20 s, from 3 decisions
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+planted calls
+  on in 2 of 4 sessions: at most 1 per session, about 1 in 20 eligible calls, never with 12 or more holds open
+  planted 2: denied 1 (caught), allowed 1 (missed), expired 0, not revealed 1
+  catch rate: caught 1 of 2, too few to say a rate (5 or more needed)
+
+by tool and rule
+  fs__write_file outside-roots: allowed 2 of 2 decided
+  fs__move_file destructive: allowed 0 of 1 decided
+
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
+
+trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has 3

@@ -365,6 +365,13 @@
    "seq": 11,
    "status": "intact"
   },
+  "valid/planted": {
+   "check": null,
+   "head": true,
+   "line": 11,
+   "seq": 10,
+   "status": "intact"
+  },
   "valid/session": {
    "check": null,
    "head": true,

@@ -52,7 +52,7 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - Another web server on 127.0.0.1 that your browser visits receives the card's cookie, since browsers send cookies to every port of a host. The cookie alone opens nothing but the page's script and style; the token and a page's nonce are needed for anything else.
 - The note that a call has probably moved to the background appears at 120 s, from one observed version of Claude Code (2.1.289, about 123 s).
 - The card's time to decision (`elapsed_ms`) starts when the card first sends a hold to a page, not when you first look at it, and a page left in a background tab counts as showing it.
-- The card was checked headless on real Claude Code, with its endpoints driven by curl; its page in a person's browser has been checked only by a test in a headless Chromium.
+- The card was checked headless on real Claude Code, with its endpoints driven by curl; its page has been checked only by a test in a headless Chromium, not yet by a person.
 
 ## People
 
@@ -77,6 +77,16 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - Real holds time out after 300 s and drill calls never do; answers that took longer are marked, and results are shown with and without them.
 - No drill entry is fsynced inline, and a drill ledger's `ledger.head` stays at its genesis entry, so a lost tail of a drill ledger is not detected.
 - Drills on a native Windows console (PowerShell or the Command Prompt) have not been tried.
+
+## Live planted calls
+
+- They are off unless `planted_calls_per_session` is set in `[policy]`, and off under `--no-holds`. With them on, a held call may be one the agent never made; none is ever forwarded, and none is made while 12 or more holds of the session are open.
+- A planted call has no call line in Claude Code, since the agent never made it. A person who matches every hold against Claude Code's screen can tell which one is planted, so a live planted call measures whether you read the held call, not whether you cross-check it with the agent's transcript.
+- One shape only: a path argument changed to a place the built-in patterns hold (a git hook, a workflow, `~/.bashrc`, `~/.ssh/authorized_keys`, or for a read, a key or credentials file). The planted call's arguments name your real home directory.
+- The rate is low by design: at most 3 per session, about 1 in 20 eligible calls, and only while the agent is active. A catch rate from planted calls takes many sessions to mean anything, and `polarizer stats` prints "too few to say" until it does.
+- The card recommends deny for every planted call, as for any real call to the same places, so a catch made on the card partly measures whether you follow its recommendation.
+- A planted call comes 1 to 8 seconds after the call it was made from. When the session ends first, as a headless `claude -p` run does right after its last call, the plan is dropped, or the planted hold ends with the session (recorded as expired at shutdown) before anyone could read it. The first headless stage 10 check saw this once.
+- A planted hold whose `serve` dies before its reveal is never revealed, and `stats` counts it as not revealed. The salt that proves the label stays in that process's memory, which a debugger running as you could read.
 
 ## The ledger
 

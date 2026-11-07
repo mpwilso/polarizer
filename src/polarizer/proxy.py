@@ -53,6 +53,7 @@ from polarizer.canon import MAX_INT, EntryRefused
 from polarizer.holds import SESSIONS, HoldState, session_state
 from polarizer.ledgerdir import make_private
 from polarizer.pins import PinState
+from polarizer.planted import DISCLOSURE, Planter
 from polarizer.sidefiles import ArgsProblem, read_args, write_args
 from polarizer.text import safe
 from polarizer.upstream import SEPARATOR, Upstream, UpstreamSpec, clip, describe, log, one_line
@@ -201,6 +202,12 @@ class Gateway:
         self._client_lock = threading.Lock()
         self._client_recorded = False
         self._legacy_sessions: list = []
+        # Live planted calls (MEASURE-SPEC.md, section 11). The planter gets the writer, the
+        # folds, the policy and the table of open holds, never a client or an upstream.
+        self.planter = Planter(
+            writer, self.holds, self.policy, self.session, self._open,
+            lambda: self._watch_wake.set(), log, hold_timeout,
+        )  # fmt: skip
 
     # Startup ---------------------------------------------------------------------------
 
@@ -250,6 +257,8 @@ class Gateway:
         if waiting:
             log(f"polarizer: {waiting} tools wait for approval; run polarizer pending")
         self._log_unclassified()
+        if self.planter.on:
+            log(DISCLOSURE.format(n=self.planter.limit))
         self._announced = await self._exposed_dump()
         self._background = await tasks.start(self._run_background)
         self._started = True
@@ -801,13 +810,35 @@ class Gateway:
         )
         with anyio.CancelScope(shield=True):
             verdict = await anyio.to_thread.run_sync(evaluate)
+        trigger = await self._plan(upstream.prefix, tool, params, definition, verdict)
         if verdict.action == "hold":
-            return await self._held(ctx, params, verdict)
-        return await self._forward(ctx, params, upstream, tool, params.arguments, verdict.rule)
+            return await self._held(ctx, params, verdict, trigger)
+        return await self._forward(
+            ctx, params, upstream, tool, params.arguments, verdict.rule, trigger=trigger
+        )
+
+    async def _plan(self, prefix, tool, params, definition, verdict):
+        """With planting on: count this call, and maybe plan a planted call from it, issued in
+        the background after its delay (MEASURE-SPEC.md, section 11). A call about to be refused
+        for too many holds is counted but is no trigger."""
+        if not self.planter.on:
+            return None
+        refused = verdict.action == "hold" and len(self._open) >= MAX_OPEN_HOLDS
+        with anyio.CancelScope(shield=True):
+            trigger = await self.planter.consider(
+                prefix, tool, params.name, params.arguments, definition, verdict, refused
+            )
+        if trigger is not None:
+            if self._background is None:
+                self.planter.pending -= 1
+                return None
+            self._background.start_soon(self.planter.issue, trigger)
+        return trigger
 
     async def _forward(
-        self, ctx, params, upstream, tool, arguments, allowed_by, hold=None, commit=None
-    ):
+        self, ctx, params, upstream, tool, arguments, allowed_by, hold=None, commit=None,
+        trigger=None,
+    ):  # fmt: skip
         """M0's order: the side file (unless a held call's is reused), call.sent, the upstream
         call, call.returned. call.sent records `allowed_by`, and `hold` for a held call."""
         meta = dict(params.meta or {})
@@ -837,6 +868,8 @@ class Gateway:
                 if hold is not None:
                     data["hold"] = hold
                 sent = await self.writer.append_async("call.sent", data)
+                if trigger is not None:
+                    trigger.mark(sent.seq)
         except (Stopped, EntryRefused, OSError) as e:
             return self._unrecordable(params.name, describe(e))
 
@@ -922,7 +955,7 @@ class Gateway:
         """The model's one line for every ending that refuses: no rule, reason or path."""
         return _text_result(f"polarizer: {clip(name, 4096)} was not allowed")
 
-    async def _held(self, ctx, params, verdict) -> types.CallToolResult:
+    async def _held(self, ctx, params, verdict, trigger=None) -> types.CallToolResult:
         """A call the rules hold: record it, wait for its ending, and act on that."""
         name = params.name
         if len(self._open) >= MAX_OPEN_HOLDS:
@@ -947,7 +980,11 @@ class Gateway:
                         "reason": verdict.reason,
                         "timeout_seconds": self.policy.hold_timeout_seconds,
                     }
-                    await self.writer.append_async("hold.created", data)
+                    if self.planter.on:  # every hold of a planting session commits
+                        waiter.salt, data["plant_commit"] = self.planter.commitment("real")
+                    created = await self.writer.append_async("hold.created", data)
+                    if trigger is not None:
+                        trigger.mark(created.seq)
             except (Stopped, EntryRefused, OSError) as e:
                 return self._unrecordable(name, describe(e))
             waiter.started = anyio.current_time()
@@ -958,6 +995,7 @@ class Gateway:
                 ending = await self._await_ending(waiter, ctx)
                 if ending is None:
                     return self._unrecordable(name, self.writer.stopped or "the writer stopped")
+                await self._reveal_real(waiter)  # before anything else is done for it
                 if _allows(ending) and self.before_forward is not None:
                     await self.before_forward(waiter.hold)  # tests hold the forward back here
             except anyio.get_cancelled_exc_class():
@@ -1055,6 +1093,7 @@ class Gateway:
             held = self.holds.get(waiter.hold)
         if held is None or held.ending is None:
             return
+        await self._reveal_real(waiter)
         if _allows(held.ending):
             reason = after_allow
         else:
@@ -1085,6 +1124,14 @@ class Gateway:
             ctx, params, upstream, tool, arguments, "hold", hold=hold_id, commit=waiter.commit
         )
 
+    async def _reveal_real(self, waiter: "_Waiter") -> None:
+        """hold.revealed for a real hold of a planting session, once, right after its ending."""
+        if waiter.salt is None or waiter.revealed:
+            return
+        waiter.revealed = True
+        with anyio.CancelScope(shield=True):
+            await self.planter.reveal(waiter.hold, "real", waiter.salt)
+
     def _wake_holds(self) -> None:
         """Wake each waiting hold whose ending the fold now has, or all of them once the writer
         has stopped. A decision ignored for its args_commit gets one stderr line."""
@@ -1113,6 +1160,8 @@ class _Waiter:
         self.started: float = 0.0
         self.progress = 0  # the last progress value sent
         self.event = anyio.Event()
+        self.salt: bytes | None = None  # with planting on: kept in memory until the reveal
+        self.revealed = False
 
 
 def _allows(ending) -> bool:

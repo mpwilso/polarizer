@@ -47,6 +47,7 @@ SERVER = "pz"  # the server's name in mcp.json, so the tool is mcp__pz__fs__writ
 WAIT_FOR_HOLD = 240.0
 WAIT_FOR_CLAUDE = 420.0
 POLL = 1.5
+NL = chr(10)
 
 FS_TOOLS = """
 [upstream.fs.tools]
@@ -83,6 +84,18 @@ def setup(directory: Path, polarizer: Path, planted: int = 0) -> dict:
         + "connect_timeout_seconds = 20\n"
         + FS_TOOLS
     )
+    if planted:
+        # The repository's own test server, for its wait tool: the planted check's prompt ends
+        # with a wait, so the session stays open while a plan's 1 to 8 s delay runs out.
+        python = REPO / ".venv" / "bin" / "python"
+        probe = REPO / "tests" / "helpers" / "probe_server.py"
+        toml += (
+            "\n[upstream.probe]\n"
+            + f"command = {json.dumps(str(python))}\n"
+            + f"args = [{json.dumps(str(probe))}]\n"
+            + "\n[upstream.probe.tools]\n"
+            + 'wait = { class = "local-read" }\n'
+        )
     config = directory / "polarizer.toml"
     config.write_text(toml, encoding="utf-8")
     mcp = {
@@ -218,7 +231,7 @@ def wait_for_hold(curl: Curl, seen: set, claude: subprocess.Popen, timeout: floa
         for card in curl.state()["open"]:
             if card["hold"] not in seen:
                 return card
-        if claude.poll() is not None:
+        if claude is not None and claude.poll() is not None:
             return None
         time.sleep(POLL)
     return None
@@ -434,9 +447,126 @@ def check_m3(paths, curl, polarizer, directory, report) -> None:
     common_end(paths, polarizer, report, 2)
 
 
+READS = 30  # files the stage 10 check asks the model to read, one call each
+SESSIONS = 3  # claude runs, each a new serve session, until a planted call appears
+KEEP_OPEN = 20  # seconds of the closing wait call; more than a plan's 8 s delay and two polls
+
+
+def check_planted(paths, curl, polarizer, directory, report) -> None:
+    """Stage 10: planting on at 1 per session; the model reads READS files inside the root, one
+    call each, which run without a hold and are eligible triggers. A hold that appears can only
+    be a planted one: it is shown on the card like any hold, denied through the card, and its
+    reveal checked. Up to SESSIONS runs, since a plan is about 1 in 20 eligible calls."""
+    notes = paths["work"] / "notes"
+    notes.mkdir()
+    names = []
+    for i in range(1, READS + 1):
+        path = notes / f"note-{i:02d}.txt"
+        path.write_text(f"note {i}" + chr(10), encoding="utf-8")
+        names.append(str(path))
+    prompt = (
+        f"Use the tool mcp__{SERVER}__fs__read_text_file to read each of these {READS} files, "
+        "one call per file, in this order: " + ", ".join(names) + ". When all are read, call "
+        f"mcp__{SERVER}__probe__wait once with seconds set to {KEEP_OPEN}. Do not use any other "
+        "tool. Then reply in one line with how many files you read."
+    )
+    allowed = f"mcp__{SERVER}__fs__read_text_file,mcp__{SERVER}__probe__wait"
+    found = None
+    for run in range(1, SESSIONS + 1):
+        report.say(f"== claude run {run} of at most {SESSIONS}")
+        claude = run_claude(
+            prompt,
+            paths["mcp"],
+            paths["work"],
+            allowed,
+            directory,
+            report,
+        )
+        seen: set = set()
+        try:
+            while claude.poll() is None and found is None:
+                found = wait_for_hold(curl, seen, claude, 2.0)
+            if found is None:  # claude is done; a plan's delay is 1 to 8 s
+                found = wait_for_hold(curl, seen, None, 15.0)
+            if found is not None:
+                rows = {label: lines for label, lines in found["rows"]}
+                report.say("the card's block:" + "".join(NL + "  " + x for x in found["block"]))
+                report.say(f"recommendation: {found['recommendation']['text']}")
+                shown = json.dumps(found).lower()
+                report.check(
+                    "the planted hold reads like any hold: no word of planting on it",
+                    "plant" not in shown,
+                    rows["Why it was held"][0],
+                )
+                code, answer = curl.decide(found["hold"], "deny", None)
+                reveal = answer.get("reveal") or []
+                report.check(
+                    "deny through the card",
+                    code == 200 and answer.get("ok") is True,
+                    (answer.get("lines") or [answer.get("error")])[-1],
+                )
+                report.say("the card's reveal:" + "".join(NL + "  " + x for x in reveal))
+                report.check(
+                    "the card shows the reveal after the deny",
+                    bool(reveal) and reveal[-1] == "You denied it: caught.",
+                )
+        finally:
+            finish_claude(claude, directory, report)
+        if found is not None:
+            break
+        report.say("no planted call in this session (about 1 in 20 eligible calls)")
+    entries_ = entries(paths["ledger"])
+    created = [e for e in entries_ if e["kind"] == "hold.created"]
+    report.check(
+        "every hold of the planting sessions carries plant_commit",
+        all("plant_commit" in e["data"] for e in created),
+        f"{len(created)} holds",
+    )
+    loaded = [
+        e["data"]["planted_calls_per_session"] for e in entries_ if e["kind"] == "policy.loaded"
+    ]
+    report.say(f"policy.loaded planted_calls_per_session: {loaded}")
+    sent = [e for e in entries_ if e["kind"] == "call.sent"]
+    report.say(f"real calls forwarded: {len(sent)}")
+    if not report.check(
+        "a planted call appeared",
+        found is not None,
+        "none in any session" if found is None else found["hold"],
+    ):
+        common_end(paths, polarizer, report, 0)
+        return
+    hold = found["hold"]
+    reveals = [e for e in entries_ if e["kind"] == "hold.revealed" and e["data"]["hold"] == hold]
+    report.check(
+        "hold.revealed says planted",
+        len(reveals) == 1 and reveals[0]["data"]["label"] == "planted",
+        reveals[0]["data"].get("why") if reveals else "none",
+    )
+    calls = [
+        e["kind"]
+        for e in entries_
+        if e["kind"].startswith("call.") and e["data"].get("hold") == hold
+    ]
+    report.check("nothing was forwarded or refused for the planted hold", calls == [], str(calls))
+    done = subprocess.run(
+        [str(polarizer), "stats", "--ledger-dir", str(paths["ledger"])],
+        capture_output=True,
+        text=True,
+    )
+    report.check(
+        "stats counts the planted call as caught", "planted 1: denied 1 (caught)" in done.stdout
+    )
+    common_end(paths, polarizer, report, 0)  # a planted hold is out of time to decision
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="the card's headless check on real Claude Code")
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--planted",
+        action="store_true",
+        help="stage 10: planted_calls_per_session = 1, many reads, a planted hold denied",
+    )
+    args = parser.parse_args(argv)
     polarizer = REPO / ".venv" / "bin" / "polarizer"
     if not polarizer.exists():
         print(f"card-check: {polarizer} not found; run uv sync --locked first", file=sys.stderr)
@@ -457,7 +587,7 @@ def main(argv=None) -> int:
     names = sorted(k for k in os.environ if k.startswith(("CLAUDE", "ANTHROPIC")))
     report.say("CLAUDE_* and ANTHROPIC_* variables set (names only): " + " ".join(names))
     before = claude_json_stat()
-    paths = setup(directory, polarizer)
+    paths = setup(directory, polarizer, planted=1 if args.planted else 0)
     report.say("== priming the ledger (no model)")
     report.say(prime(paths["config"], paths["ledger"], polarizer))
     card, port, token = start_card(paths["config"], polarizer, directory)
@@ -471,7 +601,10 @@ def main(argv=None) -> int:
         for what, code in curl.refusals():
             report.check(f"403 for {what}", code == 403, str(code))
         report.say("== claude")
-        check_m3(paths, curl, polarizer, directory, report)
+        if args.planted:
+            check_planted(paths, curl, polarizer, directory, report)
+        else:
+            check_m3(paths, curl, polarizer, directory, report)
     finally:
         stop_card(card, report)
     report.say(f"~/.claude.json bookkeeping: before {before}; after {claude_json_stat()}")

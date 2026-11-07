@@ -209,7 +209,7 @@ Written by `card.recommend(rule, reason)`, a function of the hold's rule and rea
 
 ## 8. Planted calls (stage 10)
 
-Live planted calls are built after M3 (MEASURE-SPEC.md, section 11). The card is held to the same rule as `holds`: a planted hold is shown exactly as a real one until it is decided. Everything the card shows of an open hold comes from fields a planted hold has too (HOLD-SPEC.md, section 12), and the recommendation is a function of rule and reason, which serve computes the same way for both. Stage 10 adds:
+Live planted calls were built after M3, as stage 10 (MEASURE-SPEC.md, section 11, and section 17, Stage 10 build). The card is held to the same rule as `holds`: a planted hold is shown exactly as a real one until it is decided. Everything the card shows of an open hold comes from fields a planted hold has too (HOLD-SPEC.md, section 12), and the recommendation is a function of rule and reason, which serve computes the same way for both. Stage 10 adds:
 - after a decision on a hold with `plant_commit`, the card waits up to 2 s for its `hold.revealed`, as `allow` and `deny` do, for real and planted holds alike, and adds the reveal's lines to the answer (`reveal`);
 - an ended hold revealed as planted gets its reveal lines in the ended list;
 - holds revealed as planted are left out of every card's history.

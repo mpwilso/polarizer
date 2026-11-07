@@ -28,7 +28,9 @@ POLICY_KEYS = (
     "hold_timeout_seconds",
     "write_hold_patterns",
     "read_hold_patterns",
+    "planted_calls_per_session",
 )
+MAX_PLANTED = 3
 TOOL_KEYS = ("class", "path_args")
 CLASSES = ("local-read", "local-write", "destructive", "open-world", "egress")
 EXPOSED_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
@@ -69,6 +71,7 @@ class PolicyConfig:
     hold_timeout_seconds: int = 300
     write_hold_patterns: tuple[str, ...] = ()
     read_hold_patterns: tuple[str, ...] = ()
+    planted_calls_per_session: int = 0  # live planted calls (MEASURE-SPEC.md, section 11)
 
 
 @dataclass(frozen=True)
@@ -182,7 +185,12 @@ def _policy(doc: dict, fail) -> PolicyConfig:
             if problem:
                 fail(f'[policy] pattern "{safe(pattern)}" is not valid: {problem}')
         lists[key] = tuple(given)
-    return PolicyConfig(roots, timeout, lists["write_hold_patterns"], lists["read_hold_patterns"])
+    planted = table.get("planted_calls_per_session", 0)
+    if type(planted) is not int or not 0 <= planted <= MAX_PLANTED:
+        fail(f"[policy] planted_calls_per_session must be an integer from 0 to {MAX_PLANTED}")
+    return PolicyConfig(
+        roots, timeout, lists["write_hold_patterns"], lists["read_hold_patterns"], planted
+    )
 
 
 def _upstream(prefix, table, fail, require_env, environ) -> Upstream:

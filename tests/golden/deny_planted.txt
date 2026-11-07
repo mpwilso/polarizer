@@ -1,0 +1,15 @@
+hold 7c2e94d0a1b85f36 fs__write_file local-write
+held by write-pattern: argument "path": /home/river/code/garden-planner/.git/hooks/post-checkout matches .git/hooks/**
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit d46425458f34cca21b75696d884e77429bcc457ae144d94359708bbebc7c7870, 89 bytes of arguments
+{
+  "path": "/home/river/code/garden-planner/.git/hooks/post-checkout",
+  "content": "# notes\n"
+}
+denied hold 7c2e94d0a1b85f36 at seq 7
+
+Planted call: Polarizer made this hold to check that held calls are read. The
+agent never made it, and nothing was forwarded.
+why: The agent's fs__write_file call named /home/river/code/garden-planner/notes.md; this planted call named /home/river/code/garden-planner/.git/hooks/post-checkout, where git runs code.
+You denied it: caught.

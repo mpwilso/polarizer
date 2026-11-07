@@ -60,6 +60,7 @@ class Policy:
     holds: bool = True
     workspace_roots: tuple[str, ...] = ()  # resolved
     hold_timeout_seconds: int = 300
+    planted_calls_per_session: int = 0  # 0 off; always 0 with holds off (MEASURE-SPEC.md, 11)
     write_hold_patterns: tuple[str, ...] = ()  # as configured
     read_hold_patterns: tuple[str, ...] = ()
     upstreams: dict = field(default_factory=dict)  # prefix -> UpstreamPolicy
@@ -101,6 +102,12 @@ class Policy:
             "upstreams": upstreams,
             "workspace_roots": list(self.workspace_roots),
             "write_hold_patterns": list(self.write_hold_patterns),
+            # Only when on, so every config without the key keeps its policy_sha256.
+            **(
+                {"planted_calls_per_session": self.planted_calls_per_session}
+                if self.planted_calls_per_session > 0
+                else {}
+            ),
         }
 
     @property
@@ -116,6 +123,7 @@ class Policy:
             "classified": self.classified,
             "workspace_roots": list(self.workspace_roots),
             "hold_timeout_seconds": self.hold_timeout_seconds,
+            "planted_calls_per_session": self.planted_calls_per_session,
         }
 
     def rule_for(self, prefix: str, tool: str) -> ToolRule | None:
@@ -149,6 +157,7 @@ def build(cfg: Config, *, holds: bool = True) -> Policy:
         holds=holds,
         workspace_roots=tuple(roots),
         hold_timeout_seconds=cfg.policy.hold_timeout_seconds,
+        planted_calls_per_session=cfg.policy.planted_calls_per_session if holds else 0,
         write_hold_patterns=cfg.policy.write_hold_patterns,
         read_hold_patterns=cfg.policy.read_hold_patterns,
         upstreams={

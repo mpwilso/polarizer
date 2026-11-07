@@ -9,8 +9,14 @@ and is guarded by a lock.
 Each hold ends once: the first hold.decided, hold.expired or hold.abandoned for it, in seq
 order. A hold.decided whose args_commit differs from the hold's is not an ending; it is ignored
 (serve says so on stderr). Anything after the ending changes nothing.
+
+Stage 10 (docs/MEASURE-SPEC.md, sections 8 and 11): a hold of a session with planted calls on
+carries plant_commit, and its hold.revealed is kept beside the holds, never in them, so no
+hold's state or ending changes with it. `reveal_checks` says whether a reveal matches its
+commitment.
 """
 
+import hashlib
 import json
 import re
 import threading
@@ -64,6 +70,39 @@ class Hold:
     reason: str
     timeout_seconds: int
     ending: Ending | None = None
+    plant_commit: str | None = None  # stage 10: on every hold of a planting session
+
+
+@dataclass(frozen=True)
+class Reveal:
+    """A hold.revealed: whether the hold was real or planted, with the salt that checks it."""
+
+    seq: int
+    label: str  # "real" or "planted"
+    salt: str  # 64 hex
+    why: str | None
+    derived_from: int | None
+
+
+PLANT_PREFIX = b"POLARIZER-PLANT/1" + bytes([0x0A])
+LABELS = ("real", "planted")
+
+
+def plant_commit(salt: bytes, label: str) -> str:
+    """hex(sha256(PLANT_PREFIX + salt + label)) (MEASURE-SPEC.md, section 8): the prefix is
+    the ASCII line POLARIZER-PLANT/1 and its newline."""
+    return hashlib.sha256(PLANT_PREFIX + salt + label.encode("ascii")).hexdigest()
+
+
+def reveal_checks(hold: "Hold", reveal: "Reveal | None") -> bool:
+    """True when the reveal's salt and label hash to the hold's plant_commit."""
+    if reveal is None or hold.plant_commit is None or reveal.label not in LABELS:
+        return False
+    try:
+        salt = bytes.fromhex(reveal.salt)
+    except ValueError:
+        return False
+    return len(salt) == 32 and plant_commit(salt, reveal.label) == hold.plant_commit
 
 
 def _texts(data: dict, *keys) -> bool:
@@ -77,6 +116,7 @@ class HoldState:
     _holds: dict = field(default_factory=dict)  # id -> Hold
     _sessions: dict = field(default_factory=dict)  # session -> session.started ts
     _mismatched: list = field(default_factory=list)  # (seq, hold id): decisions ignored
+    _reveals: dict = field(default_factory=dict)  # hold id -> its first Reveal
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def apply(self, entry: dict) -> None:
@@ -92,6 +132,23 @@ class HoldState:
                 self._created(entry, data)
             elif kind in ENDINGS:
                 self._ended(kind, seq, data)
+            elif kind == "hold.revealed":
+                self._revealed(seq, data)
+
+    def _revealed(self, seq: int, data: dict) -> None:
+        hold_id = data.get("hold")
+        if not isinstance(hold_id, str) or hold_id in self._reveals:
+            return
+        if not _texts(data, "label", "salt"):
+            return
+        why, derived = data.get("why"), data.get("derived_from")
+        self._reveals[hold_id] = Reveal(
+            seq,
+            data["label"],
+            data["salt"],
+            why if isinstance(why, str) else None,
+            derived if type(derived) is int else None,
+        )
 
     def _created(self, entry: dict, data: dict) -> None:
         if not _texts(data, "hold", "session", "tool", "args_commit", "rule", "reason"):
@@ -99,6 +156,7 @@ class HoldState:
         if type(data.get("timeout_seconds")) is not int or data["hold"] in self._holds:
             return
         cls, class_from = data.get("class"), data.get("class_from")
+        commit = data.get("plant_commit")
         self._holds[data["hold"]] = Hold(
             hold=data["hold"],
             seq=entry["seq"],
@@ -111,6 +169,7 @@ class HoldState:
             rule=data["rule"],
             reason=data["reason"],
             timeout_seconds=data["timeout_seconds"],
+            plant_commit=commit if isinstance(commit, str) else None,
         )
 
     def _ended(self, kind: str, seq: int, data: dict) -> None:
@@ -143,6 +202,14 @@ class HoldState:
         with self._lock:
             found = [h for h in self._holds.values() if h.ending is None]
         return sorted(found, key=lambda h: h.seq)
+
+    def revealed(self, hold_id: str) -> Reveal | None:
+        with self._lock:
+            return self._reveals.get(hold_id)
+
+    def reveals(self) -> dict:
+        with self._lock:
+            return dict(self._reveals)
 
     def session_started(self, session: str) -> str | None:
         with self._lock:

@@ -1427,6 +1427,22 @@ Decided in the owner's review of 0.4.0; docs/dev/STAGE9-NOTES.md, Review fixes, 
 2. **The session blocks group the holds once,** in a dict keyed by session, and `StatsFold` keeps sessions as a dict's keys, so `stats` grows with the ledger, not with sessions squared; `test_session_blocks_are_linear_in_sessions` times that step for 5,000 sessions. Its bound is 0.5 s, not the 2 s the review suggested: at 5,000 sessions the old code took 0.74 s on the Windows 11 machine this round ran on, so 2 s would not have caught it, and the new code takes about 0.03 s there.
 3. **The guide says "call",** as the drill's screen does (`call 3 of 10`, `Clean call`), where section 13 says "action"; section 13 is left as written, as the record of what was asked.
 
+### Stage 10 build (Nov 7, 2026, UTC)
+
+Decided while building section 11, after M3; docs/dev/STAGE10-NOTES.md has the detail. Nothing in section 11 was changed; these fill what it left open.
+
+1. **The planter is its own class,** `planted.Planter`, built from the writer, the hold fold, the policy, the session id, the gateway's table of open holds and two callbacks (wake the watch, write a stderr line). It holds no client session, request or upstream client, and its module calls nothing of the MCP SDK: the structure section 11 asks for, with `test_plan_reads_the_trigger_and_never_the_client` pinning it beside `test_planted_call_is_never_forwarded`.
+2. **The calls counted toward condition 4** are every call that routed to an approved tool and was evaluated, a call about to be refused for 16 open holds included; that call is counted but is never a trigger (condition 2).
+3. **A planned call counts toward the session's limit** while its delay runs (`pending`), so two plans can't both take the last place.
+4. **A plan waits up to 10 s for its trigger's entry** after the delay, since the delay can end before the trigger's `call.sent` is written; a trigger never recorded is never planted from, and `derived_from` is always a real seq.
+5. **A trigger path with no file name stem** (a directory) gives the workflow target the stem `ci`.
+6. **A reveal that doesn't check against its commitment** is treated as no reveal: `allow` and `deny` print section 11's no-reveal line, and the card shows no reveal, as `stats` counts it as `did not check`.
+7. **In `stats`,** when sessions had different limits the line reads `at most <a> to <b> per session`; with no planted hold decided, `catch rate: none decided`; and a planting session whose holds are all planted or unrevealed is counted among the sessions without holds, since its holds are out of every other count.
+8. **The card** carries the reveal in its answer's `reveal` (empty for a real hold), puts it on an ended planted hold, and leaves holds revealed as planted out of every card's history (docs/CARD-SPEC.md, section 8).
+9. **The card's recommendation says deny for every planted hold,** because every target is a built-in pattern (or a destructive call's destination under one) and the recommendation follows the rule alone. It says the same for a real call to those places, so it gives nothing away, but a catch made on the card partly measures whether the person heeds the recommendation. That is a stated limit (LIMITS.md).
+10. **Tests beyond section 12's table:** `test_no_holds_records_zero`, `test_the_key_is_checked`, `test_card_shows_a_planted_hold_like_a_real_one` and `test_plan_reads_the_trigger_and_never_the_client`; `test_one_terminal_entry_per_call` is extended as a second test in `tests/test_planted.py`, `test_one_terminal_entry_per_call_with_planted`, rather than by editing stage 6's; and `deny_planted.txt` is a golden file beside the two section 11 names.
+11. **The conformance fixture** `valid/planted` holds every new kind and field, and M3's `elapsed_ms` with `terminal: false`, since M3 added no fixture of its own.
+
 ### Deviations from the decisions and the existing documents
 
 1. **Time to decision for real holds is the wall-clock difference** of `hold.created` and `hold.decided`, in whole seconds, 0 when negative, labeled "about", because the interval crosses processes (section 10). milestones.md's carry-forward note and PIN-SPEC.md, section 3 asked for a monotonic value stored in the entry; that is kept for drills and proposed for M3 (section 16, question 5).

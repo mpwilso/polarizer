@@ -22,6 +22,10 @@ hold_timeout_seconds = 300
 # Added to the built-in hold patterns, which can't be removed. Optional.
 # write_hold_patterns = ["deploy/**"]
 # read_hold_patterns = ["~/.kube/**"]
+# Planted calls, to measure whether held calls are read (0 to 3 per session; default 0, off).
+# With it on, a held call may be one the agent never made; none is ever forwarded, and none is
+# made while 12 or more holds are open. polarizer allow, deny and the card say which it was.
+# planted_calls_per_session = 0
 
 # One MCP server; its tools are exposed as fs__<tool>. Run its command once by hand before the
 # first start, so the npx fetch doesn't miss Polarizer's connect timeout:

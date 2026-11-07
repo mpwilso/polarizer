@@ -62,3 +62,10 @@ def test_refuses_without_claude(tmp_path, monkeypatch, capsys):
     assert check.main([]) == 2
     assert capsys.readouterr().err == "card-check: claude is not on PATH\n"
     assert not any(Path(p).name.startswith("polarizer-card-check.") for p in tmp_path.iterdir())
+
+
+def test_setup_with_planting(tmp_path):
+    """--planted writes planted_calls_per_session = 1, which serve's config reads."""
+    check = _load()
+    paths = check.setup(tmp_path, tmp_path / "polarizer", planted=1)
+    assert config.load(paths["config"], require_env=False).policy.planted_calls_per_session == 1

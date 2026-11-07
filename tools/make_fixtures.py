@@ -475,6 +475,54 @@ def expect(status, line, seq, check=None):
     return {"status": status, "line": line, "seq": seq, "check": check}
 
 
+def planted_chain():
+    """Every kind and field stage 10 adds (docs/MEASURE-SPEC.md, section 8), and M3's
+    elapsed_ms on hold.decided (docs/CARD-SPEC.md, section 6): a session with planted calls on,
+    a real hold allowed from the card and forwarded, then a planted hold denied from the card,
+    each with its plant_commit and its hold.revealed after the ending. The commitments are fixed
+    values: no verifier checks them against the salts."""
+    real, plant = "a1b2c3d4e5f60718", "0f1e2d3c4b5a6978"
+    return build(
+        [
+            ("session.started", {"session": SESSION, "polarizer_version": "0.4.1",
+                                 "config_sha256": "7" * 64}),
+            ("policy.loaded", {"session": SESSION, "holds": "on", "policy_sha256": "8" * 64,
+                               "classified": 14, "workspace_roots": ["/home/me/proj"],
+                               "hold_timeout_seconds": 300, "planted_calls_per_session": 1}),
+            ("hold.created", {"session": SESSION, "hold": real, "tool": "fs__write_file",
+                              "args_commit": ARGS[0], "class": "local-write",
+                              "class_from": "config", "rule": "outside-roots",
+                              "reason": 'argument "path": /home/me/todo.md is outside every '
+                                        "workspace root",
+                              "timeout_seconds": 300, "plant_commit": "9" * 64}),
+            ("hold.decided", {"hold": real, "args_commit": ARGS[0], "decision": "allow",
+                              "actor": "person", "reason": None, "elapsed_ms": 4180}),
+            ("hold.revealed", {"session": SESSION, "hold": real, "label": "real",
+                               "salt": "1" * 64, "why": None, "derived_from": None}),
+            ("call.sent", {"session": SESSION, "tool": "fs__write_file", "args_commit": ARGS[0],
+                           "meta_dropped": [], "client_call_id": None, "hold": real,
+                           "allowed_by": "hold"}),
+            ("call.returned", {"call_seq": 6, "outcome": "ok", "latency_ms": 3,
+                               "result_bytes": 40}),
+            ("hold.created", {"session": SESSION, "hold": plant, "tool": "fs__write_file",
+                              "args_commit": ARGS[1], "class": "local-write",
+                              "class_from": "config", "rule": "write-pattern",
+                              "reason": 'argument "path": /home/me/proj/.git/hooks/pre-commit '
+                                        "matches .git/hooks/**",
+                              "timeout_seconds": 300, "plant_commit": "a" * 64}),
+            ("hold.decided", {"hold": plant, "args_commit": ARGS[1], "decision": "deny",
+                              "actor": "person", "reason": None, "elapsed_ms": 9050,
+                              "terminal": False}),
+            ("hold.revealed", {"session": SESSION, "hold": plant, "label": "planted",
+                               "salt": "2" * 64,
+                               "why": "The agent's fs__write_file call named /home/me/proj/a.md; "
+                                      "this planted call named /home/me/proj/.git/hooks/"
+                                      "pre-commit, where git runs code.",
+                               "derived_from": 6}),
+        ]
+    )  # fmt: skip
+
+
 def fixtures(v0_data):
     s = session_chain()
     n = len(s)  # 13 entries, seq 0 to 12
@@ -482,6 +530,7 @@ def fixtures(v0_data):
     p = pins_chain()
     h = holds_chain()
     d = drills_chain()
+    planted = planted_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -497,6 +546,12 @@ def fixtures(v0_data):
         "valid/holds": (text(h), head_of(h[15]), expect("intact", len(h), len(h) - 1)),
         # A drill ledger's ledger.head stays at its genesis: no drill kind is fsynced inline.
         "valid/drills": (text(d), head_of(d[0]), expect("intact", len(d), len(d) - 1)),
+        # ledger.head at the planted hold's deny, the last security entry.
+        "valid/planted": (
+            text(planted),
+            head_of(planted[9]),
+            expect("intact", len(planted), len(planted) - 1),
+        ),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (

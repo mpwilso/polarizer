@@ -1,0 +1,10 @@
+hold 5b1d0e2f3a4c6879 fs__write_file local-write
+held by outside-roots: argument "path": /home/river/notes/todo.md is outside every workspace root
+waiting about 7m30s; times out after 300 s
+session a1a1a1a1a1a1a1a1 started 2026-10-02T15:00:00.001Z, running
+args_commit ca55dbd158c0240b28c1a7a5089a4d7696483fba4e715580b21b95e84ba64cb9, 53 bytes of arguments
+{
+  "path": "/home/river/notes/todo.md",
+  "content": "milk"
+}
+allowed hold 5b1d0e2f3a4c6879 at seq 7

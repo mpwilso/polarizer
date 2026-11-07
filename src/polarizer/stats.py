@@ -66,6 +66,7 @@ class StatsFold:
         self.holds = holds.HoldState()
         self.sessions: dict[str, None] = {}  # in session.started order, as a dict's keys
         self.decisions: dict[int, Decision] = {}  # seq of hold.decided -> Decision
+        self.planting: dict[str, int] = {}  # session -> planted_calls_per_session, when above 0
 
     def apply(self, entry: dict) -> None:
         self.holds.apply(entry)
@@ -76,6 +77,10 @@ class StatsFold:
             session = data.get("session")
             if isinstance(session, str):
                 self.sessions.setdefault(session)
+        elif kind == "policy.loaded":
+            session, n = data.get("session"), data.get("planted_calls_per_session")
+            if isinstance(session, str) and type(n) is int and n > 0:
+                self.planting.setdefault(session, n)
         elif kind == "hold.decided" and type(entry.get("seq")) is int:
             ms = data.get("elapsed_ms")
             ts = entry.get("ts")
@@ -116,6 +121,37 @@ def seconds_between(created: str | None, decided: str | None) -> int | None:
 def round_ms(ms: int) -> int:
     """Milliseconds to whole seconds, a half rounding up."""
     return (ms + 500) // 1000
+
+
+@dataclass
+class Planted:
+    """The holds of planting sessions that are out of every other count (section 11)."""
+
+    planted: list  # Counted, revealed as planted, with a reveal that checks
+    not_revealed: int = 0
+    did_not_check: int = 0
+
+
+def split(fold: StatsFold) -> tuple[list[Counted], Planted]:
+    """(the holds every other count uses, the planted section's). A hold of a session with
+    planting on counts only once revealed as real, with a reveal that checks; revealed as
+    planted, it goes to the planted section; unrevealed or not checking, it is counted there as
+    such and left out of every rate."""
+    real, section = [], Planted([])
+    for c in count(fold):
+        if c.hold.session not in fold.planting:
+            real.append(c)
+            continue
+        reveal = fold.holds.revealed(c.hold.hold)
+        if reveal is None:
+            section.not_revealed += 1
+        elif not holds.reveal_checks(c.hold, reveal):
+            section.did_not_check += 1
+        elif reveal.label == "planted":
+            section.planted.append(c)
+        else:
+            real.append(c)
+    return real, section
 
 
 def count(fold: StatsFold) -> list[Counted]:
@@ -349,10 +385,36 @@ def trend(counted: list[Counted]) -> list[str]:
     return out
 
 
+def planted_lines(fold: StatsFold, section: Planted) -> list[str]:
+    """The planted calls section (section 11, In stats), when any session had planting on."""
+    limits = sorted(set(fold.planting.values()))
+    most = str(limits[0]) if len(limits) == 1 else f"{limits[0]} to {limits[-1]}"
+    states = {state: sum(1 for c in section.planted if c.state == state) for state in STATES}
+    caught, missed = states["denied"], states["allowed"]
+    second = (
+        f"  planted {len(section.planted)}: denied {caught} (caught), allowed {missed} (missed), "
+        f"expired {states['expired']}, not revealed {section.not_revealed}"
+    )
+    if section.did_not_check:
+        second += f", did not check {section.did_not_check}"
+    decided = caught + missed
+    if decided:
+        catch = f"  catch rate: caught {caught} of {decided}, {_rate(caught, decided)}"
+    else:
+        catch = "  catch rate: none decided"
+    return [
+        "planted calls",
+        f"  on in {len(fold.planting)} of {len(fold.sessions)} sessions: at most {most} per "
+        "session, about 1 in 20 eligible calls, never with 12 or more holds open",
+        second,
+        catch,
+    ]
+
+
 def lines(fold: StatsFold) -> list[str]:
     """`stats`' stdout for an intact ledger."""
-    counted = count(fold)
-    if not counted:
+    counted, section = split(fold)
+    if not counted and not fold.planting:
         return ["stats: no holds in this ledger"]
     with_holds = {c.hold.session for c in counted}
     without = sum(1 for s in fold.sessions if s not in with_holds)
@@ -365,6 +427,9 @@ def lines(fold: StatsFold) -> list[str]:
         out.extend(block)
     out.append("")
     out.extend(_all_block(counted))
+    if fold.planting:
+        out.append("")
+        out.extend(planted_lines(fold, section))
     out.append("")
     out.append("by tool and rule")
     out.extend(_pair_line(pair, group) for pair, group in _pairs(counted))

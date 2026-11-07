@@ -1,4 +1,4 @@
-# Manual check (M0, M1a, M2a and M3)
+# Manual check (M0, M1a, M2a, M3 and stage 10)
 
 **Which code this checks.** Steps 1 to 8 describe M0, the code at commit 4eaa61a, where every upstream tool is exposed as soon as Polarizer connects. From M1a (stage 4 on), Polarizer exposes no tool until a person approves it with `polarizer approve`, and no flag brings M0's behavior back. To run steps 1 to 8 as written, check out commit 4eaa61a. The M1a and M2a sections at the end run on the current code: M1a's is a headless, scripted rug-pull check that asks nothing; M2a's is an interactive session with a script that finds each hold for you.
 
@@ -176,3 +176,13 @@ The owner's interactive check of the card; nothing in this section has been run.
 4. **Deny** on the page. The page should say `denied hold <id> at seq <q>` and list the hold under `Ended while this card was open`; Claude Code should show `polarizer: fs__write_file was not allowed`. Ask Claude to try again, and **Allow** the new hold on the page; the file should be written.
 5. Ask for one more write and leave it on the page for more than 2 minutes: the note `probably moved to the background by Claude Code` should appear at 120 s, and Claude Code should move the call to the background at about 123 s. Allow it, and note what Claude Code shows.
 6. **Terminal C:** Ctrl+C ends the card. Then `polarizer verify` and `polarizer stats` with `--config ~/code/polarizer/polarizer.toml`: the decisions from the page carry `elapsed_ms`, and `stats` says how many were timed on one clock. Then `scripts/hold-check.sh finish` in terminal B.
+
+## Stage 10: live planted calls (not run yet)
+
+The owner's interactive check of live planted calls; nothing in this section has been run. The headless one is `.venv/bin/python scripts/card_check.py --planted` (docs/verified-facts.md).
+
+1. After `scripts/hold-check.sh reset`, add `planted_calls_per_session = 3` under `[policy]` in `~/code/polarizer/polarizer.toml`, and start Claude Code as in M2a, step 2. Polarizer's stderr says planted calls are on; that line goes to Claude Code's log, not to your screen.
+2. Start `polarizer card --config ~/code/polarizer/polarizer.toml` in terminal C and open its link.
+3. Work in Claude Code with the polarizer tools, mostly reads and writes inside `/tmp/polarizer-manual`, until a held call appears that you did not ask for. It may take many calls: about 1 in 20 eligible calls, and none before the fifth. Note whether anything on the page or in Claude Code told you it was planted before you decided.
+4. Decide it on the page, or with `polarizer allow` or `deny` in terminal B. Read the reveal under the result: `Planted call: ...`, why, and caught or missed.
+5. Exit Claude Code, then run `polarizer stats --config ~/code/polarizer/polarizer.toml`: its planted calls section counts the call. Then `scripts/hold-check.sh finish`, which writes `polarizer.toml` again without the key.
