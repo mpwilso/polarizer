@@ -10,6 +10,9 @@ Time to decision crosses processes (`serve` holds, `allow` decides), so it is th
 difference of `hold.created` and `hold.decided`, in whole seconds, 0 when the clock stepped
 back, and labelled "about". A `hold.decided` that carries a monotonic `elapsed_ms` (M3's card,
 which shows the hold and takes the decision in one process) is preferred when present.
+
+M2b (docs/TAINT-SPEC.md, section 9): when any session is tainted, a taint section counts the
+tainted sessions and the holds taint caused (rule tainted), which never get a suggestion.
 """
 
 import sys
@@ -411,6 +414,21 @@ def planted_lines(fold: StatsFold, section: Planted) -> list[str]:
     ]
 
 
+def taint_lines(fold: StatsFold, counted: list[Counted]) -> list[str]:
+    """The taint section (TAINT-SPEC.md, section 9), or nothing when no session is tainted."""
+    tainted = fold.holds.tainted_sessions() & set(fold.sessions)
+    if not tainted:
+        return []
+    by_taint = [c for c in counted if c.hold.rule == "tainted"]
+    rest = _counts_line(by_taint).replace("  holds ", "  held by taint ", 1)
+    return [
+        "taint",
+        f"  tainted: {len(tainted)} of {len(fold.sessions)} sessions, every egress call held "
+        "from then on",
+        rest,
+    ]
+
+
 def lines(fold: StatsFold) -> list[str]:
     """`stats`' stdout for an intact ledger."""
     counted, section = split(fold)
@@ -430,6 +448,10 @@ def lines(fold: StatsFold) -> list[str]:
     if fold.planting:
         out.append("")
         out.extend(planted_lines(fold, section))
+    taint = taint_lines(fold, counted)
+    if taint:
+        out.append("")
+        out.extend(taint)
     out.append("")
     out.append("by tool and rule")
     out.extend(_pair_line(pair, group) for pair, group in _pairs(counted))

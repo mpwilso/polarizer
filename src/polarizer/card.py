@@ -91,6 +91,11 @@ UNCHECKED_DANGER = (
     "Deny, unless you know why: Polarizer could not check the path this call names ({}), so "
     "it cannot tell where the call would write or read."
 )
+TAINT_DANGER = (
+    "Deny, unless you asked for exactly this: the agent read content from outside this machine "
+    "earlier in this session, and this call would send data out. Text it read can ask it to send "
+    "what it knows."
+)
 NO_RECOMMENDATION = (
     "No recommendation: the rule that held this call does not mark it as dangerous by itself. "
     "Read the call and decide."
@@ -107,8 +112,9 @@ def recommend(rule: str, reason: str) -> tuple[str | None, str]:
     """("deny", text) or (None, text), from the hold's rule and reason only (section 4).
 
     Deny for a built-in pattern (read from the reason as `stats` reads it; a destructive call's
-    paths are judged as a write's, an egress call's as a read's), for polarizer-files, and for
-    the fail-closed path rules. Anything else gets no recommendation. Nothing acts on it."""
+    paths are judged as a write's, an egress call's as a read's), for polarizer-files, for the
+    fail-closed path rules, and for an egress call held by taint (docs/TAINT-SPEC.md, section 9).
+    Anything else gets no recommendation. Nothing acts on it."""
     if rule in ("write-pattern", "destructive", "read-pattern", "egress"):
         writes = rule in ("write-pattern", "destructive")
         pattern = stats.pattern_of(reason)
@@ -117,6 +123,8 @@ def recommend(rule: str, reason: str) -> tuple[str | None, str]:
             return "deny", (WRITE_DANGER if writes else READ_DANGER).format(printable(pattern))
     if rule == "polarizer-files":
         return "deny", FILES_DANGER
+    if rule == "tainted":
+        return "deny", TAINT_DANGER
     if rule in FAIL_CLOSED:
         return "deny", UNCHECKED_DANGER.format(rule)
     return None, NO_RECOMMENDATION
@@ -411,6 +419,13 @@ class Card:
                 [f"{printable(hold.session)} started {started_text}, {holds.STATE_TEXT[state]}"],
             ],
         ]
+        found = held.taint_of(hold.session)
+        if found is not None:  # docs/TAINT-SPEC.md, section 9
+            line = (
+                f"tainted by {printable(found.tool)} at {printable(found.ts)} "
+                f"(seq {found.call_seq}): every egress call of this session is held"
+            )
+            rows.append(["Session taint", [line]])
         notes = []
         age = age_seconds(hold.ts, now)
         if age is not None and age >= BACKGROUND_SECONDS:

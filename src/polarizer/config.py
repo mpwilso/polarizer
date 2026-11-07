@@ -15,6 +15,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from polarizer.argrules import domain_problem
 from polarizer.ledgerdir import always_forbidden, default_ledger_dir
 from polarizer.paths import pattern_problem
 from polarizer.text import safe
@@ -31,12 +32,16 @@ POLICY_KEYS = (
     "planted_calls_per_session",
 )
 MAX_PLANTED = 3
-TOOL_KEYS = ("class", "path_args")
+TOOL_KEYS = ("class", "path_args", "url_args", "domains", "deny_values")
 CLASSES = ("local-read", "local-write", "destructive", "open-world", "egress")
 EXPOSED_NAME = re.compile(r"[A-Za-z0-9._-]{1,128}")
 MAX_ROOTS = 32
 MAX_PATTERNS = 64
 MAX_PATH_ARGS = 16
+MAX_DOMAINS = 64  # docs/TAINT-SPEC.md, section 2
+MAX_DENY_ARGS = 16
+MAX_DENY_PATTERNS = 32
+MAX_PATTERN = 1024
 _TOML_WHERE = re.compile(r"^(.*) \(at line (\d+), column \d+\)$", re.S)
 
 
@@ -46,10 +51,15 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class ToolRule:
-    """One [upstream.<p>.tools] entry: the tool's class and the arguments that hold paths."""
+    """One [upstream.<p>.tools] entry: the tool's class, the arguments that hold paths, and M2b's
+    argument rules (docs/TAINT-SPEC.md, section 2): the arguments that hold URLs, the hosts they
+    may name (lowercased), and deny_values as (argument name, patterns) pairs in config order."""
 
     cls: str
     path_args: tuple[str, ...] = ()
+    url_args: tuple[str, ...] = ()
+    domains: tuple[str, ...] = ()
+    deny_values: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -259,14 +269,80 @@ def _tools(prefix: str, given, fail) -> dict:
         if entry["class"] not in CLASSES:
             fail(f'{where} "{shown}" class must be one of {", ".join(CLASSES)}')
         path_args = entry.get("path_args", [])
-        if (
-            not isinstance(path_args, list)
-            or len(path_args) > MAX_PATH_ARGS
-            or not all(isinstance(a, str) and 1 <= len(a) <= 128 for a in path_args)
-        ):
+        if not _names(path_args):
             fail(
                 f'{where} "{shown}" path_args must be a list of at most {MAX_PATH_ARGS} '
                 "argument names"
             )
-        tools[name] = ToolRule(entry["class"], tuple(path_args))
+        url_args, domains = _domains(entry, f'{where} "{shown}"', fail)
+        deny = _deny_values(entry.get("deny_values", {}), f'{where} "{shown}"', fail)
+        tools[name] = ToolRule(entry["class"], tuple(path_args), url_args, domains, deny)
     return tools
+
+
+def _names(given) -> bool:
+    """A list of at most 16 argument names, each 1 to 128 characters (path_args, url_args)."""
+    return (
+        isinstance(given, list)
+        and len(given) <= MAX_PATH_ARGS
+        and all(isinstance(a, str) and 1 <= len(a) <= 128 for a in given)
+    )
+
+
+def _domains(entry: dict, here: str, fail) -> tuple[tuple, tuple]:
+    """url_args and domains (docs/TAINT-SPEC.md, section 2): their form, each entry, that they
+    go together, and only with class egress. Entries are returned lowercased."""
+    url_args = entry.get("url_args", [])
+    if not _names(url_args):
+        fail(f"{here} url_args must be a list of at most {MAX_PATH_ARGS} argument names")
+    domains = entry.get("domains", [])
+    if (
+        not isinstance(domains, list)
+        or len(domains) > MAX_DOMAINS
+        or not all(isinstance(d, str) for d in domains)
+    ):
+        fail(f"{here} domains must be a list of at most {MAX_DOMAINS} host names")
+    for domain in domains:
+        problem = domain_problem(domain)
+        if problem:
+            fail(f'{here} domains entry "{safe(domain)}" is not a host name: {problem}')
+    if bool(url_args) != bool(domains):
+        fail(f"{here} domains and url_args go together")
+    if domains and entry["class"] != "egress":
+        fail(f"{here} domains and url_args go only with class egress")
+    return tuple(url_args), tuple(d.lower() for d in domains)
+
+
+def _deny_values(given, here: str, fail) -> tuple:
+    """deny_values (docs/TAINT-SPEC.md, section 2): a table of at most 16 argument names, each
+    with 1 to 32 patterns of 1 to 1024 characters that compile as Python regular expressions."""
+    if (
+        not isinstance(given, dict)
+        or len(given) > MAX_DENY_ARGS
+        or not all(1 <= len(a) <= 128 for a in given)
+    ):
+        fail(
+            f"{here} deny_values must be a table of at most {MAX_DENY_ARGS} argument names, "
+            "each with a list of patterns"
+        )
+    out = []
+    for arg, patterns in given.items():
+        if (
+            not isinstance(patterns, list)
+            or not 1 <= len(patterns) <= MAX_DENY_PATTERNS
+            or not all(isinstance(p, str) and 1 <= len(p) <= MAX_PATTERN for p in patterns)
+        ):
+            fail(
+                f'{here} deny_values "{safe(arg)}" must be a list of 1 to {MAX_DENY_PATTERNS} '
+                f"patterns of 1 to {MAX_PATTERN} characters"
+            )
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                fail(
+                    f'{here} deny_values "{safe(arg)}" pattern "{safe(pattern)}" is not a valid '
+                    f"regular expression: {safe(str(e))}"
+                )
+        out.append((arg, tuple(patterns)))
+    return tuple(out)

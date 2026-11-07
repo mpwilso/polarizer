@@ -600,7 +600,9 @@ OLD_LIMITS = (
     "Polarizer only sees calls routed through it",
     "Tools only. Resources, prompts and completions from upstream",
     "Requests from an upstream server to the client (elicitation,",
-    "No scanning of tool descriptions, no rules on argument value",
+    # M2b built argument rules and taint (docs/TAINT-SPEC.md), so this limit now names only
+    # scanning.
+    "No scanning of tool descriptions. A call that no rule holds",
     "Results pass through the MCP Python SDK, which drops fields",
     "Each upstream starts once per session. One that fails to sta",
     "Pins check a tool's definition (name, description, parameter",

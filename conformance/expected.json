@@ -239,6 +239,13 @@
    "seq": 4,
    "status": "tampered"
   },
+  "broken/taint_edit_source": {
+   "check": "hash",
+   "head": false,
+   "line": 7,
+   "seq": 6,
+   "status": "tampered"
+  },
   "broken/tampered_line_and_head_mismatch": {
    "check": "hash",
    "head": true,
@@ -373,6 +380,13 @@
    "status": "intact"
   },
   "valid/session": {
+   "check": null,
+   "head": true,
+   "line": 13,
+   "seq": 12,
+   "status": "intact"
+  },
+  "valid/taint": {
    "check": null,
    "head": true,
    "line": 13,

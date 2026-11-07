@@ -27,6 +27,12 @@ back from its side file.
 Lifetime (section 7): the gateway holds a lock on sessions/<session>.lock for its whole life, so
 other processes can tell whether its holds can still be decided. At start, the open holds of
 every session proven ended are recorded as hold.abandoned.
+
+M2b (docs/TAINT-SPEC.md): a call the deny tier refuses records call.refused with its rule; an
+egress call whose URLs all name a listed host runs as a grant; and the first answer from an
+open-world call, or its first progress notification, waits until session.tainted is recorded
+and fsynced. From then on, for the rest of the Claude Code session (the client session, read
+from CLAUDE_CODE_SESSION_ID by serve), every egress call is held.
 """
 
 import asyncio
@@ -55,9 +61,10 @@ from polarizer.ledgerdir import make_private
 from polarizer.pins import PinState
 from polarizer.planted import DISCLOSURE, Planter
 from polarizer.sidefiles import ArgsProblem, read_args, write_args
+from polarizer.taint import Taint
 from polarizer.text import safe
 from polarizer.upstream import SEPARATOR, Upstream, UpstreamSpec, clip, describe, log, one_line
-from polarizer.writer import LedgerWriter, Stopped
+from polarizer.writer import LedgerWriter, Stopped, now_ts
 
 FORWARDED_META = ("traceparent", "tracestate")
 RESERVED_META_PREFIX = "io.modelcontextprotocol/"
@@ -81,6 +88,12 @@ CANCELLED_BEFORE_FORWARD = "the client cancelled the call before it was forwarde
 SHUTDOWN_HOLD = "polarizer shut down while the call was held"
 SHUTDOWN_BEFORE_FORWARD = "polarizer shut down before the call was forwarded"
 HOLD_PROGRESS_INTERVAL = 10.0  # seconds between progress notifications while a call is held
+# The client's line when an open-world call's answer can't be let through because its taint
+# could not be recorded (docs/TAINT-SPEC.md, section 7).
+WITHHELD = (
+    "polarizer: the answer from {name} was withheld: the ledger could not record that it taints "
+    "this session"
+)
 NOTICE_INTERVAL = 1.0  # at most one change notice to clients per this many seconds
 RETRY = (30.0, 300.0)  # the retry timer after a failed refresh: first interval, and the cap
 INPUT_KINDS = {
@@ -129,7 +142,10 @@ class Gateway:
     one, every tool is unclassified and every call to it is held. `hold_timeout` replaces the
     policy's timeout in seconds, for tests only: the ledger still records the policy's.
     `hold_progress_interval` replaces the 10 s between progress notifications (tests; None
-    reads HOLD_PROGRESS_INTERVAL when the gateway is made).
+    reads HOLD_PROGRESS_INTERVAL when the gateway is made). `client_session` is the Claude Code
+    session this serve belongs to (docs/TAINT-SPEC.md, section 7), or None, and
+    `client_session_warning` the start-up line to write when there is none and a tool has
+    domains.
     """
 
     def __init__(
@@ -147,8 +163,14 @@ class Gateway:
         retry: tuple[float, float] = RETRY,
         hold_timeout: float | None = None,
         hold_progress_interval: float | None = None,
+        client_session: str | None = None,
+        client_session_warning: str | None = None,
     ):
         self.writer = writer
+        self.client_session = client_session
+        self.client_session_warning = client_session_warning
+        self._local_taint: Taint | None = None  # a taint this process could not record
+        self._taint_lock = anyio.Lock()
         self.policy = policy if policy is not None else policy_mod.Policy()
         self.holds = holds if holds is not None else HoldState()
         self.hold_watch_interval = hold_watch_interval
@@ -240,7 +262,7 @@ class Gateway:
             },
         )
         # Fsynced, with ledger.head moved, before any upstream is connected (SECURITY_KINDS).
-        await self._append("policy.loaded", self.policy.loaded(self.session))
+        await self._append("policy.loaded", self.policy.loaded(self.session, self.client_session))
         await self._abandon_ended()
         for upstream in self.upstreams.values():
             upstream.started = True
@@ -259,6 +281,7 @@ class Gateway:
         self._log_unclassified()
         if self.planter.on:
             log(DISCLOSURE.format(n=self.planter.limit))
+        self._log_taint_at_start()
         self._announced = await self._exposed_dump()
         self._background = await tasks.start(self._run_background)
         self._started = True
@@ -344,6 +367,59 @@ class Gateway:
                 f"polarizer: {len(trusted)} of {len(listed)} listed tools take their class from "
                 f"annotations (trust_annotations is on for {prefixes})"
             )
+
+    def _log_taint_at_start(self) -> None:
+        """With holds on: the warning when taint can't outlive this process and some tool has
+        domains, and the line saying this Claude Code session is already tainted."""
+        if not self.policy.holds:
+            return
+        if self.client_session is None and self.client_session_warning and self.policy.has_domains:
+            log(self.client_session_warning)
+        found = self.taint
+        if found is not None:
+            log(
+                f"polarizer: this session was tainted by {safe(found.tool)} at {safe(found.ts)} "
+                f"(seq {found.call_seq}); every egress call is held"
+            )
+
+    @property
+    def taint(self) -> Taint | None:
+        """This session's taint: the first session.tainted of its client session (any serve of
+        that Claude Code session wrote it) or of this serve, else one held only in memory."""
+        found = self.holds.taint_of(self.session)
+        return found if found is not None else self._local_taint
+
+    async def _taint(self, name: str, call_seq: int) -> bool:
+        """Record session.tainted, fsynced, before an open-world call's first answer or progress
+        reaches the client (docs/TAINT-SPEC.md, section 7). True when the session's taint is
+        recorded, by this call or earlier; False when it could not be, and the answer must be
+        withheld. One at a time, so a session gets one session.tainted."""
+        async with self._taint_lock:
+            found = self.taint
+            if found is not None and found.seq is not None:
+                return True
+            data = {
+                "session": self.session,
+                "client_session": self.client_session,
+                "tool": clip(name, 256),
+                "call_seq": call_seq,
+            }
+            try:
+                with anyio.CancelScope(shield=True):
+                    await self.writer.append_async("session.tainted", data)
+            except (Stopped, EntryRefused, OSError) as e:
+                if self._local_taint is None:
+                    self._local_taint = Taint(
+                        clip(name, 256), now_ts(), call_seq, None, self.session,
+                        self.client_session,
+                    )  # fmt: skip
+                log(f"polarizer: could not record session.tainted: {describe(e)}")
+                return False
+            log(
+                f"polarizer: session tainted by {safe(name)} (seq {call_seq}); every egress call "
+                "is held from now on"
+            )
+            return True
 
     async def _run_background(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
         async with anyio.create_task_group() as background:
@@ -806,16 +882,29 @@ class Gateway:
         # The rule function (HOLD-SPEC.md, section 4) on a worker thread, since it resolves
         # paths; shielded, so a call the client cancels meanwhile is still decided and recorded.
         evaluate = functools.partial(
-            policy_mod.evaluate, self.policy, upstream.prefix, tool, params.arguments, definition
-        )
+            policy_mod.evaluate, self.policy, upstream.prefix, tool, params.arguments, definition,
+            taint=self.taint,
+        )  # fmt: skip
         with anyio.CancelScope(shield=True):
             verdict = await anyio.to_thread.run_sync(evaluate)
         trigger = await self._plan(upstream.prefix, tool, params, definition, verdict)
+        if verdict.action == "deny":
+            return await self._denied(params, verdict)
         if verdict.action == "hold":
             return await self._held(ctx, params, verdict, trigger)
         return await self._forward(
-            ctx, params, upstream, tool, params.arguments, verdict.rule, trigger=trigger
-        )
+            ctx, params, upstream, tool, params.arguments, verdict.rule, trigger=trigger,
+            taints=verdict.cls == "open-world",
+        )  # fmt: skip
+
+    async def _denied(self, params, verdict) -> types.CallToolResult:
+        """The deny tier (docs/TAINT-SPEC.md, section 4): one call.refused with the rule and the
+        reason, no side file and no hold, a stderr line, and the client's one line."""
+        name = params.name
+        log(f"polarizer: refused {safe(name)} ({verdict.rule}): {safe(verdict.reason)}")
+        data = {"session": self.session, "tool": clip(name), "reason": verdict.reason}
+        await self._append("call.refused", {**data, "rule": verdict.rule})
+        return self._not_allowed(name)
 
     async def _plan(self, prefix, tool, params, definition, verdict):
         """With planting on: count this call, and maybe plan a planted call from it, issued in
@@ -823,7 +912,9 @@ class Gateway:
         for too many holds is counted but is no trigger."""
         if not self.planter.on:
             return None
-        refused = verdict.action == "hold" and len(self._open) >= MAX_OPEN_HOLDS
+        refused = verdict.action == "deny" or (
+            verdict.action == "hold" and len(self._open) >= MAX_OPEN_HOLDS
+        )
         with anyio.CancelScope(shield=True):
             trigger = await self.planter.consider(
                 prefix, tool, params.name, params.arguments, definition, verdict, refused
@@ -837,10 +928,13 @@ class Gateway:
 
     async def _forward(
         self, ctx, params, upstream, tool, arguments, allowed_by, hold=None, commit=None,
-        trigger=None,
+        trigger=None, taints=False,
     ):  # fmt: skip
         """M0's order: the side file (unless a held call's is reused), call.sent, the upstream
-        call, call.returned. call.sent records `allowed_by`, and `hold` for a held call."""
+        call, call.returned. call.sent records `allowed_by`, and `hold` for a held call. With
+        `taints` (an open-world call), session.tainted is recorded before the first progress
+        or the answer goes to the client, and before call.returned; if it can't be, nothing more
+        from the call reaches the client (docs/TAINT-SPEC.md, section 7)."""
         meta = dict(params.meta or {})
         forward = {key: meta[key] for key in FORWARDED_META if key in meta}
         dropped = sorted(
@@ -873,8 +967,23 @@ class Gateway:
         except (Stopped, EntryRefused, OSError) as e:
             return self._unrecordable(params.name, describe(e))
 
+        withheld = False
+
+        async def gate() -> bool:
+            """True when what the upstream sent may reach the client."""
+            nonlocal withheld
+            if taints and not withheld and not await self._taint(params.name, sent.seq):
+                withheld = True
+            return not withheld
+
+        def answer(reply):
+            return (
+                _text_result(WITHHELD.format(name=clip(params.name, 4096))) if withheld else reply
+            )
+
         async def relay(progress, total, message):
-            await ctx.session.report_progress(progress, total, message)
+            if await gate():
+                await ctx.session.report_progress(progress, total, message)
 
         returned = {"call_seq": sent.seq}
         start = time.monotonic_ns()
@@ -914,18 +1023,23 @@ class Gateway:
                 # The client gets the upstream's message unchanged (PROXY-SPEC.md, Calls); the
                 # ledger gets it through safe(), cut to 1 KiB.
                 recorded = safe(e.message, 1024)
+                await gate()
                 await self._append("call.returned", finish("protocol-error", 0, recorded, e.code))
+                if withheld:
+                    return answer(None)
                 raise MCPError(code=e.code, message=e.message) from None
             line = f"polarizer: upstream {upstream.prefix} failed: {describe(e)}"
+            await gate()
             reply = await self._reply_error(line, "transport-error", finish)
             await upstream.check_closed(e)  # a dead upstream hides its tools before we answer
-            return reply
+            return answer(reply)
         except Exception as e:
             why = UNREADABLE if _leaf(e, pydantic.ValidationError) else describe(e)
             line = f"polarizer: upstream {upstream.prefix} failed: {why}"
+            await gate()
             reply = await self._reply_error(line, "transport-error", finish)
             await upstream.check_closed(e)
-            return reply
+            return answer(reply)
 
         if isinstance(result, types.InputRequiredResult):
             asked = (result.input_requests or {}).values()
@@ -934,13 +1048,15 @@ class Gateway:
                 f"polarizer: upstream {upstream.prefix} asked the client for {kinds or 'input'}; "
                 "Polarizer does not forward these"
             )
-            return await self._reply_error(line, "unsupported", finish)
+            await gate()
+            return answer(await self._reply_error(line, "unsupported", finish))
+        await gate()
         if result.is_error:
             error = f"upstream {upstream.prefix} returned a tool error"
             await self._append("call.returned", finish("tool-error", result_bytes(result), error))
         else:
             await self._append("call.returned", finish("ok", result_bytes(result)))
-        return result
+        return answer(result)
 
     async def _reply_error(self, line: str, outcome: str, finish) -> types.CallToolResult:
         """Answer the client with a one-line isError result that Polarizer wrote itself, and
@@ -964,6 +1080,7 @@ class Gateway:
             )
             return self._not_allowed(name)
         waiter = _Waiter(secrets.token_hex(8), params.arguments)
+        waiter.cls = verdict.cls
         self._open[waiter.hold] = waiter  # takes its place under the cap before any await
         try:
             try:
@@ -1121,8 +1238,9 @@ class Gateway:
                 await self._append("call.refused", {**data, "reason": reason})
                 return self._not_allowed(name)
         return await self._forward(
-            ctx, params, upstream, tool, arguments, "hold", hold=hold_id, commit=waiter.commit
-        )
+            ctx, params, upstream, tool, arguments, "hold", hold=hold_id, commit=waiter.commit,
+            taints=waiter.cls == "open-world",
+        )  # fmt: skip
 
     async def _reveal_real(self, waiter: "_Waiter") -> None:
         """hold.revealed for a real hold of a planting session, once, right after its ending."""
@@ -1162,6 +1280,7 @@ class _Waiter:
         self.event = anyio.Event()
         self.salt: bytes | None = None  # with planting on: kept in memory until the reveal
         self.revealed = False
+        self.cls: str | None = None  # the verdict's class: an open-world call taints once allowed
 
 
 def _allows(ending) -> bool:

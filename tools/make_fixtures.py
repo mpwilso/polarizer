@@ -523,6 +523,58 @@ def planted_chain():
     )  # fmt: skip
 
 
+def taint_chain():
+    """Every kind and field M2b adds (docs/TAINT-SPEC.md, section 8): a session of the Claude
+    Code session CLIENT with a grant (allowed_by domains), an open-world call and its
+    session.tainted before its call.returned, a hold by tainted naming that source, a refusal
+    by the deny tier with its rule, and a restarted serve of the same client session, whose
+    start abandons the first serve's open hold."""
+    client = "0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
+    restarted, hold = "9e8d7c6b5a493827", "b1c2d3e4f5061728"
+
+    def loaded(session):
+        return ("policy.loaded", {"session": session, "holds": "on", "policy_sha256": "8" * 64,
+                                  "classified": 2, "workspace_roots": [],
+                                  "hold_timeout_seconds": 300, "planted_calls_per_session": 0,
+                                  "client_session": client})  # fmt: skip
+
+    def sent(tool, commit, allowed_by):
+        return ("call.sent", {"session": SESSION, "tool": tool, "args_commit": commit,
+                              "meta_dropped": [], "client_call_id": None,
+                              "allowed_by": allowed_by})  # fmt: skip
+
+    return build(
+        [
+            ("session.started", {"session": SESSION, "polarizer_version": "0.4.1",
+                                 "config_sha256": "7" * 64}),
+            loaded(SESSION),
+            sent("web__post_comment", ARGS[0], "domains"),
+            ("call.returned", {"call_seq": 3, "outcome": "ok", "latency_ms": 5,
+                               "result_bytes": 40}),
+            sent("web__fetch", ARGS[1], "open-world"),
+            ("session.tainted", {"session": SESSION, "client_session": client,
+                                 "tool": "web__fetch", "call_seq": 5}),
+            ("call.returned", {"call_seq": 5, "outcome": "ok", "latency_ms": 31,
+                               "result_bytes": 900}),
+            ("hold.created", {"session": SESSION, "hold": hold, "tool": "web__post_comment",
+                              "args_commit": ARGS[2], "class": "egress", "class_from": "config",
+                              "rule": "tainted",
+                              "reason": f"session tainted by web__fetch at {ts(6)} (seq 5); "
+                                        "egress is held for the rest of the session, even to a "
+                                        "host in this tool's domains",
+                              "timeout_seconds": 300}),
+            ("call.refused", {"session": SESSION, "tool": "web__post_comment",
+                              "reason": 'argument "body" matches the deny_values pattern '
+                                        "BEGIN [A-Z ]*PRIVATE KEY",
+                              "rule": "deny-value"}),
+            ("session.started", {"session": restarted, "polarizer_version": "0.4.1",
+                                 "config_sha256": "7" * 64}),
+            loaded(restarted),
+            ("hold.abandoned", {"session": restarted, "hold": hold, "held_by": SESSION}),
+        ]
+    )  # fmt: skip
+
+
 def fixtures(v0_data):
     s = session_chain()
     n = len(s)  # 13 entries, seq 0 to 12
@@ -531,6 +583,7 @@ def fixtures(v0_data):
     h = holds_chain()
     d = drills_chain()
     planted = planted_chain()
+    t = taint_chain()
     m = build([])
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
@@ -552,6 +605,8 @@ def fixtures(v0_data):
             head_of(planted[9]),
             expect("intact", len(planted), len(planted) - 1),
         ),
+        # ledger.head at the restarted serve's policy.loaded, the last security entry.
+        "valid/taint": (text(t), head_of(t[11]), expect("intact", len(t), len(t) - 1)),
         # Tampered lines.
         "broken/edit_value": (edit_value(s, 6), None, expect("tampered", 7, 6, "hash")),
         "broken/delete_middle_line": (
@@ -581,6 +636,11 @@ def fixtures(v0_data):
             change_data(h, 8, {"decision": "allow"}, rehash=False),
             None,
             expect("tampered", 9, 8, "hash"),
+        ),
+        "broken/taint_edit_source": (
+            change_data(t, 6, {"tool": "web__other"}, rehash=False),
+            None,
+            expect("tampered", 7, 6, "hash"),
         ),
         "broken/holds_rehashed_decision": (
             change_data(h, 8, {"decision": "allow"}),

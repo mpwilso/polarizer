@@ -4,8 +4,11 @@
 held for a person. It is pure apart from path resolution, which only reads the file system and
 is bounded per path (polarizer.paths). The gateway runs it on a worker thread.
 
-The tiers are deny, then hold, then allow. M2a has no deny rule; the cap on open holds acts
-like one and lives in the gateway, after this function.
+The tiers are deny, then hold, then allow. M2b's deny tier is deny_values (a match refuses the
+call at once); the cap on open holds acts like a deny too and lives in the gateway, after this
+function. M2b also adds domain allowlists for egress tools, the grant they make (allow rule
+`domains`), and taint, which revokes that grant for the rest of the session (docs/TAINT-SPEC.md,
+section 5).
 """
 
 import hashlib
@@ -15,7 +18,7 @@ from pathlib import Path
 
 import rfc8785
 
-from polarizer import paths
+from polarizer import argrules, paths
 from polarizer.config import CLASSES, Config, ConfigError, ToolRule
 from polarizer.ledgerdir import is_inside
 from polarizer.text import safe
@@ -32,11 +35,16 @@ HOLDS_OFF = "holds-off"
 INSIDE_ROOTS = "inside-roots"
 LOCAL_READ = "local-read"
 OPEN_WORLD = "open-world"
+DOMAINS = "domains"  # a grant: an egress call whose URLs all name a listed host
+# M2b's other rules: the deny tier's, and the hold of an egress call that taint alone held.
+DENY_VALUE = "deny-value"
+TAINTED = "tainted"
+GRANTS_END = "egress is held for the rest of the session, even to a host in this tool's domains"
 
 
 @dataclass(frozen=True)
 class Verdict:
-    action: str  # "allow" or "hold"
+    action: str  # "allow", "hold" or "deny" (refused at once)
     rule: str
     reason: str | None  # None for every allow
     cls: str | None
@@ -87,10 +95,7 @@ class Policy:
     def form(self) -> dict:
         upstreams = {
             prefix: {
-                "tools": {
-                    name: {"class": rule.cls, "path_args": list(rule.path_args)}
-                    for name, rule in u.tools.items()
-                },
+                "tools": {name: _tool_form(rule) for name, rule in u.tools.items()},
                 "trust_annotations": u.trust_annotations,
             }
             for prefix, u in self.upstreams.items()
@@ -114,8 +119,9 @@ class Policy:
     def sha256(self) -> str:
         return hashlib.sha256(POLICY_PREFIX + rfc8785.dumps(self.form())).hexdigest()
 
-    def loaded(self, session: str) -> dict:
-        """The data of policy.loaded for a serve process."""
+    def loaded(self, session: str, client_session: str | None = None) -> dict:
+        """The data of policy.loaded for a serve process; `client_session` is the Claude Code
+        session it belongs to, or None (docs/TAINT-SPEC.md, section 8)."""
         return {
             "session": session,
             "holds": "on" if self.holds else "off",
@@ -124,7 +130,13 @@ class Policy:
             "workspace_roots": list(self.workspace_roots),
             "hold_timeout_seconds": self.hold_timeout_seconds,
             "planted_calls_per_session": self.planted_calls_per_session,
+            "client_session": client_session,
         }
+
+    @property
+    def has_domains(self) -> bool:
+        """Whether any tool has domains, so taint can change a verdict (TAINT-SPEC.md, 7)."""
+        return any(rule.domains for u in self.upstreams.values() for rule in u.tools.values())
 
     def rule_for(self, prefix: str, tool: str) -> ToolRule | None:
         upstream = self.upstreams.get(prefix)
@@ -141,6 +153,19 @@ class Policy:
         upstream with trust_annotations (HOLD-SPEC.md, section 2)."""
         upstream = self.upstreams.get(prefix)
         return upstream is not None and upstream.trust_annotations and tool not in upstream.tools
+
+
+def _tool_form(rule: ToolRule) -> dict:
+    """A tool's form in the policy hash. M2b's keys appear only when set, so a config without
+    them keeps its policy_sha256 (docs/TAINT-SPEC.md, section 2)."""
+    form = {"class": rule.cls, "path_args": list(rule.path_args)}
+    if rule.url_args:
+        form["url_args"] = list(rule.url_args)
+    if rule.domains:
+        form["domains"] = list(rule.domains)
+    if rule.deny_values:
+        form["deny_values"] = {arg: list(patterns) for arg, patterns in rule.deny_values}
+    return form
 
 
 def build(cfg: Config, *, holds: bool = True) -> Policy:
@@ -199,9 +224,14 @@ def contradicts(configured: str, suggested: str) -> bool:
 # The rule function -------------------------------------------------------------------------
 
 
-def _hold(rule: str, reason: str, cls, class_from) -> Verdict:
+def _hold(rule: str, reason: str, cls, class_from, taint=None) -> Verdict:
+    """A hold. In a tainted session an egress hold's reason starts with the taint, which the
+    1 KiB cut never removes (docs/TAINT-SPEC.md, section 5)."""
     if class_from == "annotations":
         reason += ANNOTATIONS_SUFFIX
+    if taint is not None:
+        prefix = f"{safe(taint.text, REASON_LIMIT)}; "
+        reason = prefix + clip(reason, REASON_LIMIT - len(prefix.encode("utf-8")))
     return Verdict("hold", rule, clip(reason, REASON_LIMIT), cls, class_from)
 
 
@@ -263,9 +293,10 @@ def _paths_hold(policy: Policy, cls: str, path_args, arguments) -> tuple[str, st
     return None
 
 
-def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> Verdict:
-    """Section 4: allow or hold one call to an approved tool. `definition` is the approved
-    stored copy (a dict), whose annotations count only for a trusted upstream."""
+def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition, taint=None) -> Verdict:
+    """Section 4, with docs/TAINT-SPEC.md, section 5: allow, hold or deny one call to an approved
+    tool. `definition` is the approved stored copy (a dict), whose annotations count only for a
+    trusted upstream. `taint` is the session's taint.Taint, or None; it changes only egress."""
     if not policy.holds:
         return Verdict("allow", HOLDS_OFF, None, None, None)
     rule = policy.rule_for(prefix, tool)
@@ -281,15 +312,20 @@ def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> V
     if cls is None:
         return _hold("unclassified", f"{prefix}__{tool} has no class in polarizer.toml", None, None)
     assert cls in CLASSES
-    if cls in ("destructive", "egress"):
-        # Held on every call; the paths only add to the reason (rows 3 and 4): a destructive
-        # tool's are judged as local-write's, an egress tool's as local-read's.
-        reason = f"class {cls} is held on every call"
-        as_cls = "local-write" if cls == "destructive" else "local-read"
-        held = _paths_hold(policy, as_cls, path_args, arguments)
+    if rule is not None and rule.deny_values:
+        # The deny tier (TAINT-SPEC.md, section 4): a match refuses the call at once.
+        denied = argrules.value_match(rule.deny_values, arguments)
+        if denied:
+            return Verdict("deny", DENY_VALUE, clip(denied, REASON_LIMIT), cls, class_from)
+    if cls == "egress":
+        return _egress(policy, rule, path_args, arguments, class_from, taint)
+    if cls == "destructive":
+        # Held on every call; the paths only add to the reason (row 3), judged as local-write's.
+        reason = "class destructive is held on every call"
+        held = _paths_hold(policy, "local-write", path_args, arguments)
         if held:
             reason += f"; {held[1]}"
-        return _hold(cls, reason, cls, class_from)
+        return _hold("destructive", reason, cls, class_from)
     if cls == "local-write" and not path_args:
         reason = "class local-write has no path_args, so its paths cannot be checked"
         return _hold("write-unchecked", reason, cls, class_from)
@@ -298,6 +334,29 @@ def evaluate(policy: Policy, prefix: str, tool: str, arguments, definition) -> V
         return _hold(*held, cls, class_from)
     allow = {"local-write": INSIDE_ROOTS, "local-read": LOCAL_READ, "open-world": OPEN_WORLD}
     return Verdict("allow", allow[cls], None, cls, class_from)
+
+
+def _egress(policy: Policy, rule, path_args, arguments, class_from, taint) -> Verdict:
+    """The egress rows (TAINT-SPEC.md, section 5). With no domains, HOLD-SPEC.md's row 4: held
+    on every call, paths judged as local-read's added to the reason. With domains: held for the
+    first URL that names no listed host (4a), held for a path rule (4b), held by taint when the
+    grant would otherwise be made (4c), or allowed as a grant (4d). In a tainted session every
+    egress hold's reason starts with the taint (4e)."""
+    held = _paths_hold(policy, "local-read", path_args, arguments)
+    if rule is None or not rule.domains:
+        reason = "class egress is held on every call"
+        if held:
+            reason += f"; {held[1]}"
+        return _hold("egress", reason, "egress", class_from, taint)
+    url = argrules.url_hold(rule.url_args, rule.domains, arguments)
+    if url is not None:
+        reason = url + (f"; {held[1]}" if held else "")
+        return _hold("egress", reason, "egress", class_from, taint)
+    if held:
+        return _hold("egress", held[1], "egress", class_from, taint)
+    if taint is not None:
+        return _hold(TAINTED, GRANTS_END, "egress", class_from, taint)
+    return Verdict("allow", DOMAINS, None, "egress", class_from)
 
 
 # Classes in `pending` and `approve` with --config (section 8) -------------------------------

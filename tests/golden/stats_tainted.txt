@@ -1,0 +1,35 @@
+stats: 3 holds; 3 sessions with holds, 0 without
+
+session b1b1b1b1b1b1b1b1 started 2026-10-02T15:00:00.001Z
+  holds 1: allowed 1, denied 0, expired 0, abandoned 0, open 0
+  approval: allowed 1 of 1 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 0 s, from 1 decision
+
+session b2b2b2b2b2b2b2b2 started 2026-10-02T15:00:00.007Z
+  holds 1: allowed 0, denied 0, expired 0, abandoned 0, open 1
+  approval: no decisions
+  time to decision: no decisions
+
+session c3c3c3c3c3c3c3c3 started 2026-10-02T15:00:00.010Z
+  holds 1: allowed 0, denied 0, expired 0, abandoned 0, open 1
+  approval: no decisions
+  time to decision: no decisions
+
+all sessions
+  holds 3: allowed 1, denied 0, expired 0, abandoned 0, open 2
+  approval: allowed 1 of 1 decided, too few to say a rate (5 or more needed)
+  time to decision: median about 0 s, from 1 decision
+  Times are wall-clock differences in whole seconds, so each can be off by about
+  a second, and they include the time before a hold was noticed.
+
+taint
+  tainted: 2 of 3 sessions, every egress call held from then on
+  held by taint 1: allowed 1, denied 0, expired 0, abandoned 0, open 0
+
+by tool and rule
+  web__post_comment egress: none decided; 2 open
+  web__post_comment tainted: allowed 1 of 1 decided
+
+suggestions: none (a tool and rule needs 20 decided holds, all allowed; 20 is provisional)
+
+trend: needs 80 decided holds to compare the last 40 with the 40 before (provisional numbers); this ledger has 1

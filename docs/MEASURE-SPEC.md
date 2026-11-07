@@ -14,7 +14,7 @@ The goal of the whole project is to measure whether a person's approvals still c
 - **Live planted calls** (stage 10, specified here and built after M3). With an opt-in config key, `serve` occasionally creates a hold that the agent never made and that is never forwarded, to see whether the person catches it during real work. Every hold of such a session carries a commitment, and every ending is followed by a reveal that can be checked against it (section 11).
 
 **Not in this slice:**
-- the card (M3), argument rules and taint (M2b), scanning (M1b), and the practice range (M4);
+- the card (M3), argument rules and taint (M2b; docs/TAINT-SPEC.md, section 10 says why section 11 below stays correct with them), scanning (M1b), and the practice range (M4);
 - any service that collects results from several people: results stay on the machine, and an export is a file the person may send by hand (section 3);
 - scoring of predictions: the prediction is recorded, never judged (section 16);
 - live planted calls of any shape but a changed path argument (section 11).

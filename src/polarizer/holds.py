@@ -14,6 +14,11 @@ Stage 10 (docs/MEASURE-SPEC.md, sections 8 and 11): a hold of a session with pla
 carries plant_commit, and its hold.revealed is kept beside the holds, never in them, so no
 hold's state or ending changes with it. `reveal_checks` says whether a reveal matches its
 commitment.
+
+M2b (docs/TAINT-SPEC.md, sections 7 and 9): the fold also keeps each serve session's client
+session, from policy.loaded, and the first session.tainted of each session key, so serve knows
+at start whether its Claude Code session is tainted, and `holds` prints a taint line on every
+hold of a tainted session.
 """
 
 import hashlib
@@ -25,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from polarizer import lock, sidefiles
+from polarizer import taint as taint_mod
+from polarizer.taint import Taint
 from polarizer.text import printable
 
 HOLD_ID = re.compile("[0-9a-f]{16}")
@@ -117,6 +124,8 @@ class HoldState:
     _sessions: dict = field(default_factory=dict)  # session -> session.started ts
     _mismatched: list = field(default_factory=list)  # (seq, hold id): decisions ignored
     _reveals: dict = field(default_factory=dict)  # hold id -> its first Reveal
+    _clients: dict = field(default_factory=dict)  # serve session -> its client session or None
+    _taints: dict = field(default_factory=dict)  # taint.key -> the first Taint
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def apply(self, entry: dict) -> None:
@@ -134,6 +143,25 @@ class HoldState:
                 self._ended(kind, seq, data)
             elif kind == "hold.revealed":
                 self._revealed(seq, data)
+            elif kind == "policy.loaded":
+                client = data.get("client_session")
+                if isinstance(data.get("session"), str):
+                    self._clients.setdefault(
+                        data["session"], client if isinstance(client, str) else None
+                    )
+            elif kind == "session.tainted":
+                self._tainted(entry, data)
+
+    def _tainted(self, entry: dict, data: dict) -> None:
+        if not _texts(data, "session", "tool") or type(data.get("call_seq")) is not int:
+            return
+        client = data.get("client_session")
+        client = client if isinstance(client, str) else None
+        found = Taint(
+            data["tool"], entry.get("ts"), data["call_seq"], entry.get("seq"), data["session"],
+            client,
+        )  # fmt: skip
+        self._taints.setdefault(taint_mod.key(data["session"], client), found)
 
     def _revealed(self, seq: int, data: dict) -> None:
         hold_id = data.get("hold")
@@ -215,6 +243,20 @@ class HoldState:
         with self._lock:
             return self._sessions.get(session)
 
+    def taint_of(self, session: str) -> Taint | None:
+        """The taint of a serve session: the first session.tainted of its client session, or,
+        with none, of the serve session itself (docs/TAINT-SPEC.md, section 7)."""
+        with self._lock:
+            client = self._clients.get(session)
+            return self._taints.get(taint_mod.key(session, client))
+
+    def tainted_sessions(self) -> set[str]:
+        """Every serve session with a policy.loaded whose taint_of is not None."""
+        with self._lock:
+            clients = dict(self._clients)
+            taints = dict(self._taints)
+        return {s for s, c in clients.items() if taint_mod.key(s, c) in taints}
+
     def mismatched(self) -> list[tuple[int, str]]:
         """(seq, hold id) of every hold.decided ignored for its args_commit, in seq order."""
         with self._lock:
@@ -282,24 +324,39 @@ def class_text(hold: Hold) -> str:
     return hold.cls
 
 
-def _head(hold: Hold, started: str | None, state: str, now: datetime) -> list[str]:
-    """The block's first four lines, every string from the ledger through printable()."""
+def taint_line(found: Taint | None) -> list[str]:
+    """`session tainted by <tool> at <ts> (seq <n>)`, through printable(), or nothing."""
+    return [printable(found.text)] if found is not None else []
+
+
+def _head(
+    hold: Hold, started: str | None, state: str, now: datetime, taint: Taint | None = None
+) -> list[str]:
+    """The block's first four lines, every string from the ledger through printable(), and the
+    taint line after them when the hold's session is tainted (docs/TAINT-SPEC.md, section 9)."""
     return [
         f"hold {printable(hold.hold)} {printable(hold.tool)} {printable(class_text(hold))}",
         f"held by {printable(hold.rule)}: {printable(hold.reason)}",
         f"waiting about {age(hold.ts, now)}; times out after {hold.timeout_seconds} s",
         f"session {printable(hold.session)} started "
         f"{printable(started) if started is not None else 'unknown'}, {STATE_TEXT[state]}",
+        *taint_line(taint),
     ]
 
 
 def render_block(
-    hold: Hold, started: str | None, state: str, now: datetime, arguments, size: int
+    hold: Hold,
+    started: str | None,
+    state: str,
+    now: datetime,
+    arguments,
+    size: int,
+    taint: Taint | None = None,
 ) -> list[str]:
     """One hold's block from its arguments and their size in bytes (the side file's size minus
     its salt), with no file read: `holds` calls it after reading and checking the side file,
     and a drill calls it with a scenario's arguments (docs/MEASURE-SPEC.md, section 4)."""
-    lines = _head(hold, started, state, now)
+    lines = _head(hold, started, state, now, taint)
     lines.append(f"args_commit {printable(hold.args_commit)}, {size} bytes of arguments")
     lines.extend(render_arguments(arguments).split("\n"))
     return lines
@@ -308,18 +365,19 @@ def render_block(
 def block(hold: Hold, folded: HoldState, ledger_dir: Path, now: datetime, state: str) -> list[str]:
     """One hold's block, reading and checking its side file."""
     started = folded.session_started(hold.session)
+    taint = folded.taint_of(hold.session)
     try:
         arguments, size = sidefiles.read_args(ledger_dir, hold.args_commit)
     except sidefiles.ArgsProblem as e:
         commit = printable(hold.args_commit)
         size_text = f", {e.size} bytes of arguments" if e.size is not None else ""
         return [
-            *_head(hold, started, state, now),
+            *_head(hold, started, state, now, taint),
             f"args_commit {commit}{size_text}",
             f"arguments: side file args/{commit}.bin {printable(str(e))}; "
             "this hold cannot be allowed",
         ]
-    return render_block(hold, started, state, now, arguments, size)
+    return render_block(hold, started, state, now, arguments, size, taint)
 
 
 def listing(folded: HoldState, ledger_dir: Path, now: datetime, states=None) -> list[str]:

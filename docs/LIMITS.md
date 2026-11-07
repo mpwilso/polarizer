@@ -9,7 +9,7 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - Tried only with Claude Code, on Linux (WSL2). CI runs the tests on Windows and macOS; no live check has.
 - Tools only. Resources, prompts and completions from upstream servers are not exposed.
 - Requests from an upstream server to the client (elicitation, sampling, roots) are not passed on, and the tool call fails.
-- No scanning of tool descriptions, no rules on argument values or domains, and no taint. A call that no rule holds goes straight through, recorded in the ledger.
+- No scanning of tool descriptions. A call that no rule holds goes straight through, recorded in the ledger.
 - Results pass through the MCP Python SDK, which drops fields the protocol doesn't define and turns a result it can't parse into an error. Tools are served in the 2026-07-28 form, without `execution` or `_meta`. [docs/PROXY-SPEC.md](PROXY-SPEC.md#results) lists each change.
 - Each upstream starts once per session. One that fails to start stays off until the client restarts Polarizer. An upstream whose tool listing fails has its tools hidden until a listing succeeds again (Polarizer retries after 30 seconds, then less often, up to every 5 minutes); one whose process exits stays hidden until Polarizer restarts.
 
@@ -29,6 +29,19 @@ Polarizer only sees calls routed through it; the agent's own shell, its file too
 - The built-in patterns protect git's own files under `.git`, but an agent can still write a directory anywhere in the workspace that looks like a bare git repository, with a config that runs code. It does nothing until a person runs git inside that directory, which git allows by default (`safe.bareRepository` is `all`).
 - On Windows, the device names `COM1` to `COM3` and `LPT1` to `LPT3` written with a superscript digit are not recognized as device names.
 - `polarizer.example.toml` uses POSIX paths. On native Windows, edit each one to a real absolute path with a drive, such as `C:/Users/<you>/...`; a `workspace_roots` entry without a drive is refused there as not absolute.
+
+## Argument rules and taint
+
+- Taint sees only calls routed through Polarizer. A page fetched by the agent's own shell, by Claude Code's own WebFetch or WebSearch tools, or by an MCP server configured directly in Claude Code does not taint the session.
+- Taint follows the tool's class, never what a result says. A `local-read` tool that returns text someone else wrote (a downloaded file, a log) does not taint, and an `open-world` call whose answer is harmless still does.
+- Taint holds egress calls only. After it, writes, destructive calls and reads keep their usual rules, though text the agent read can steer them too.
+- Taint lasts across a restart of `polarizer serve` because Claude Code passes `CLAUDE_CODE_SESSION_ID` to it, which was observed headless with Claude Code 2.1.310 and has not been checked after an interactive Esc. Without that variable, a restarted serve starts clean, and serve says so at start when a tool has `domains`. A session continued under a new id, such as a fork, starts clean although it holds what the agent read, and a session run with `--no-holds` records no taint.
+- There is no command to clear taint: it lasts for the rest of the Claude Code session.
+- `domains` checks only the arguments named in `url_args`, and only URLs written as `scheme://host`. A host inside free text, an address such as `bob@example.com`, or a redirect the server follows is not checked, and a listed host can receive anything in the arguments. Polarizer doesn't resolve names, so a listed name that points somewhere else is outside it.
+- A URL whose host Polarizer can't read the way every common parser would (a backslash, more than one `@`, an IP address, a non-ASCII or percent-encoded host) is held; write internationalized names in their `xn--` form.
+- `deny_values` searches the strings in an argument as they are. An encoded, split or differently written value (base64, a zero-width character inside a word, another letter case without `(?i)`) doesn't match, and a pattern that backtracks badly can stall the call that meets it.
+- An egress call that arrived before the taint was recorded may still run; the taint is recorded before the tainting answer reaches the agent, so such a call was made before the agent could read it.
+- Paths nested inside an argument are still not checked; M2b left them out (Paths, above).
 
 ## Annotations
 

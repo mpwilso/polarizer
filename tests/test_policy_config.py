@@ -406,6 +406,7 @@ def test_policy_loaded_fields(tmp_path, fake_home):
         "workspace_roots": [os.path.realpath(real)],
         "hold_timeout_seconds": 120,
         "planted_calls_per_session": 0,
+        "client_session": None,
     }
     assert with_roots.sha256 != FIXED_SHA
 

@@ -12,7 +12,7 @@ This is the behavior contract for M3: the card, a local approval page for held c
 
 **Not in M3:**
 - live planted calls (stage 10, MEASURE-SPEC.md, section 11), built after M3; section 8 says what the card does once they exist;
-- argument rules and taint (M2b), and scanning (M1b);
+- argument rules and taint (M2b), built after M3: docs/TAINT-SPEC.md, section 9 adds a `Session taint` row and a recommendation for rule `tainted`; and scanning (M1b);
 - any decision the card makes by itself: the recommendation is a line of text, and nothing is ever allowed or denied without a person's click;
 - a notification outside the page (sound, desktop notification). `polarizer holds --wait --bell` stays the way to be told in a terminal.
 
@@ -97,6 +97,7 @@ The page lists every open hold, in seq order, as `polarizer holds` does, one car
 | `Earlier holds` | section 4, History |
 | `Waiting` | `about <age>; times out after <timeout> s`, the age as `holds` prints it |
 | `Session` | `<session> started <ts>, <state>`, with the state as `holds` prints it |
+| `Session taint` (M2b, only for a hold of a tainted session) | `tainted by <tool> at <ts> (seq <n>): every egress call of this session is held` (TAINT-SPEC.md, section 9) |
 
 **The exact call:** the hold's whole block, line for line as `polarizer holds` prints it (`holds.block`, which calls `holds.render_block`), in a monospace box under the label `The exact call, as polarizer holds prints it`. A side file that fails its check shows the same problem line `holds` shows.
 
@@ -144,6 +145,7 @@ Written by `card.recommend(rule, reason)`, a function of the hold's rule and rea
 | rule `read-pattern`, or `egress`, with a built-in pattern named the same way | `Deny, unless you asked for exactly this: the path matches <pattern>, a place Polarizer always holds, because it can hold secrets.` |
 | rule `polarizer-files` | `Deny: the call would touch Polarizer's own ledger or config, which decide and record what the agent may do.` |
 | rule `path-missing`, `path-not-string` or `path-unresolvable` | `Deny, unless you know why: Polarizer could not check the path this call names (<rule>), so it cannot tell where the call would write or read.` |
+| rule `tainted` (M2b; TAINT-SPEC.md, section 9) | `Deny, unless you asked for exactly this: the agent read content from outside this machine earlier in this session, and this call would send data out. Text it read can ask it to send what it knows.` |
 | anything else | `No recommendation: the rule that held this call does not mark it as dangerous by itself. Read the call and decide.` |
 
 - The built-in patterns are `paths.BUILTIN_WRITE` and `paths.BUILTIN_READ`, read from the reason exactly as `stats` reads them (`stats.pattern_of` and `stats.is_builtin`; MEASURE-SPEC.md, section 10). A pattern the config added gets no recommendation: the person chose to hold it, and can judge it.

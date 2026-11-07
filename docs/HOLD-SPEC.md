@@ -15,7 +15,7 @@ docs/PLAN.md does not exist in the repo, so nothing here relies on it. Where thi
 - **Restart.** A new `serve` records the open holds a dead process left behind (section 7).
 
 **Not in M2a:**
-- taint, grants, and domain or value rules on arguments (M2b);
+- taint, grants, and domain or value rules on arguments (M2b; docs/TAINT-SPEC.md, which adds to sections 2 and 4 here);
 - the card, `polarizer card` (M3), apart from the ledger kinds it will share;
 - stats and time per decision (M5), and canaries (M6; section 12 says what M2a keeps open for them);
 - scanning of descriptions (M1b).
@@ -40,7 +40,7 @@ docs/PLAN.md does not exist in the repo, so nothing here relies on it. Where thi
 | `local-read` | reads local data and changes nothing | runs, logged; held when a path argument matches a read hold pattern (section 3) |
 | `local-write` | changes local files | runs when every path argument resolves inside a workspace root and matches no write hold pattern; held otherwise |
 | `destructive` | deletes, moves or overwrites, or changes something hard to undo | held on every call; a path argument that a path rule would hold is named in the reason (section 4) |
-| `open-world` | reads from outside the machine (web pages, issues, mail) | runs, logged (taint is M2b) |
+| `open-world` | reads from outside the machine (web pages, issues, mail) | runs, logged; from M2b, its answer taints the session (docs/TAINT-SPEC.md, section 7) |
 | `egress` | sends data outside the machine, or acts there | held on every call; a path argument that a path rule would hold is named in the reason (section 4) |
 
 A tool with no class is **unclassified** and held on every call (fail closed).
@@ -165,7 +165,7 @@ A tool's `path_args` names top-level argument keys. For each name, in the order 
 - **a list of strings:** each is a path, in order; an empty list has nothing to check; more than 256 elements is held, `path-unresolvable`;
 - **anything else** (a number, null, an object, a list holding a non-string): held, `path-not-string`.
 
-Nested keys (`edits[0].path`) cannot be named in M2a; they come in M2b, and the README states the limit (section 16, decision 3).
+Nested keys (`edits[0].path`) cannot be named in M2a; decision 3 put them in M2b, which left them out too (docs/TAINT-SPEC.md, section 15, deviation 2), and LIMITS.md states the limit.
 
 ### Resolving a path
 
@@ -235,7 +235,7 @@ Found in the M2a review (Oct 4, 2026), and stated in the README draft (section 1
 
 `evaluate(policy, prefix, tool, arguments, definition) -> Verdict(action, rule, reason, class, class_from)` is a pure function apart from path resolution. `action` is `allow` or `hold`. It runs after routing (PROXY-SPEC.md and PIN-SPEC.md, section 6, Calls): a name that matches no listed tool, or a tool that isn't approved, is refused exactly as in M1a and never reaches it.
 
-The tiers are deny, then hold, then allow. M2a has no deny rule of its own: every M2a rule either holds or allows, and the tier exists so M2b's value and domain rules slot in before the holds. One limit acts like a deny and comes after the function: a call it would hold, when 16 holds of this session are already open, is refused at once (section 6, Too many holds).
+The tiers are deny, then hold, then allow. M2a has no deny rule of its own: every M2a rule either holds or allows, and the tier exists so M2b's value and domain rules slot in before the holds. They do: docs/TAINT-SPEC.md, section 5 gives the order with M2b's deny tier, the egress rows with `domains`, and taint. One limit acts like a deny and comes after the function: a call it would hold, when 16 holds of this session are already open, is refused at once (section 6, Too many holds).
 
 1. **`--no-holds`:** allow, rule `holds-off`. Nothing else is checked.
 2. **The class.** The configured class, `class_from` `"config"`. Else, when the upstream has `trust_annotations = true`, the class the approved definition's annotations suggest (below), `class_from` `"annotations"`. Else none.

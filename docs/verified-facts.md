@@ -877,6 +877,49 @@ Built on Windows 11 (native), Python 3.12.10, uv 0.12.2, on branch `stage10-plan
 - **What it shows:** with Claude Code 2.1.310, headless, a planted call is made from a real call in a session with planting on, appears on the card like a real hold, is never forwarded, and is revealed after the person's decision, which the card shows, and `stats` counts.
 - **What it does not show:** a person deciding a planted call without knowing which hold it is (the client here knew every hold would be planted); a planted write (both were reads, the targets drawn at random); Windows or macOS. The interactive check (docs/dev/MANUAL-CHECK.md, Stage 10) is still the owner's to run.
 
+## Taint session id (Nov 7, 2026, UTC, headless, Claude Code 2.1.310)
+
+Checked for docs/TAINT-SPEC.md, section 7, before the spec was written, in WSL2 (the `parallax` distro), in a directory under the repo's gitignored `.repro/` (`~/code/polarizer/.repro/m2b-env`). The MCP server was a shell wrapper that appended to a log the time, its process id, its parent's id and `comm`, the value of `CLAUDE_CODE_SESSION_ID`, and the names (never the values) of the variables starting `CLAUDE`, `ANTHROPIC` or `MCP`, then ran the repository's probe (`tests/helpers/probe_server.py`). Each run was `claude -p` with `--model claude-haiku-4-5-20251001`, `--max-budget-usd 1`, `--strict-mcp-config --mcp-config <dir>/mcp.json` (that server only), `--allowedTools=mcp__pz__wait`, `--permission-mode default` and `--output-format json`, stdin from `/dev/null`, from a shell with no `CLAUDE_CODE_SESSION_ID` of its own. No Polarizer was involved.
+
+- **Run 1 (18:59:52Z):** the server's parent was `claude`, and its environment had `CLAUDE_CODE_SESSION_ID=51919c3c-2423-4b04-be27-020b13d92a87`, the `session_id` the run's JSON output reported. The other names: `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_PROJECT_DIR`.
+- **Runs 2 and 3 (19:06Z):** run 2 reported `session_id` `da437e1e-14b1-4359-b089-af9f9bd0448b`; run 3 was `claude -p --resume da437e1e-...` with the same flags, and reported the same `session_id`. Each started its own server process (process ids 31242 and 31312, parents 31205 and 31274, both `claude`), and both had `CLAUDE_CODE_SESSION_ID=da437e1e-14b1-4359-b089-af9f9bd0448b`.
+- **Cost,** from Claude Code's own `total_cost_usd`: 0.0306632, 0.0227659 and 0.0291371 USD, 0.0825662 in total. Runs 2 and 3 kept their session (no `--no-session-persistence`), which Claude Code records under `~/.claude`; that, and its update of `~/.claude.json`, are Claude Code's own bookkeeping.
+- **What it shows:** with Claude Code 2.1.310, headless, a stdio MCP server started from an `--mcp-config` file gets `CLAUDE_CODE_SESSION_ID`, equal to the session's `session_id`, and a new server process started for a resumed session gets the same value.
+- **What it does not show:** whether interactive Claude Code passes the same value to the serve it starts after Esc (docs/dev/MANUAL-CHECK.md, M2b), whether `/clear` or a fork changes it, and other versions, platforms or clients.
+
+## Stage 12, argument rules and taint (Nov 7, 2026, UTC)
+
+Built on Windows 11 (native), Python 3.12.10, uv 0.12.2, on branch `m2b-taint` from ef6b516 (master after stage 10's merge). docs/dev/STAGE12-NOTES.md has the details.
+
+- **`scripts/test.sh` on Windows,** on the final tree: ruff, the format check and `scripts/check_docs.py` clean; 1442 passed, 81 skipped in 271.90 s.
+- **In WSL2** (the `parallax` distro), on a copy of the working tree streamed in with tar (the distro mounts no Windows drive), checked by the sha256 of `src/polarizer/proxy.py` on both sides: `tests/test_taint.py`, `tests/test_argrules.py`, `tests/test_taint_check.py`, `tests/test_planted.py`, `tests/test_card.py`, `tests/test_holds.py`, `tests/test_stats.py` and `tests/test_conformance.py` together, 314 passed in 49.92 s.
+
+## Taint check (Nov 7, 2026, UTC, headless, Claude Code 2.1.310)
+
+`scripts/taint_check.py`, run once in WSL2 (the `parallax` distro), from `~/code/polarizer/.repro/m2b-tree`, the copy above, before its commit, as `.venv/bin/python scripts/taint_check.py`, at 2026-11-07T19:30:56Z. `claude auth status` showed a claude.ai login before the run. No `CLAUDE_*` or `ANTHROPIC_*` variable was set. The check's directory was `~/code/polarizer/.repro/m2b-tree/.repro/taint-check.8nq383xr`, under the gitignored `.repro/`, with its ledger inside it; nothing was written to `~/.local/share/polarizer` or `polarizer-drills`. The only upstream was `tests/helpers/web_stub.py` (the repository's own stand-in: `fetch` returns fixed text and `post` appends what it was sent to a log in the directory, neither touching the network; nothing was fetched or installed for it), with `fetch = { class = "open-world" }` and `post = { class = "egress", url_args = ["url"], domains = ["allowed.example"] }`. Each run was `claude -p` with `--model claude-haiku-4-5-20251001`, `--max-budget-usd 1`, `--strict-mcp-config`, `--mcp-config <dir>/mcp.json` (only `polarizer serve --config <dir>/polarizer.toml`), `--allowedTools=mcp__pz__web__post,mcp__pz__web__fetch`, `--permission-mode default` and `--output-format json`, stdin from `/dev/null`, `MCP_TOOL_TIMEOUT` unset; runs 1 and 2 kept their session so that run 2 could resume it, and run 3 had `--no-session-persistence`. The card was started as `polarizer card --config <dir>/polarizer.toml --allow-no-terminal` and driven with curl only. Every check passed:
+
+| Check | Result |
+|---|---|
+| The page loads with the token, and has a nonce | PASS |
+| Run 1: a post to `https://allowed.example/notes` ran without a hold | PASS: `call.sent` at seq 12 with `allowed_by` `domains`, before the taint; the stub received `first note` |
+| Run 1: after the fetch (`call.sent` at seq 14), `session.tainted` was recorded before the fetch's `call.returned` | PASS: seq 15, `{"call_seq": 14, "client_session": "f0cc3e01-e7ac-41ac-b246-f8b03c70865b", "session": "3019718ba876cecc", "tool": "web__fetch"}`; the `client_session` is the `session_id` Claude Code reported |
+| Run 1: the same post was held by `tainted`, the reason and the card's `Session taint` row naming the source | PASS: hold e173a097113d875c, `session tainted by web__fetch at 2026-11-07T19:31:03.731Z (seq 14); egress is held for the rest of the session, even to a host in this tool's domains`, with the recommendation to deny; nothing posted while it was held |
+| Run 1: allowed through the card | PASS: `allowed hold e173a097113d875c at seq 18`; forwarded at seq 19 with `allowed_by` `hold`; the stub received `second note` |
+| Run 2, `claude -p --resume f0cc3e01-...`: a new serve (session dd3bb252419b4241, its `policy.loaded` with the same `client_session`) held the post by `tainted` at once, naming the same source | PASS: hold 1ab48d7e05d3f31c, the same reason, seq 14 |
+| Run 2: denied through the card, never forwarded | PASS: `denied hold 1ab48d7e05d3f31c at seq 26`; the stub received nothing |
+| Run 3, a new Claude Code session (`dc248c19-...`): the post ran as a grant | PASS: `call.sent` at seq 32 with `allowed_by` `domains`; the stub received `fourth note` |
+| Both card decisions carry `elapsed_ms` | PASS |
+| `polarizer verify` | PASS: `intact: 34 entries, 4 sessions, 4 calls` |
+| `polarizer stats` | PASS: `tainted: 2 of 4 sessions, every egress call held from then on` and `held by taint 2: allowed 1, denied 1, expired 0, abandoned 0, open 0` |
+| The card stops on SIGTERM with exit 0 and nothing more on stdout | PASS |
+
+- **The four serve starts' `client_session`:** null (the priming start, by the script, outside Claude Code), `f0cc3e01-...` twice (runs 1 and 2), `dc248c19-...` (run 3).
+- **The model replied** (not used for pass or fail): run 1, "First POST: posted 10 characters; FETCH: plain text from server outside this machine; second POST: posted 11 characters."; run 2, "Third POST was not allowed by Polarizer."; run 3, "Posted 11 characters."
+- **Cost,** from Claude Code's own `total_cost_usd`: 0.0450979, 0.053132 and 0.0284115 USD, 0.1266414 in total.
+- **Bookkeeping:** `~/.claude.json` went from 105,133 bytes (mtime 19:08:26Z) to 104,307 bytes (19:31:12Z), Claude Code's own update; the script only stats it. Runs 1 and 2 kept their session, which Claude Code records under `~/.claude`.
+- **What it shows:** with Claude Code 2.1.310, headless, an egress call to a listed host runs as a grant; an open-world call taints the session, recorded before its answer; the same egress call is then held by `tainted` with the source named on the card, and decided there; a new serve started for the resumed session is tainted from its start by the ledger, with the same source; and a new Claude Code session starts clean.
+- **What it does not show:** the restart that follows Esc in an interactive session (docs/dev/MANUAL-CHECK.md, M2b, the owner's to run); `deny_values` and the tricky hosts on real Claude Code (tests cover them); a real web or mail server; Windows or macOS.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.
@@ -903,7 +946,7 @@ These are assumed or open. Nothing here has been observed.
   - whether interactive sessions open `subscriptions/listen` the same way;
   - whether `TaskStop` on a call moved to the background sends `notifications/cancelled`, what happens to such a call when the session exits, and whether the 123 s is fixed or configurable (M2a check, interactive);
   - elicitation forms.
-- **Environment variables for `polarizer serve`:** which of Claude Code's own environment variables reach a stdio server it starts from an `--mcp-config` file, and whether it expands `"${NAME}"` in that file's `env`. `polarizer init` writes secret-looking values as `"${NAME}"` in polarizer.toml (docs/PROXY-SPEC.md, Starting from an existing MCP config), which `serve` reads from its own environment and refuses to start without.
+- **Environment variables for `polarizer serve`:** apart from `CLAUDE_CODE_SESSION_ID` and the names listed under Taint session id (headless, Claude Code 2.1.310), which of Claude Code's own environment variables reach a stdio server it starts from an `--mcp-config` file, and whether it expands `"${NAME}"` in that file's `env`. `polarizer init` writes secret-looking values as `"${NAME}"` in polarizer.toml (docs/PROXY-SPEC.md, Starting from an existing MCP config), which `serve` reads from its own environment and refuses to start without.
 - **Idle timeout:** it did not fire headless. Whether it applies interactively is unknown.
 - **Hard limit settings:** the default of 27.8 hours and the per-server `timeout` key are read from the binary, not observed.
 - **Startup in interactive sessions:** whether `MCP_TIMEOUT` (30 s) and `MCP_CONNECT_TIMEOUT_MS` (5 s) behave there as they did headless.

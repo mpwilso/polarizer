@@ -621,8 +621,11 @@ def serve(config_path: Path, no_holds: bool = False) -> int:
     install_log_handler()  # the SDK's log records, through safe(), never raw upstream text
     if no_holds:
         print("polarizer: warning: started with --no-holds; no call is held", file=sys.stderr)
+    from polarizer import taint
+
+    client = taint.client_session(os.environ)  # the Claude Code session (TAINT-SPEC.md, 7)
     try:
-        anyio.run(_serve, cfg, ledger, state, held, policy)
+        anyio.run(_serve, cfg, ledger, state, held, policy, client)
     finally:
         ledger.close()
     return 0
@@ -730,7 +733,12 @@ class _StdinLines:
 
 
 async def _serve(
-    cfg: config.Config, ledger: "writer.LedgerWriter", state: pins.PinState, held, policy
+    cfg: config.Config,
+    ledger: "writer.LedgerWriter",
+    state: pins.PinState,
+    held,
+    policy,
+    client=(None, None),
 ) -> None:
     """Startup, serving, then the shutdown path of PIN-SPEC.md, section 8: cancel the calls in
     flight (each records call.returned), close the upstream clients in parallel within
@@ -751,7 +759,14 @@ async def _serve(
         for u in cfg.upstreams
     ]
     gateway = Gateway(
-        specs, ledger, config_sha256=cfg.sha256, pins=state, holds=held, policy=policy
+        specs,
+        ledger,
+        config_sha256=cfg.sha256,
+        pins=state,
+        holds=held,
+        policy=policy,
+        client_session=client[0],
+        client_session_warning=client[1],
     )
     stop = _Shutdown(gateway)
     async with anyio.create_task_group() as tasks:

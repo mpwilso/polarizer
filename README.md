@@ -23,6 +23,7 @@ Status: a portfolio project, built to show how I design, test and judge an AI to
 - **Holds look at what a call would touch.** What decides is the kind of tool and the real file paths the call names, not the tool's name. Claude Code may ask you before the call reaches Polarizer, but its question doesn't show the call's details. Polarizer shows them: the exact arguments, the paths the call would touch, and whether the tool changed since you approved it.
 - **You see the exact call; the agent learns that it was refused, and nothing more.** A held call shows its exact arguments, every unusual character escaped.
 - **Every call, hold and decision goes into a hash-chained ledger,** a log in which each entry carries a fingerprint of the one before, so an edited or deleted entry shows. A separately written verifier checks it as well as Polarizer's own.
+- **After the agent reads from outside the machine, outbound calls wait.** Once a tool that reads web pages, issues or mail answers through Polarizer, every call that sends data out is held for you for the rest of the session, even to a host you allowed, and the hold names the read that caused it.
 - **For the calls it sees, it fails closed,** which means that when in doubt it stops: a tool with no class is held on every call, and a ledger that doesn't verify stops startup. The agent's own shell and file tools never reach Polarizer ([Limits](#limits)).
 - **Drills measure the person.** An offline practice session of invented calls, some planted to be wrong, gives your catch rate and false-flag rate with intervals ([Try a drill](#try-a-drill)).
 
@@ -91,7 +92,7 @@ Not covered: native Windows or macOS with Claude Code, any client but Claude Cod
   </picture>
 </p>
 
-Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent the definitions you approved, from a stored copy. For each call, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you, and a held call ends in one of five recorded ways: allow, deny, expiry, the client's cancel, or Polarizer's shutdown. Every ledger entry is one line of canonical JSON (RFC 8785) holding the previous entry's hash; `polarizer verify` detects a line that was edited, removed or reordered, and lines lost from the end back past the entry `ledger.head` records. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md), [holds](docs/HOLD-SPEC.md) and [drills](docs/MEASURE-SPEC.md).
+Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, and serves the agent the definitions you approved, from a stored copy. For each call, one rule function decides from the tool's class and the call's resolved paths whether it runs or waits for you, and a held call ends in one of five recorded ways: allow, deny, expiry, the client's cancel, or Polarizer's shutdown. Every ledger entry is one line of canonical JSON (RFC 8785) holding the previous entry's hash; `polarizer verify` detects a line that was edited, removed or reordered, and lines lost from the end back past the entry `ledger.head` records. The specs: [ledger](docs/LEDGER-SPEC.md), [proxy](docs/PROXY-SPEC.md), [pins](docs/PIN-SPEC.md), [holds](docs/HOLD-SPEC.md), [taint](docs/TAINT-SPEC.md) and [drills](docs/MEASURE-SPEC.md).
 
 ## Limits
 
@@ -99,7 +100,7 @@ Polarizer exposes each server's tools with a prefix, such as `fs__write_file`, a
 - **Definitions and named paths, not behavior.** A server can change what a tool does without changing its definition, and a path nested inside an argument or written in free text is not checked.
 - **A person who allows without reading.** Polarizer records that you allowed it; drills measure it, under practice conditions. `polarizer stats` counts real holds, the approval rate and the time to each decision, and warns when decisions get faster while the rate stays flat, but it can't tell less reading from easier calls.
 
-Not built: holds after the agent reads untrusted content ([docs/milestones.md](docs/milestones.md)). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
+Holding outbound calls after an outside read follows a tool's class, not what a result says, and counts the reads routed through Polarizer, not the agent's own fetches. What comes next is in [docs/milestones.md](docs/milestones.md). Every limit, grouped, including the ones about drills and the ledger: [docs/LIMITS.md](docs/LIMITS.md).
 
 ## How it was built
 

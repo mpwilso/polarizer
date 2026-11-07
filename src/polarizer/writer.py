@@ -51,6 +51,7 @@ SECURITY_KINDS = frozenset(
         "ledger.head_rebuilt",
         "hold.decided",
         "policy.loaded",
+        "session.tainted",  # docs/TAINT-SPEC.md, section 8
     }
 )
 _BINARY = getattr(os, "O_BINARY", 0)

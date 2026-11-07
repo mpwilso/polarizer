@@ -14,7 +14,7 @@ This is the behavior contract for M1a: tool definition pins. It replaces the M1a
 **Not in M1a:**
 - scan rules for descriptions, the review UI with diffs, and group approval of unflagged tools (M1b);
 - tool `_meta` and upstream `instructions` handling (M1b): `_meta` is never served in M1a, and instructions are never passed on, as in M0;
-- policy and holds on calls (M2a), taint (M2b), and the card (M3).
+- policy and holds on calls (M2a), taint (M2b; docs/TAINT-SPEC.md), and the card (M3).
 
 **What pinning protects.** It pins what the model is shown: the name, description, schemas, annotations and the other fields of a tool definition. It does not pin what the upstream does. A server can change what a tool does without changing its definition, and M1a cannot see that. A pin says "the agent is still being shown what a person approved", not "the tool still behaves as it did".
 
