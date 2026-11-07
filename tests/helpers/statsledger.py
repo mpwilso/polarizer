@@ -224,3 +224,16 @@ def two_windows(ledger_dir: Path, earlier_seconds: int, earlier_allowed: int,
                     start_seq=n + 1, session=B2)  # fmt: skip
     specs.insert(1 + 2 * n, started(B2, "10:59:59.000"))
     return build(ledger_dir, specs)
+
+
+def many_sessions(ledger_dir: Path, n: int) -> Path:
+    """n sessions, each started and then holding one fs__write_file outside-roots call that is
+    allowed 10 s later: the shape that made stats' session blocks quadratic in sessions."""
+    specs = []
+    for i in range(n):
+        session, hold = f"{i:016x}", f"{i + 1:016x}"
+        specs.append(started(session, "09:59:59.000"))
+        specs.append(created(session, hold, "fs__write_file", "outside-roots", OUTSIDE,
+                             "10:00:00.000"))  # fmt: skip
+        specs.append(decided(hold, "allow", "10:00:10.000"))
+    return build(ledger_dir, specs)

@@ -7,9 +7,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to a branch cancels its older run; master's runs always finish.
+# A newer push to a branch cancels its older run. Each push to master has a group of its own,
+# keyed by its commit, so every merged commit gets a run that finishes: with one group for
+# master, a run still waiting when the next merge arrived was cancelled (run 42152253005).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:

@@ -64,7 +64,7 @@ class StatsFold:
 
     def __init__(self):
         self.holds = holds.HoldState()
-        self.sessions: list[str] = []  # in session.started order
+        self.sessions: dict[str, None] = {}  # in session.started order, as a dict's keys
         self.decisions: dict[int, Decision] = {}  # seq of hold.decided -> Decision
 
     def apply(self, entry: dict) -> None:
@@ -74,8 +74,8 @@ class StatsFold:
             return
         if kind == "session.started":
             session = data.get("session")
-            if isinstance(session, str) and session not in self.sessions:
-                self.sessions.append(session)
+            if isinstance(session, str):
+                self.sessions.setdefault(session)
         elif kind == "hold.decided" and type(entry.get("seq")) is int:
             ms = data.get("elapsed_ms")
             ts = entry.get("ts")
@@ -180,7 +180,12 @@ def _times(counted: list[Counted]) -> list[int]:
 def _time_line(counted: list[Counted]) -> str:
     times = _times(counted)
     if not times:
-        return "  time to decision: no decisions"
+        decided = sum(1 for c in counted if c.state in DECIDED)
+        if not decided:
+            return "  time to decision: no decisions"
+        if decided == 1:
+            return "  time to decision: the 1 decision has no time"
+        return f"  time to decision: none of the {decided} decisions has a time"
     median = measure.stats_seconds(measure.median_low(times))
     return f"  time to decision: median about {median}, from {_plural(len(times), 'decision')}"
 
@@ -191,19 +196,19 @@ def _block(counted: list[Counted]) -> list[str]:
 
 def _session_blocks(fold: StatsFold, counted: list[Counted]) -> list[list[str]]:
     """One block per session with holds, in session.started order; a session with holds and no
-    session.started (a hand-edited ledger) comes after them, in order of its first hold."""
-    with_holds = []
+    session.started (a hand-edited ledger) comes after them, in order of its first hold. The
+    holds are grouped once, so the cost grows with the ledger, not with sessions squared."""
+    by_session: dict[str, list[Counted]] = {}  # in order of each session's first hold
     for c in counted:
-        if c.hold.session not in with_holds:
-            with_holds.append(c.hold.session)
-    order = [s for s in fold.sessions if s in with_holds]
-    order += [s for s in with_holds if s not in order]
+        by_session.setdefault(c.hold.session, []).append(c)
+    order = {s: None for s in fold.sessions if s in by_session}
+    order.update((s, None) for s in by_session if s not in order)
     blocks = []
     for session in order:
         started = fold.holds.session_started(session)
         started_text = printable(started) if started is not None else "unknown"
         head = f"session {printable(session)} started {started_text}"
-        blocks.append([head, *_block([c for c in counted if c.hold.session == session])])
+        blocks.append([head, *_block(by_session[session])])
     return blocks
 
 

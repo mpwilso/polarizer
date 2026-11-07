@@ -5,6 +5,7 @@ windows, that other kinds change nothing, that it is read-only, and every `stats
 section 9's golden table but the stage 10 one."""
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from helpers import statsledger as sl
 from test_drill import check_golden, listing
 
 from polarizer import cli, stats
-from polarizer.ledger import LOCK
+from polarizer.ledger import LOCK, read_files, verify_bytes
 from polarizer.lock import LedgerLock
 
 SPEC_MIXED = """stats: 9 holds; 3 sessions with holds, 1 without
@@ -296,6 +297,65 @@ def test_stats_prefers_a_monotonic_elapsed_ms(tmp_path, capsys):
         "  a second, and they include the time before a hold was noticed.\n"
         "  1 of 2 decisions were timed on one clock, from the card that showed the hold.\n"
     )
+
+
+def test_decisions_without_a_time(tmp_path, capsys):
+    """A session whose decisions all lack a parseable time (section 17, Stage 9 build, 2) says
+    so under its approval line, instead of `no decisions`, which would contradict it."""
+    bad = "not a time"
+    specs = [
+        sl.started(sl.A1, "09:59:59.000"),
+        sl.created(sl.A1, "0000000000000001", "fs__write_file", "outside-roots", sl.OUTSIDE,
+                   "10:00:00.000"),
+        (bad, "hold.decided", sl.decided("0000000000000001", "allow", "10:00:10.000")[2]),
+        sl.created(sl.A1, "0000000000000002", "fs__write_file", "outside-roots", sl.OUTSIDE,
+                   "10:01:00.000"),
+        (bad, "hold.decided", sl.decided("0000000000000002", "deny", "10:01:10.000")[2]),
+        sl.started(sl.B2, "10:59:59.000"),
+        sl.created(sl.B2, "0000000000000003", "fs__write_file", "outside-roots", sl.OUTSIDE,
+                   "11:00:00.000"),
+        (bad, "hold.decided", sl.decided("0000000000000003", "allow", "11:00:10.000")[2]),
+    ]  # fmt: skip
+    code, out, err = run(sl.build(tmp_path / "ledger", specs), capsys)
+    assert (code, err) == (0, "")
+    assert section(out, f"session {sl.A1}") == (
+        f"session {sl.A1} started 2026-10-06T09:59:59.000Z\n"
+        "  holds 2: allowed 1, denied 1, expired 0, abandoned 0, open 0\n"
+        "  approval: allowed 1 of 2 decided, too few to say a rate (5 or more needed)\n"
+        "  time to decision: none of the 2 decisions has a time\n"
+    )
+    assert section(out, f"session {sl.B2}") == (
+        f"session {sl.B2} started 2026-10-06T10:59:59.000Z\n"
+        "  holds 1: allowed 1, denied 0, expired 0, abandoned 0, open 0\n"
+        "  approval: allowed 1 of 1 decided, too few to say a rate (5 or more needed)\n"
+        "  time to decision: the 1 decision has no time\n"
+    )
+    assert section(out, "all sessions") == (
+        "all sessions\n"
+        "  holds 3: allowed 2, denied 1, expired 0, abandoned 0, open 0\n"
+        "  approval: allowed 2 of 3 decided, too few to say a rate (5 or more needed)\n"
+        "  time to decision: none of the 3 decisions has a time\n"
+    )
+    assert "no decisions" not in out
+
+
+def test_session_blocks_are_linear_in_sessions(tmp_path):
+    """5,000 sessions with a hold each: the session blocks take well under a second. They were
+    quadratic in sessions: 87.9 s for stats on a ledger of 20,000, and 0.74 s for this step at
+    5,000 on the machine the fix was made on, where the new code takes milliseconds. Only that
+    step is timed, so the test stays fast, and 0.5 s leaves slow runners a wide margin."""
+    n = 5000
+    data, head = read_files(sl.many_sessions(tmp_path / "ledger", n))
+    fold = stats.StatsFold()
+    assert verify_bytes(data, head, fold.apply).status == "intact"
+    counted = stats.count(fold)
+    start = time.perf_counter()
+    blocks = stats._session_blocks(fold, counted)
+    elapsed = time.perf_counter() - start
+    assert len(blocks) == n
+    assert blocks[0][0] == f"session {0:016x} started 2026-10-06T09:59:59.000Z"
+    assert blocks[-1][0] == f"session {n - 1:016x} started 2026-10-06T09:59:59.000Z"
+    assert elapsed < 0.5, f"{elapsed:.2f} s for {n} sessions"
 
 
 def test_stats_is_read_only(tmp_path, capsys):
