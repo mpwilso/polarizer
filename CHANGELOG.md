@@ -1,14 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (preview, released Nov 7, 2026 (UTC))
 
 - `polarizer stats` groups holds by session once. It was quadratic in sessions: the review measured 87.9 s on a ledger of 100,000 entries in 20,000 sessions, 70.8 s of it in the session blocks, where `polarizer verify` took 6.7 s. On a ledger of that size here, it took 77.3 s before the change and 7.9 s after, against 5.8 s for `verify`. The output is unchanged byte for byte, and a test times the session blocks for 5,000 sessions.
 - A session whose decisions all lack a parseable time (a hand-edited ledger) prints `time to decision: none of the <n> decisions has a time`, or `the 1 decision has no time`, where it printed `no decisions` under an approval line that counted them (docs/MEASURE-SPEC.md, section 17, Stage 9 build, 2).
 - Corrected in the 0.4.0 entry and its GitHub release: `tests/test_stats.py` added 27 tests (18 test functions, one of them run for 10 golden files), not 30; and 0.4.0 was released on Nov 6, 2026 (UTC), not Nov 5.
 - The README says who Polarizer is for and explains MCP, a rug pull, pinning, failing closed and the hash-chained ledger in plain words where each first appears, and its status line, its line on Claude Code's own prompt, the verifier claim and the drill audit are rewritten plainly. docs/DRILL-GUIDE.md says "call", as the drill's screen does, where it said "action".
-- docs/dev/releasing.md puts the steps in the order that keeps master's install lines working: merge the release commit, then tag, build and publish the release with its files in the same session, and check that the README's wheel URL resolves before calling it done. 0.4.0's install lines named a wheel that didn't exist for about 13.7 hours.
+- docs/dev/releasing.md puts the steps in the order that keeps master's install lines working: merge the release commit, then tag, build and publish the release with its files in the same session, and check that the README's wheel URL resolves before calling it done; it also names the two drill export golden files, which hold the version. 0.4.0's install lines named a wheel that didn't exist for about 13.7 hours.
 - CI gives each push to master its own concurrency group, keyed by its commit, so no master run cancels another. With one group for master, a run still waiting when the next merge arrived was cancelled (run 42152253005 at 28d990a), although the workflow's comment said master's runs always finish.
-- docs/EVIDENCE.md and docs/milestones.md name the latest CI runs recorded as passing on all five jobs, which had stayed at 7afd4e1 since October.
+- docs/EVIDENCE.md and docs/milestones.md name the latest CI runs recorded as passing on all five jobs, which had stayed at 7afd4e1 since October; the latest is now the review fixes' merge, 639761e.
 
 ## 0.4.0 (preview, released Nov 6, 2026 (UTC))
 
