@@ -1002,6 +1002,98 @@ Checked in WSL2 (the `parallax` distro), in a worktree of `review-fixes` under `
 
 **The tests written first.** With the new tests, fixtures and reference checks in place and `src/` reverted to 57ab5a2, `uv run --locked pytest tests/test_scan.py tests/test_anchor.py tests/test_conformance.py tests/test_canon.py` gave 54 failed and 211 passed: every scanner probe, the new rule's fixture and rule count, every anchor case (the old code has no `choose`), the git, signature, directory and FIFO tests, `broken/nested_too_deep` in Polarizer's verifier, the deep-line tests and the nesting-limit test. With `src/` restored, all passed but three, whose expected message lacked `(seq ?)`; the expectation was corrected.
 
+## Manual checks run by Claude (Nov 8, 2026, UTC, interactive, Claude Code 2.1.310 and 2.1.319)
+
+docs/dev/MANUAL-CHECK.md's M1b, M3, Stage 10 and M2b sections, **run by Claude (Opus 5.5) at the owner's direction on Nov 8, 2026 (UTC), through tmux and headless Chromium; a person's reading of the page was not done.** The owner did not run them. Every "what Claude Code showed" below is Claude's reading of a terminal capture, and every "what the page showed" is Claude's reading of a screenshot and of the page's text; no person looked at either. In quotes from Claude Code's screen, its bullet and ellipsis characters are left out or written as `...`, and its middle dot as `-`, since these docs are ASCII.
+
+**Conditions.**
+- **Where:** WSL2, the `parallax` distro, in `~/code/polarizer` at master 40797ad (v0.6.1), with the repo's `.venv` after `uv sync --locked`. That sync changed the shared `.venv` to match the lock (ruff 0.17.1 to 0.17.2, and urllib3 2.8.0 added); nothing outside the lock was installed.
+- **Terminals A, B and C:** detached tmux 3.4 sessions on their own server (`tmux -L pzmc`), each started in `~/code/polarizer`, 220 by 50 characters. `tmux show-environment -g` listed no `CLAUDE*`, `ANTHROPIC*` or `MCP*` variable, so no check ran from inside another Claude Code session. Claude typed with `tmux send-keys` and read the screen with `tmux capture-pane -p`; the script prompts (`yes`) were answered the same way.
+- **Claude Code:** started exactly as each section says, with `--model claude-haiku-5-5` added (`claude --model claude-haiku-5-5 --mcp-config <file> --strict-mcp-config`). `claude auth status` showed a claude.ai login (Claude Max). The M1b session ran 2.1.310; during it Claude Code showed `Update installed - Restart to update`, and every later start was 2.1.319 (`Updated to latest`). Every session showed `auto mode on`, and no permission prompt appeared. The project's `.claude/settings.local.json` hooks ran in each session (a guard snapshot at start, a guard check at stop), as did the user's PreToolUse hook; none of them was changed.
+- **The browser:** the headless Chromium shell Playwright left in `~/.cache/ms-playwright/chromium_headless_shell-1243/` (it reports `HeadlessChrome/153.0.8010.12`), the one `tests/test_card.py` uses, driven over the DevTools pipe by `tests/helpers/chromium.py` from a small driver kept under the gitignored `.repro/manual-checks/`. Playwright itself was not run, and nothing was installed or fetched for it, so there is no install command to record. Window 1280 by 900; screenshots are full-page PNGs, saved with the page's text under `.repro/manual-shots/`. Buttons were pressed with DevTools mouse events at each button's centre after scrolling it into view.
+- **Cost,** from `/cost` in each session (all `claude-haiku-5-5`): M1b 0.0035 USD; M3 0.0097; Stage 10 0.0330; M2b 0.0111 and 0.0046; 0.0619 USD in total.
+
+### M1b, scanning and review (run by Claude)
+
+`scripts/scan_check.py --setup` at 14:41Z made `.repro/scan-manual.x2g__59p` and printed `polarizer: 3 tools wait for approval; run polarizer pending` and `polarizer: the instructions of 1 upstreams wait for approval; run polarizer pending`. Every step behaved as written:
+
+| Step | What was seen |
+|---|---|
+| 2, `pending` | `new lab__lookup fecc0353...`, then `flagged by the scanner; read it, then approve it by name`, then the four flag lines `conceal-from-user`, `read-before-use`, `secret-path` and `instruction-tag`, each quoting what matched; the last line `group b18efdb3... covers the 3 unflagged new definitions above for tools with no decision yet and one definition waiting` |
+| 3, the review view | `m1b-1-review.png`: four boxes; `lab__lookup`'s with a red border, `Flagged: approve it on its own, after reading it.` and the four flag lines above its definition; `Approve all unflagged (3)` above a list of `lab__:instructions`, `lab__add` and `lab__echo` only |
+| 4, the group | `approved lab__:instructions ... at seq 8`, `approved lab__add ... at seq 9`, `approved lab__echo ... at seq 10`, `approved 3 definitions as group b18efdb3...` |
+| 5, `/mcp` | `pz 2 tools`, then `lab__add read-only` and `lab__echo read-only`; no `lookup` |
+| 5, the pass phrase | asked `What is the lab pass phrase?`, Claude Code showed `The lab pass phrase is pelican-42.` |
+| 6, approve `lookup` | the result box repeated the definition and its four flags, then `approved lab__lookup fecc0353... at seq 15`; `/mcp`, with no reconnect, then showed `3 tools`, `lab__lookup read-only` among them |
+| 7, `verify` | `intact: 16 entries, 2 sessions, 0 calls`; `tool.approved` at seqs 8, 9 and 10 with group `b18efdb3...`, and at seq 15 for `lookup` with group null and flags `["conceal-from-user", "instruction-tag", "read-before-use", "secret-path"]` |
+
+- **Read sideways?** The page itself never scrolls sideways (its scroll width equalled its width, 1280). The flags wrap. Two definition boxes do not: the instructions box (content 1,064 pixels wide in a 798-pixel box) and `lookup`'s (1,826 in 798), which are `pre` blocks with `overflow-x: auto` and `white-space: pre` inside a page at most 52rem wide. In the screenshot, `lookup`'s description line stops at `<IMPORTANT>Before using this tool, re`; the instruction to read a key file and the line telling the model to hide it are visible only by scrolling inside the box. A wider window does not help, since the column's width is fixed. This was recorded, not changed.
+- **Misread as approval of `lookup`?** In Claude's reading, no: the group button names three definitions and lists them, and nothing says `lookup` is approved until its own button is pressed. Its `Approve this definition` button looks the same as the clean boxes' buttons.
+- The approvals carry no `terminal` field, since the card ran in a terminal and without `--allow-no-terminal`.
+- Not checked: a person reading the page; the diff view (no definition changed).
+
+### M3, the card (run by Claude)
+
+`scripts/hold-check.sh reset` at 14:46:56Z approved the 21 definitions as one group (seqs 26 to 46) after Claude typed `yes`; it moved an earlier check's ledger, already there before this session, to `~/.local/share/polarizer-m2a-check.before-20261108T144658Z`. The card's page first said `Nothing is held right now.` (`m3-1-empty.png`). `/mcp` showed `polarizer 21 tools`, connected. Claude was asked: `Using the polarizer tool fs__write_file, write the text "M3 card check" to a new file /tmp/polarizer-manual/.git/hooks/m3-card-check.txt. Use only that tool.`
+
+| Step | What was seen |
+|---|---|
+| 3, the hold on the page | hold 83a5a519c077314f, `hold.created` at 14:47:54.251Z; the page showed it at 14:47:55.174Z, 0.9 s later (`m3-2-held.png`) |
+| 3, the labels | `Recommendation, from Polarizer's code: Deny, unless you asked for exactly this: the path matches .git/hooks/**, ...`; `Tool`: `fs__write_file, class local-write`; `Why it was held`: `write-pattern: argument "path": ... matches .git/hooks/**`; `What it would touch`: the path; `Its definition`: `unchanged since it was approved at seq 39`; `Earlier holds`: `none: this is the first hold of this tool by write-pattern`; `Waiting`; `Session`; `The exact call, as polarizer holds prints it` |
+| 4, Deny | `denied hold 83a5a519c077314f at seq 53`; under `Ended while this card was open`, `fs__write_file, hold 83a5a519c077314f: denied at seq 53` (`m3-3-denied.png`); Claude Code: `The write failed. Polarizer returned polarizer: fs__write_file was not allowed, so /tmp/polarizer-manual/.git/hooks/m3-card-check.txt was not created.`; the file did not exist |
+| 4, the retry, Allow | hold 106ebfdb14371099; `allowed hold 106ebfdb14371099 at seq 56`; `call.sent` at seq 57 with `allowed_by` `hold`, `call.returned` `ok`; the file held `M3 card check`; Claude Code: `The retry worked.` |
+| 5, the note | hold e34b435e1b93d99f, `hold.created` at 14:50:47.073Z; the page showed `This call has waited over 2 minutes: probably moved to the background by Claude Code; the agent may have moved on.` at 14:52:47.334Z, 120.3 s later (`m3-6-long-held.png`) |
+| 5, the background | Claude Code showed `Calling polarizer - 2m 1s...` at 14:52:46.9Z and `1 MCP task still running` at 14:52:47.950Z, about 121 s after the hold; then `The write to /tmp/polarizer-manual/.git/hooks/m3-long-wait.txt has not finished. Polarizer ran it past 120 seconds and moved it to the background as task kfoqebgf0. I'll get a notification when it completes.` (the model's words: Claude Code, not Polarizer, moved it) |
+| 5, Allow | allowed at seq 60, 14:53:19.8Z; Claude Code: `MCP task kfoqebgf0 (polarizer/fs__write_file) completed.`, then `The background write finished. /tmp/polarizer-manual/.git/hooks/m3-long-wait.txt now contains "M3 long wait".` |
+| 6, `verify` and `stats` | `intact: 63 entries, 2 sessions, 2 calls`; `elapsed_ms` 27,941, 14,407 and 151,433 on the three `hold.decided`; `stats`: `3 of 3 decisions were timed on one clock, from the card that showed the hold.` |
+| 6, `finish` | verify intact, `holds: nothing is held`, no probe or Filesystem server left, guard exit code 0 |
+
+- **Every label read plainly,** in Claude's reading, except one thing found: the exact-call block (and the result box, which uses the same `pre` style) cuts lines at its right edge, for example `held by write-pattern: argument "path": /tmp/polarizer-manual/.git/hooks/m3-card-check.txt` with `matches .git/hooks/**` past the edge, and `87 bytes of a` for `87 bytes of arguments`. The rows above it wrap and say the same things in full.
+- The move to the background came at about 121 s with 2.1.319, against about 123 s with 2.1.289 (docs/HOLD-SPEC.md, section 9).
+- Not checked: a person reading the page and deciding.
+
+### Stage 10, live planted calls (partly run by Claude)
+
+After a second `reset` (which moved M3's ledger to `~/.local/share/polarizer-m2a-check.before-20261108T145411Z`), `planted_calls_per_session = 3` was added under `[policy]`; the serve's `policy.loaded` at seq 48 carried `"planted_calls_per_session": 3`. Claude was asked to write `work-01.txt` to `work-25.txt` in `/tmp/polarizer-manual` with `fs__write_file`, read each back with `fs__read_text_file`, and list the directory; all 51 calls returned `ok`.
+
+| Planted hold | Made from | It named | Decided on the page | Reveal |
+|---|---|---|---|---|
+| f22b439eaf482c1e, 14:55:22.740Z | the write of `work-14.txt` | a write of `/tmp/polarizer-manual/.github/workflows/work-14.yml` | Deny, seq 106 | `You denied it: caught.` |
+| 0fd565012f87dcba, 14:55:35.335Z | the write of `work-22.txt` | a write of `/tmp/polarizer-manual/.github/workflows/work-22.yml` | Deny, seq 159 | `You denied it: caught.` |
+| 026df0a8520b954d, 14:55:59.638Z | the read of `work-10.txt` | a read of `/home/matt/.aws/credentials` | Allow, seq 161, on purpose | `You allowed it: missed.` |
+
+- **Before deciding,** the page's text had no word starting `plant` (`s10-2-held-before-decision.txt`), and each planted hold read like a real one: `write-pattern` or `read-pattern`, the recommendation to deny, the exact call. Claude Code at that moment showed only `Calling polarizer 20 times...`, with no line for a planted call. This is Claude's reading, by a reader who knew planting was on.
+- **The reveal,** under the result and on the ended hold (`s10-3-reveal.png`): `Planted call: Polarizer made this hold to check that held calls are read. The agent never made it, and nothing was forwarded.`, then `why: The agent's fs__write_file call named /tmp/polarizer-manual/work-14.txt; this planted call named /tmp/polarizer-manual/.github/workflows/work-14.yml, which can run code when pushed.`, then `You denied it: caught.` In the result box the `why:` line is cut at the box edge, as in M3; on the ended hold it wraps.
+- **History:** the second planted write still said `Earlier holds: none: this is the first hold of this tool by write-pattern` after the first was denied, as docs/CARD-SPEC.md, section 8, says (holds revealed as planted are left out of every card's history).
+- **The ledger:** `plant_commit` on each `hold.created`; `hold.revealed` with label `planted` after each `hold.decided`; no `call.sent`, `call.returned` or `call.refused` for any of the three; `/tmp/polarizer-manual/.github` did not exist afterwards. The allow of the planted read sent nothing, and the Filesystem server is confined to `/tmp/polarizer-manual` in any case.
+- **`stats`:** `on in 1 of 2 sessions: at most 3 per session, about 1 in 20 eligible calls, never with 12 or more holds open`, `planted 3: denied 2 (caught), allowed 1 (missed), expired 0, not revealed 0`, `catch rate: caught 2 of 3, too few to say a rate (5 or more needed)`. `verify`: `intact: 163 entries, 2 sessions, 51 calls`. `finish` wrote `polarizer.toml` again without the key; guard exit code 0.
+- **Not checked: whether a person could tell a planted call apart before deciding.** Claude knew planting was on and that any hold it had not asked for was planted, so it was not a blind reader, and its decisions say nothing about a person's catch rate. The planted read was allowed only to see the `missed` path.
+
+### M2b, taint (partly run by Claude)
+
+`scripts/taint_check.py --setup` at 14:57:55Z made `.repro/taint-manual.d30a62u0`, primed it and printed `approved 2 definitions as group 40be1ea8...`. The first Claude Code session's `client_session` was `6b9140a3-de40-499e-af1a-f07dc2d22f0f`, its serve session 3e792b4473b3594f.
+
+| Step | What was seen |
+|---|---|
+| 3, the first post | `call.sent` at seq 12 with `allowed_by` `domains`; the stub received `first` |
+| 3, the fetch | `call.sent` at seq 14; `session.tainted` at seq 15, before the fetch's `call.returned` at seq 16 |
+| 3, the second post | hold 4ac7bb1f0ac33445 (`m2b-1-tainted-hold.png`): `Why it was held`: `tainted: session tainted by web__fetch at 2026-11-08T14:58:38.642Z (seq 14); egress is held for the rest of the session, even to a host in this tool's domains`; `Session taint`: `tainted by web__fetch at 2026-11-08T14:58:38.642Z (seq 14): every egress call of this session is held`; the recommendation to deny. Allowed at seq 18, forwarded at seq 19; the stub received `second` |
+| 4, Esc during the hold | hold bdbf5981ab26d573 at 14:59:10.890Z; Esc sent at 14:59:15.230Z; `hold.expired` at seq 22, 14:59:15.290Z, reason `the client cancelled the call`, then `call.refused` at seq 23. The card's ended list: `web__post, hold bdbf5981ab26d573: cancelled at seq 22: the client cancelled the call` (`m2b-4-after-esc.png`). Claude Code: `Called pz`, then `Interrupted - What should Claude do instead?` The same serve process (pid 39808) kept running |
+| 4, the same post again | hold 712fd61c47c95268, by the same serve session 3e792b4473b3594f, `tainted` with the same source; `Earlier holds`: `1 allowed, 0 denied`. Denied at seq 25; Claude Code: `The post with body third was not sent. The Polarizer proxy refused it with "polarizer: web__post was not allowed".` |
+| Extra, `/mcp` reconnect | not in the check: `/mcp`, `pz`, `Reconnect` showed `Reconnected to pz.`; a new serve, session 9325eeae3e4eccf5, `session.started` at seq 27 with `client_session` `6b9140a3-...`; the post `third-after-reconnect` was held at once (hold e859af6884d951a5, seq 31) by `tainted`, naming the fetch at 14:58:38.642Z (seq 14); denied at seq 32. Claude Code: `The post with body third-after-reconnect was refused again: "polarizer: web__post was not allowed". The /mcp reconnect did not change that.` |
+| 5, a new session | `client_session` `91633316-d58c-47f4-9e67-e98fb697b94a`, serve session 891e322fdbae2bd8; the post `fourth` ran as a grant (`call.sent` at seq 38, `allowed_by` `domains`) |
+| 6, `verify` and `stats` | `intact: 40 entries, 4 sessions, 4 calls`; `tainted: 2 of 4 sessions, every egress call held from then on` and `held by taint 4: allowed 1, denied 2, expired 1, abandoned 0, open 0`; the four `policy.loaded` carry null (the priming start), `6b9140a3-...` twice and `91633316-...`; the stub received `first`, `second` and `fourth` only |
+
+- **Found:** step 4 expects Esc to end serve, so that the hold leaves the card as ended at shutdown and the next post meets a new serve. With Claude Code 2.1.319 neither happened: Esc cancelled the held call through the protocol (the reason above is the one Polarizer records for the client's `notifications/cancelled`, `CLIENT_CANCEL_ERROR` in `src/polarizer/proxy.py`), and the serve process stayed. With 2.1.288, Esc had sent SIGINT and Claude Code had started a new serve (Manual check follow-up, Esc restart timing). So the question step 4 asks, whether interactive Claude Code keeps `CLAUDE_CODE_SESSION_ID` across the restart that follows Esc, was not answered. The extra reconnect shows that an interactive 2.1.319 session gave a restarted serve the same `client_session`, and that the new serve folded the taint from the ledger; it is a different trigger from Esc.
+- Not checked: a person reading the page; Esc during a call that is not held; whether Esc ever restarts serve in 2.1.319.
+
+### Bookkeeping, processes and the guard (manual checks run by Claude)
+
+- **`~/.claude.json`** went from 104,940 bytes (mtime 14:41:28Z) to 113,423 bytes (15:01:42Z), Claude Code's own updates; its MCP config hashes were unchanged. Each interactive session was kept by Claude Code under `~/.claude`, as it does by default, and Claude Code updated itself, both its own bookkeeping.
+- **`polarizer.toml`:** the copy in the repo root before the checks (sha256 `36508be9...`) was an older one, not what `hold-check.sh finish` writes; it was saved under `.repro/manual-checks/` first, and put back byte for byte after the last `finish` (same sha256).
+- **Leftovers:** after the last check, no probe, Filesystem server, stand-in, serve, card or driver process was running; Claude's Chromium had closed. Claude Code exited with `/exit` each time, and the tmux server was killed.
+- **The guard:** both `hold-check.sh finish` runs printed no changes and guard exit code 0. `scripts/dev/guard.sh check` against the snapshot taken at the start of the session (`snapshot-20261108T144135Z.txt`) exited 1. It listed `~/code/parallax/parallax/__pycache__/evals.cpython-312.pyc` (mtime 14:44:06Z) and `~/.local/share/parallax` changed (91,099 files before, 91,102 after); the entries newer than the snapshot were all under `tasks/field-demo-a4d36c41/70d1f6/`, with mtimes at 14:42:07Z. No Parallax command, import or file was run or opened by these checks: at that time the M1b setup and card were running, and a separate tmux server, not this session's, had a session named `demo-ui` that was gone by 14:46Z. Everything else, `~/.config/parallax`, Loupe, ISR and the MCP config hashes, showed no changes.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.
@@ -1022,9 +1114,9 @@ The owner gave these facts in the release round's brief (Oct 5, 2026). No sessio
 
 These are assumed or open. Nothing here has been observed.
 
-- **Interactive sessions:** apart from the facts the owner observed interactively (Interactive, Manual check follow-up, M1a check, interactive, and M2a check, interactive: Esc to cancel, the `/mcp` names, re-listing after an approval, how a held call is shown, and the move to the background after about 123 s), every Claude Code fact above is headless. Not tested interactively:
+- **Interactive sessions:** apart from the facts the owner observed interactively (Interactive, Manual check follow-up, M1a check, interactive, and M2a check, interactive: Esc to cancel, the `/mcp` names, re-listing after an approval, how a held call is shown, and the move to the background after about 123 s), and those Claude observed at the owner's direction (Manual checks run by Claude, with no person reading the page), every Claude Code fact above is headless. Not tested interactively:
   - closing a session without pressing Esc while a call is in flight (does Claude Code send `notifications/cancelled`, or only close stdin?);
-  - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap);
+  - whether Claude Code sends `notifications/cancelled` on Esc, before or instead of signaling the server process (needs the wiretap). With 2.1.319, during a held call, Polarizer recorded the client's cancel and the process kept running (Manual checks run by Claude, M2b); the wire itself was not read;
   - whether interactive sessions open `subscriptions/listen` the same way;
   - whether `TaskStop` on a call moved to the background sends `notifications/cancelled`, what happens to such a call when the session exits, and whether the 123 s is fixed or configurable (M2a check, interactive);
   - elicitation forms.

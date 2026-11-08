@@ -166,9 +166,11 @@ What it does not show:
 - **Claude Code's own limits** on a call that waits for many minutes: the hold timeout here is 300 seconds at most, under the idle timeout read from the binary (docs/HOLD-SPEC.md, section 9).
 - **Other servers and other platforms.** Only the pinned Filesystem server and the probe, on the machine you run it on.
 
-## M3: the card (not run yet)
+## M3: the card (run by Claude, Nov 8, 2026)
 
-The owner's interactive check of the card; nothing in this section has been run. The headless check, `.venv/bin/python scripts/card_check.py`, drives the card with curl on real Claude Code (docs/verified-facts.md, Card check, headless); this one is a person, a browser and an interactive session.
+The interactive check of the card. **Run by Claude (Opus 5.5) at the owner's direction on Nov 8, 2026 (UTC), through tmux and headless Chromium; a person's reading of the page was not done.** The owner has not run it. Conditions: Claude Code 2.1.319 started with `--model claude-haiku-5-5` added to the command in step 3, Polarizer at 40797ad (v0.6.1), and the headless Chromium 153.0.8010.12 in `~/.cache/ms-playwright`, driven with `tests/helpers/chromium.py`. Every step behaved as written: the held write was on the page 0.9 s after its `hold.created`, with every label of step 3; the deny, the retry's allow, the note at 120 s and Claude Code's move to the background at about 121 s; `verify` intact, and `stats` timed 3 of 3 decisions on one clock. Found: the exact-call block cuts long lines at its right edge, so they are read only by scrolling sideways inside the box. The captures, screenshots and numbers are in docs/verified-facts.md, Manual checks run by Claude.
+
+The headless check, `.venv/bin/python scripts/card_check.py`, drives the card with curl on real Claude Code (docs/verified-facts.md, Card check, headless); this one is a person, a browser and an interactive session.
 
 1. **Terminal B:** `scripts/hold-check.sh reset`, as in M2a, step 1.
 2. **Terminal C:** `polarizer card --config ~/code/polarizer/polarizer.toml`. It prints one line, `open http://127.0.0.1:<port>/?t=<token>`; open that link in a browser on the same machine. The page should say `Nothing is held right now.`
@@ -177,9 +179,11 @@ The owner's interactive check of the card; nothing in this section has been run.
 5. Ask for one more write and leave it on the page for more than 2 minutes: the note `probably moved to the background by Claude Code` should appear at 120 s, and Claude Code should move the call to the background at about 123 s. Allow it, and note what Claude Code shows.
 6. **Terminal C:** Ctrl+C ends the card. Then `polarizer verify` and `polarizer stats` with `--config ~/code/polarizer/polarizer.toml`: the decisions from the page carry `elapsed_ms`, and `stats` says how many were timed on one clock. Then `scripts/hold-check.sh finish` in terminal B.
 
-## Stage 10: live planted calls (not run yet)
+## Stage 10: live planted calls (partly run by Claude, Nov 8, 2026)
 
-The owner's interactive check of live planted calls; nothing in this section has been run. The headless one is `.venv/bin/python scripts/card_check.py --planted` (docs/verified-facts.md).
+The interactive check of live planted calls. **Run by Claude (Opus 5.5) at the owner's direction on Nov 8, 2026 (UTC), through tmux and headless Chromium; a person's reading of the page was not done.** The owner has not run it. Same conditions as M3. The mechanics ran as written: with `planted_calls_per_session = 3`, three planted holds appeared during 51 ordinary calls; nothing on the page or in Claude Code named them as planted before a decision; the page showed the reveal after each decision; `stats` counted them, and nothing was forwarded. **Not checked: whether a person could tell a planted call apart before deciding.** Claude knew planting was on and that any hold it had not asked for was planted, so its decisions are not a blind reader's. One planted read was allowed on purpose, to see the `missed` reveal. Details in docs/verified-facts.md, Manual checks run by Claude.
+
+The headless one is `.venv/bin/python scripts/card_check.py --planted` (docs/verified-facts.md).
 
 1. After `scripts/hold-check.sh reset`, add `planted_calls_per_session = 3` under `[policy]` in `~/code/polarizer/polarizer.toml`, and start Claude Code as in M2a, step 2. Polarizer's stderr says planted calls are on; that line goes to Claude Code's log, not to your screen.
 2. Start `polarizer card --config ~/code/polarizer/polarizer.toml` in terminal C and open its link.
@@ -187,9 +191,11 @@ The owner's interactive check of live planted calls; nothing in this section has
 4. Decide it on the page, or with `polarizer allow` or `deny` in terminal B. Read the reveal under the result: `Planted call: ...`, why, and caught or missed.
 5. Exit Claude Code, then run `polarizer stats --config ~/code/polarizer/polarizer.toml`: its planted calls section counts the call. Then `scripts/hold-check.sh finish`, which writes `polarizer.toml` again without the key.
 
-## M2b: taint (not run yet)
+## M2b: taint (partly run by Claude, Nov 8, 2026)
 
-The owner's interactive check of taint; nothing in this section has been run. The headless one is `.venv/bin/python scripts/taint_check.py` (docs/verified-facts.md, Taint check), which shows a restart of serve with `claude -p --resume`; this one asks whether interactive Claude Code keeps `CLAUDE_CODE_SESSION_ID` across the restart that follows Esc, which nothing else checks (docs/TAINT-SPEC.md, section 11). It uses the repository's stand-in web server (`tests/helpers/web_stub.py`: `fetch` returns fixed text and `post` records what it was sent, neither touching the network) and its own ledger under `.repro/`.
+The interactive check of taint. **Run by Claude (Opus 5.5) at the owner's direction on Nov 8, 2026 (UTC), through tmux and headless Chromium; a person's reading of the page was not done.** The owner has not run it. Same conditions as M3. Steps 1 to 3, 5 and 6 behaved as written. **Step 4 did not test what it is for.** With Claude Code 2.1.319, Esc during the hold cancelled the call (`hold.expired` with `the client cancelled the call`, the reason Polarizer records for the client's `notifications/cancelled`), and the same serve process kept running. So the hold ended as cancelled, not at shutdown, and the next post was held by that same serve, which proves nothing about a restart. As an extra step outside this list, `/mcp`, `Reconnect` in the same session started a new serve with the same `client_session`, and its hold was again by `tainted`, naming the same fetch and seq. Whether Esc restarts serve in other versions, and taint across that restart, is still unchecked. Details in docs/verified-facts.md, Manual checks run by Claude.
+
+The headless one is `.venv/bin/python scripts/taint_check.py` (docs/verified-facts.md, Taint check), which shows a restart of serve with `claude -p --resume`; this one asks whether interactive Claude Code keeps `CLAUDE_CODE_SESSION_ID` across the restart that follows Esc, which nothing else checks (docs/TAINT-SPEC.md, section 11). It uses the repository's stand-in web server (`tests/helpers/web_stub.py`: `fetch` returns fixed text and `post` records what it was sent, neither touching the network) and its own ledger under `.repro/`.
 
 1. **Terminal B,** in `~/code/polarizer`: `uv sync --locked`, then `.venv/bin/python scripts/taint_check.py --setup`. It writes a directory under `.repro/`, primes its ledger (no model) and prints the commands for terminals A and C.
 2. **Terminal C:** the printed `polarizer card --config ...`; open its link.
@@ -200,9 +206,11 @@ The owner's interactive check of taint; nothing in this section has been run. Th
 
 If step 4's new hold is by `egress` and its reason names no taint, or the post runs, the restart did not keep `CLAUDE_CODE_SESSION_ID`; note it, since taint across Esc then fails open (docs/TAINT-SPEC.md, section 11).
 
-## M1b: scanning and review (not run yet)
+## M1b: scanning and review (run by Claude, Nov 8, 2026)
 
-The owner's interactive check of the scanner and the card's review view; nothing in this section has been run. The headless one is `.venv/bin/python scripts/scan_check.py` (docs/verified-facts.md, Scan check), driven with curl; this one has a person read the review view in a browser and approve from it, which nothing else checks. It uses the repository's stand-in server (`tests/helpers/lab_stub.py`: `add` and `echo` are clean, `lookup`'s description is poisoned on purpose and the tool reads no file, and its instructions are clean) and its own ledger under `.repro/`.
+The interactive check of the scanner and the card's review view. **Run by Claude (Opus 5.5) at the owner's direction on Nov 8, 2026 (UTC), through tmux and headless Chromium; a person's reading of the page was not done.** The owner has not run it. Conditions as for M3, except Claude Code: this check ran on 2.1.310, which updated itself to 2.1.319 in the background before M3 started. Every step behaved as written: four flag lines and the group of three in `pending` and on the page; the group approval; `/mcp` listing `add` and `echo` but not `lookup`; the answer `pelican-42`; `lookup` listed by `/mcp` after its approval on the page, with no reconnect; three approvals with one group id and `lookup`'s alone with its flags. Found: at a 1280-pixel-wide window, `lookup`'s definition box cuts its long description line, so the poisoned part of the definition is read only by scrolling sideways inside the box; the flags wrap and quote the matched words. Details in docs/verified-facts.md, Manual checks run by Claude.
+
+The headless one is `.venv/bin/python scripts/scan_check.py` (docs/verified-facts.md, Scan check), driven with curl; this one has a person read the review view in a browser and approve from it, which nothing else checks. It uses the repository's stand-in server (`tests/helpers/lab_stub.py`: `add` and `echo` are clean, `lookup`'s description is poisoned on purpose and the tool reads no file, and its instructions are clean) and its own ledger under `.repro/`.
 
 1. **Terminal B,** in `~/code/polarizer`: `uv sync --locked`, then `.venv/bin/python scripts/scan_check.py --setup`. It writes a directory under `.repro/`, records what the stand-in lists with no approval (no model), and prints the commands for terminals A, B and C.
 2. **Terminal B:** the printed `polarizer pending --config ...`. `lab__lookup` should say `flagged by the scanner; read it, then approve it by name`, with four flag lines, and the group line should cover the 3 unflagged definitions: `lab__:instructions`, `lab__add` and `lab__echo`.
