@@ -221,7 +221,7 @@ Live planted calls were built after M3, as stage 10 (MEASURE-SPEC.md, section 11
 - **Files:** `index.html`, `card.js` and `card.css`, in `src/polarizer/card_page/`, shipped as package data and read with `importlib.resources`. No external asset, no font, no build step. `index.html` has two placeholders the card fills: the nonce, and the ledger directory through `printable()` and HTML escaping.
 - **Script:** one file of plain JavaScript, loaded with `<script src="/card.js" defer>`. No inline script, no inline style, no `on...=` attribute, no `eval`, no `innerHTML` with server text; events are bound with `addEventListener`. All of it works under section 3's Content-Security-Policy.
 - **Words:** plain labels (section 4), the buttons `Allow` and `Deny`, a box `Reason for a deny (optional)`, the heading `Held calls`, and `Nothing is held right now.` for an empty queue. The page names the ledger directory it watches.
-- **Layout:** one column, readable at 80 characters of text, the exact call in a monospace box that wraps no line and scrolls sideways, the recommendation in a box above the rows, and the buttons apart from each other.
+- **Layout:** one column, readable at 80 characters of text, the exact call in a monospace box that keeps its line breaks and wraps a line wider than the box, breaking a word if it must, so the whole call is read without scrolling sideways (every other monospace box, a definition, a diff and the last decision, does the same; section 14, deviation 16), the recommendation in a box above the rows, and the buttons apart from each other.
 
 ## 10. Limits
 
@@ -271,6 +271,8 @@ Added to LIMITS.md when M3 ships:
 | `test_card_page_in_a_browser` | A headless Chromium loads the page from the open line, shows the hold's block and recommendation, and a click on Deny records the deny with `elapsed_ms` | Browser |
 
 Added while building (section 14, deviation 15): `test_card_with_config` (the card from `--config` as a subprocess), `test_paths_through_a_link` (the symbolic-link case of `test_paths_with_config`, skipped where `os.symlink` raises `OSError`), `test_rejected_definition_and_history_counts`, `test_malformed_decisions`, `test_page_names_the_ledger_and_escapes_it`, and `tests/test_card_check.py` for the headless check script's files and refusals.
+
+Added in 0.6.2 (section 14, deviation 16): `test_card_page_wraps_long_lines` (Browser), which loads `tests/helpers/cardledger.py`'s `long_lines` ledger at a 1280-pixel window and checks that no exact call, definition or result box is wider than itself, and `test_boxes_wrap_long_lines` (Default), which checks the CSS rule that does it.
 
 ### Golden files
 
@@ -322,3 +324,4 @@ The owner's answers to M3's open questions, given with the build brief on Nov 6,
 13. **The card prints nothing after its open line,** not even decisions: the brief asked for one line, and a request log would print the token.
 14. **The stage is numbered 11,** and its notes are docs/dev/STAGE11-NOTES.md: stage 10, live planted calls, is named in MEASURE-SPEC.md and comes after M3, so its notes keep the name STAGE10-NOTES.md.
 15. **Extra tests** beyond section 11's table, listed under it, and a committed headless check script, `scripts/card_check.py`, which section 12 asked for as "a headless check" without naming one. It drives the card with curl only, as the brief asked.
+16. **Long lines wrap** (0.6.2). Section 9 first said the exact call's box wraps no line and scrolls sideways, and every monospace box on the page shared that style. The manual checks run by Claude on Nov 8, 2026 (docs/verified-facts.md, Manual checks run by Claude) found that this hides the very text a person must read: at a 1280-pixel window, the flagged `lab__lookup` definition was cut at `<IMPORTANT>Before using this tool, re`, its content 1,826 pixels wide in a 798-pixel box, and the exact-call and result boxes cut their long lines the same way. Every `pre` on the page now has `white-space: pre-wrap` and `overflow-wrap: anywhere`. The text, its escapes and its line breaks are unchanged; a line wider than the box goes on at the box's left edge in the next row, with no marker.

@@ -8,13 +8,21 @@ tests inject, so every open hold is more than 120 s old and shows the background
 
 from pathlib import Path
 
+import mcp_types as types
 from conftest import build_chain
 from helpers import holdledger as hl
+from helpers import scanledger as sl
+
+from polarizer import defhash
 
 EARLIER = "b00000000000000b"  # an earlier allowed hold of fs__write_file by write-pattern
 WRITE_HASH = "c" * 64
 WEB_APPROVED = "d" * 64
 WEB_LIVE = "e" * 64
+LONG_HOLD = "c00000000000000c"  # the open hold of long_lines
+# A 2,000-character description: sentences, then a 300-character run with no space in it,
+# which only overflow-wrap can break.
+LONG_DESCRIPTION = ("Read the glossary entry for the word and return it. " * 40)[:1700] + "A" * 300
 
 
 def approvals() -> list:
@@ -72,4 +80,34 @@ def one_hold(ledger_dir: Path, tool: str, rule: str, reason: str, arguments, hol
     entry = hl.created(session, hold, tool, commit, cls, "config", rule, reason)
     build_chain(ledger_dir, [hl.started(session), entry], head_at=0)
     hl.lock_files(ledger_dir, session)
+    return ledger_dir
+
+
+def long_lines(ledger_dir: Path) -> Path:
+    """A card whose boxes hold lines far wider than the page (docs/CARD-SPEC.md, section 9,
+    Layout, and deviation 16): one open hold of fs__write_file in the running session, with a
+    long path under .git/hooks and a long content argument, so its exact call and its reason
+    run past the box; and two definitions waiting for approval: scanledger's poisoned
+    lab/lookup, whose description line holds the <IMPORTANT> instruction, and lab/notes, whose
+    description is LONG_DESCRIPTION, 2,000 characters."""
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    path = "/home/me/proj/.git/hooks/" + "post-checkout-with-a-very-long-name-" * 6 + "end.sh"
+    arguments = {"path": path, "content": "echo " + "every word of this hook " * 25}
+    commit = hl.side_file(ledger_dir, arguments, 31)
+    reason = f'argument "path": {path} matches .git/hooks/**'
+    notes = types.Tool(name="notes", description=LONG_DESCRIPTION, input_schema={"type": "object"})
+    seen = []
+    for tool in (sl.TOOLS["lookup"], notes):
+        def_hash, canon = defhash.definition(tool, sl.META_ALLOW)
+        defhash.write_copy(ledger_dir, def_hash, canon)
+        seen.append(("tool.seen", {"session": hl.RUNNING, "upstream": "lab", "tool": tool.name,
+                                   "def_hash": def_hash}))  # fmt: skip
+    specs = [
+        hl.started(hl.RUNNING),
+        hl.created(hl.RUNNING, LONG_HOLD, "fs__write_file", commit, "local-write", "config",
+                   "write-pattern", reason),
+        *seen,
+    ]  # fmt: skip
+    build_chain(ledger_dir, specs, head_at=len(specs))
+    hl.lock_files(ledger_dir, hl.RUNNING)
     return ledger_dir

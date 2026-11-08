@@ -46,7 +46,9 @@ code, pre { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospa
 .rows dt { font-weight: 600; }
 .rows dd { margin: 0; overflow-wrap: anywhere; }
 .block-label { margin: 1rem 0 0.25rem; font-size: 1rem; }
-pre { background: var(--panel); padding: 0.5rem 0.75rem; overflow-x: auto; white-space: pre; margin: 0; }
+/* Every monospace box keeps its line breaks and wraps a line wider than itself, breaking a
+   word if it must, so the whole text is read without scrolling sideways. */
+pre { background: var(--panel); padding: 0.5rem 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .actions { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem 2rem; }
 .reason-label { display: flex; flex-direction: column; flex: 1 1 18rem; font-size: 0.9rem; color: var(--muted); }
 .reason { font: inherit; padding: 0.3rem 0.4rem; margin-top: 0.2rem; }
