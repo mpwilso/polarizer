@@ -988,6 +988,20 @@ Checked for docs/EXPORT-SPEC.md on Nov 7, 2026 (UTC), at master c1982c1, by read
 
 **Not run:** Jaeger; an OCSF validator (the attribute names are checked by name against the lists above); `uv tool install` of the `otel` extra.
 
+## Review fixes for 0.6.1 (Nov 8, 2026, UTC)
+
+Checked in WSL2 (the `parallax` distro), in a worktree of `review-fixes` under `.repro/`, branched from master 57ab5a2.
+
+**Deep nesting (finding 9).** A ledger of `valid/minimal`'s genesis and one v1 line nested N deep, hashed by the reference verifier, was verified by `conformance/reference_verify.py` and by `python -m polarizer verify`, both from 57ab5a2, with the worktree's Python 3.13.15: at 60, 200, 800 and 950 deep both said intact; at 1,100 and 5,000 both exited 1 with `RecursionError: maximum recursion depth exceeded`. A v0 line 1,100 and 5,000 deep verified intact in both. `json.loads` of `[` times N then `]` times N, run with `uv run --no-project --offline --python <v>`: Python 3.11.16 parsed 900 and raised RecursionError at 1,000; 3.12.3 and 3.13.15 parsed 8,000 and raised it at 20,000. The deepest line in any conformance fixture nests 6 levels, and `valid/v0-parallax.jsonl` 3, counted by a recursive walk over each parsed line.
+
+**git and `log.showSignature` (finding 7).** git 2.43.0, in a scratch repository under `.repro/`: with `-c log.showSignature=true`, `git log --format=%H%x00%B%x00` printed nothing extra for an unsigned commit, and `No signature` and a newline before the hash of a commit signed with an ed25519 SSH key (`gpg.format=ssh`, no `gpg.ssh.allowedSignersFile`). Adding `-c log.showSignature=false` after it, or `--no-show-signature`, removed the line.
+
+**After the fix, the deep lines.** On a 1,100-deep v1 line after `valid/minimal`'s genesis, and a 100,000-deep v0 line after `valid/v0-parallax`'s first line: the reference verifier from 57ab5a2 exited 1 with RecursionError on both (the v0 one inside json, `while decoding a JSON array`), and the installed `polarizer` (0.6.0, `~/.local/bin/polarizer`) exited 1 with RecursionError on the v1 one; on this branch the reference printed `invalid`, line 2, seq null, check `structure` for both, and `polarizer verify` printed `invalid: line 2 (seq ?): nested more than 64 deep` and exited 3.
+
+**The reference servers under the new rules** (`POLARIZER_REFERENCE=1 uv run --locked pytest -s tests/test_reference.py`, with `npx` resolved to a wrapper under `.repro/` that runs the real `npx --offline`, as at stage 4): the four reference tests passed. `test_reference_scan` scanned 27 tools and 1 set of instructions and flagged 1 definition with 1 flag, Everything's instructions by `long-text` (1,574 characters), the same as on the base 57ab5a2 run just before. Nothing was fetched: `--offline` refuses any registry request.
+
+**The tests written first.** With the new tests, fixtures and reference checks in place and `src/` reverted to 57ab5a2, `uv run --locked pytest tests/test_scan.py tests/test_anchor.py tests/test_conformance.py tests/test_canon.py` gave 54 failed and 211 passed: every scanner probe, the new rule's fixture and rule count, every anchor case (the old code has no `choose`), the git, signature, directory and FIFO tests, `broken/nested_too_deep` in Polarizer's verifier, the deep-line tests and the nesting-limit test. With `src/` restored, all passed but three, whose expected message lacked `(seq ?)`; the expectation was corrected.
+
 ## Related projects (from the owner's research, October 2026, not re-checked in this repo)
 
 The owner gave these facts in the release round's brief (Oct 5, 2026). No session fetched these pages, ran these tools or read their code; each line says what the project's own documentation described in October 2026, and nothing more. docs/related.md is written from this list.

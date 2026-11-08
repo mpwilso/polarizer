@@ -83,6 +83,24 @@ def test_integer_bounds_are_inclusive():
     assert subset_problem({"a": MAX_INT, "b": -MAX_INT}) is None
 
 
+def nested(levels):
+    value = []
+    for _ in range(levels - 1):
+        value = [value]
+    return value
+
+
+def test_nesting_limit():
+    """Arrays and objects nest at most 64 deep, the entry being level 1; a writer refuses a
+    deeper entry, and the check never recurses past the limit (finding 9)."""
+    assert subset_problem(nested(64)) is None
+    assert subset_problem(nested(65)) == "nested more than 64 deep at " + "/0" * 64
+    assert subset_problem(nested(5000)) == "nested more than 64 deep at " + "/0" * 64
+    make_entry(1, "t", "x.deep", {"deep": nested(62)}, "0" * 64)
+    with pytest.raises(EntryRefused, match="x.deep: nested more than 64 deep at /data/deep/0/"):
+        make_entry(1, "t", "x.deep", {"deep": nested(63)}, "0" * 64)
+
+
 def test_pointer_part_escapes_controls():
     assert pointer_part("a\nb") == "a\\u000ab"
 

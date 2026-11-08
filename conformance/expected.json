@@ -19,6 +19,43 @@
    "seq": 8,
    "trailer": "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
   },
+  "furthest": {
+   "ledger": "valid/session",
+   "result": "extends",
+   "seq": 12,
+   "trailers": [
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:5:238517356fff922828489e5a56514fc18ec5306373d5f7488972af71ec57ebdc:4211e81d4cd69bd3cf5a9d9ec6f7c4fb5175ac8442aab214df48e672d73b34c4",
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:13:7bceec9be84724ba651d3bcd64afc80fb2cfea18852643fe4f3b8974155d9ddb:1068df7bd9513a8fc64a1495d9b9eac0483a067393188e8418a6b43879f718c0",
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:5:238517356fff922828489e5a56514fc18ec5306373d5f7488972af71ec57ebdc:4211e81d4cd69bd3cf5a9d9ec6f7c4fb5175ac8442aab214df48e672d73b34c4"
+   ]
+  },
+  "furthest_no_own_chain": {
+   "ledger": "valid/session",
+   "result": "other chain",
+   "seq": 12,
+   "trailers": [
+    "Polarizer-Checkpoint: 0123456789abcdef0123456789abcdef:5:45bc06601f2436f4ed191248df8ed797eefb6dc9706a88141c23097c3f8ce682:7b6499134e259648b343a537f3545dfb92ac294ac352132583843a483174e0eb",
+    "Polarizer-Checkpoint: 0123456789abcdef0123456789abcdef:13:91f60639522093e36feae23ff0adadc43134cfca9ef93ed2066afb270278244c:38371631ca3ea215fd7a01b09a5dd3be0e66a3c80c1a20a4f2a876b8fd3647f9"
+   ]
+  },
+  "furthest_own_chain": {
+   "ledger": "valid/session",
+   "result": "extends",
+   "seq": 8,
+   "trailers": [
+    "Polarizer-Checkpoint: 0123456789abcdef0123456789abcdef:13:91f60639522093e36feae23ff0adadc43134cfca9ef93ed2066afb270278244c:38371631ca3ea215fd7a01b09a5dd3be0e66a3c80c1a20a4f2a876b8fd3647f9",
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+   ]
+  },
+  "furthest_rewound": {
+   "ledger": "anchors/rewound",
+   "result": "rewound",
+   "seq": 8,
+   "trailers": [
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:5:238517356fff922828489e5a56514fc18ec5306373d5f7488972af71ec57ebdc:4211e81d4cd69bd3cf5a9d9ec6f7c4fb5175ac8442aab214df48e672d73b34c4",
+    "Polarizer-Checkpoint: 5f0c9e2a7b14d3e8a1c6f9b2d4e7a0c3:9:4121f4046574e55f1019d526caef6322acff10e3819138891ab06786a3d35074:a6b5fabec7745fbf12ee95f0e1fe2efeb1a90c78cf9f131dae40af1f22967986"
+   ]
+  },
   "other_chain": {
    "ledger": "anchors/other_chain",
    "result": "other chain",
@@ -248,6 +285,13 @@
    "seq": null,
    "status": "invalid"
   },
+  "broken/nested_too_deep": {
+   "check": "structure",
+   "head": false,
+   "line": 7,
+   "seq": null,
+   "status": "invalid"
+  },
   "broken/non_ascii_key": {
    "check": "structure",
    "head": false,
@@ -428,6 +472,13 @@
    "head": true,
    "line": 1,
    "seq": 0,
+   "status": "intact"
+  },
+  "valid/nested_at_limit": {
+   "check": null,
+   "head": false,
+   "line": 2,
+   "seq": 1,
    "status": "intact"
   },
   "valid/no_head": {

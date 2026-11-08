@@ -9,7 +9,10 @@ MAX_INT = 2**53 - 1
 MAX_LINE = 16 * 1024  # bytes, including the newline
 HASH_PREFIX = b"LEDGER-SPEC/1\n"
 ZERO_HASH = "0" * 64
+MAX_DEPTH = 64  # arrays and objects nest at most this deep in a line; the entry is level 1
 _SURROGATE = re.compile("[\ud800-\udfff]")
+_STRING = re.compile(rb'"(?:[^"\\]|\\.)*"', re.S)
+_NOT_BRACKET = bytes(b for b in range(256) if b not in b"[]{}")
 
 
 class EntryRefused(ValueError):
@@ -30,20 +33,35 @@ def _escape(c: str) -> str:
     )
 
 
-def subset_problem(value, path: str = "") -> str | None:
-    """The first value outside the v1 subset, in document order, as a rule; None if all fit."""
+def nesting(raw: bytes) -> int:
+    """How deep a line's arrays and objects nest, read from its bytes without parsing them
+    (docs/LEDGER-SPEC.md, Canonical bytes and the subset): brackets inside strings don't
+    count. On a line that isn't JSON the number means nothing, and the parse refuses it."""
+    marks = _STRING.sub(b"", raw).translate(None, _NOT_BRACKET)
+    depth = deepest = 0
+    for mark in marks:
+        depth += 1 if mark in b"[{" else -1
+        deepest = max(deepest, depth)
+    return deepest
+
+
+def subset_problem(value, path: str = "", depth: int = 1) -> str | None:
+    """The first value outside the v1 subset, in document order, as a rule; None if all fit.
+    `depth` is the nesting level of `value` when it is an array or object: 1 for an entry."""
+    if isinstance(value, (dict, list)) and depth > MAX_DEPTH:
+        return f"nested more than {MAX_DEPTH} deep at {path}"
     if isinstance(value, dict):
         for key, item in value.items():
             where = f"{path}/{pointer_part(key)}"
             if not key.isascii():
                 return f"non-ASCII key at {where}"
-            found = subset_problem(item, where)
+            found = subset_problem(item, where, depth + 1)
             if found:
                 return found
         return None
     if isinstance(value, list):
         for i, item in enumerate(value):
-            found = subset_problem(item, f"{path}/{i}")
+            found = subset_problem(item, f"{path}/{i}", depth + 1)
             if found:
                 return found
         return None

@@ -35,17 +35,17 @@ def structure_ok(e, raw, n, version):
         return isinstance(e, dict) and "v" not in e and not version and set(e) == V0
     if len(raw) >= 16384 or set(e) != set(V1) or any(type(e[k]) is not t for k, t in V1.items()):
         return False
-    chain_id = e["data"].get("chain_id")
-    genesis_ok = n > 1 or isinstance(chain_id, str) and CHAIN_ID.fullmatch(chain_id)
+    genesis_ok = n > 1 or isinstance(c := e["data"].get("chain_id"), str) and CHAIN_ID.fullmatch(c)
     return e["v"] == 1 and subset(e) and (e["kind"] == "ledger.genesis") == (n == 1) and genesis_ok
 
 
 def verify(ledger_path, head_path=None):
-    lines = open(ledger_path, "rb").read().split(b"\n")
-    tail, version, hashes = lines.pop(), None, []
+    (*lines, tail), version, hashes = open(ledger_path, "rb").read().split(b"\n"), None, []
     for n, raw in enumerate(lines, 1):
+        d, marks = 0, re.sub(rb'"(?:[^"\\]|\\.)*"|[^][{}]', b"", raw, flags=re.S)  # brackets
+        deep = max((d := d + 2 * (c in b"[{") - 1 for c in marks), default=0) > 64  # unparsed
         try:
-            e = json.loads(raw.decode("utf-8"))
+            e = None if deep else json.loads(raw.decode("utf-8"))
         except ValueError:
             e = None
         version = (0 if isinstance(e, dict) and "v" not in e else 1) if version is None else version

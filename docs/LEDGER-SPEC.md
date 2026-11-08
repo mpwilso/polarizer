@@ -31,7 +31,8 @@ Canonical bytes are RFC 8785 (JSON Canonicalization Scheme). Every value in an e
 - objects whose keys are ASCII;
 - integers from -(2^53-1) to 2^53-1, with no floats, NaN or infinities;
 - strings that are valid Unicode with no lone surrogates. Any other character is allowed, including control characters, astral characters, U+2028 and U+FEFF;
-- `true`, `false`, `null` and arrays.
+- `true`, `false`, `null` and arrays;
+- arrays and objects nested at most 64 deep, counting the entry itself as level 1 and its `data` as level 2.
 
 On this subset, these two produce identical bytes:
 
@@ -46,6 +47,8 @@ Two rules exist because the encoders would otherwise disagree:
 - **The integer range.** The stdlib serializes 2^53 without complaint, so writers must check the range themselves.
 
 A line is at most 16 KiB, including the newline. Writers refuse larger entries, and cut free text from upstreams (such as error messages) to 1 KiB before it enters `data`.
+
+**The nesting limit** (added for 0.6.1, Nov 8, 2026 (UTC)). Until then this spec set no depth, and both verifiers exited 1 with a RecursionError on a valid v1 line nested 1,100 deep (950 still verified, on Python 3.13), Polarizer's in its subset check and the reference in its own. A verifier must give a verdict on every line, so the limit is part of the format: a line, v0 or v1, whose arrays and objects nest more than 64 deep is `invalid` (structure), with no seq. A verifier measures the depth from the line's bytes, counting `[` and `{` outside strings, before it parses the line, because Python's json parser itself raises RecursionError at 1,000 levels on Python 3.11 and somewhere between 8,000 and 20,000 on 3.12 and 3.13 (measured in WSL2 on Nov 8, 2026), and a v0 line has no length limit. 64 is far above what any entry needs (the deepest conformance fixture nests 6) and low enough that a recursive check stays well inside Python's default recursion limit. Writers refuse a deeper entry. `valid/nested_at_limit` (64 deep) and `broken/nested_too_deep` (65 deep, hashed and linked, so depth is its only fault) pin the boundary in both verifiers.
 
 ### Hash
 
@@ -103,7 +106,7 @@ New kinds can be added without changing the version, as long as their `data` sta
 | `intact` | 0 | Every rule holds. |
 | `tampered` | 1 | A line's `seq`, `prev` or `hash` doesn't match, or `ledger.head`'s hash differs from the entry at its seq. |
 | (usage error) | 2 | Bad arguments, an unreadable file, a config error, or no ledger. `serve` and `repair` also exit 2 when they refuse a `ledger_dir` inside a forbidden path (Part 2). |
-| `invalid` | 3 | An entry breaks a structure rule (an extra or missing key, a float, an integer out of range, a non-ASCII key, a lone surrogate, an oversize line, a missing or second genesis, a mix of v0 and v1), or `ledger.head` isn't a valid head record or names another chain. `serve` and `repair` also exit 3 when `ledger_dir` holds a v0 ledger. |
+| `invalid` | 3 | An entry breaks a structure rule (an extra or missing key, a float, an integer out of range, a non-ASCII key, a lone surrogate, an oversize line, nesting more than 64 deep, a missing or second genesis, a mix of v0 and v1), or `ledger.head` isn't a valid head record or names another chain. `serve` and `repair` also exit 3 when `ledger_dir` holds a v0 ledger. |
 | `not canonical` | 4 | The entry parses and hashes correctly, but its stored bytes aren't its canonical bytes (v1) or its line form (v0). |
 | `torn tail` | 5 | There are bytes after the last newline. |
 | `truncated` | 6 | `ledger.head` records a later seq than the ledger's last entry. |
@@ -113,7 +116,7 @@ New kinds can be added without changing the version, as long as their `data` sta
 | (anchor signature) | 10 | `verify --anchor` only: the checkpoint's signature does not match, or the key to check it is missing or not a key (EXPORT-SPEC.md, section 4). |
 
 **Precedence.** The first of these that applies decides the status. Both verifiers implement exactly this order.
-1. **Per-line problems**, in file order. Within one v1 line: structure (`invalid`), then `seq`, then `prev`, then `hash` (`tampered`), then canonical bytes (`not canonical`). Structure means the line is valid UTF-8 and JSON, is an object of the same version as the first line, is at most 16 KiB, has exactly the v1 keys with the right types, stays inside the subset, and is the one genesis at line 1. v0 lines have their own order (below).
+1. **Per-line problems**, in file order. Within one v1 line: structure (`invalid`), then `seq`, then `prev`, then `hash` (`tampered`), then canonical bytes (`not canonical`). Structure means the line nests at most 64 deep (checked first, before parsing), is valid UTF-8 and JSON, is an object of the same version as the first line, is at most 16 KiB, has exactly the v1 keys with the right types, stays inside the subset, and is the one genesis at line 1. v0 lines have their own order (below).
 2. **`ledger.head` problems**, checked only when every complete line passes: an invalid head file (`invalid`), then a head hash that doesn't match the entry at the head's seq (`tampered`), then a head seq past the last entry (`truncated`). A head behind the last entry is normal, because the head moves only on security-state entries. A missing `ledger.head` is not a problem for `verify` (PROXY-SPEC.md shows the extra line it prints).
 3. **A torn tail** (`torn tail`).
 4. Otherwise `intact`.
@@ -131,11 +134,11 @@ A line with no `v` key is a v0 entry, the format Parallax's ledger writes today.
 - **Genesis:** the first `prev` is 64 zeros.
 - **Line form:** each line is `json.dumps(entry, sort_keys=True)`.
 - **Check order** for each v0 line: structure (valid UTF-8 and JSON, an object, no `v` key, exactly the v0 keys), then `prev`, then `hash`, then line form. A wrong line form is `not canonical`. v0 has no seq, so v0 messages name only the line, and `conformance/expected.json` records the seq as `null`.
-- **No v1 rules:** the subset and the 16 KiB limit don't apply. Floats and non-ASCII keys are legal in v0.
+- **No v1 rules:** the subset and the 16 KiB limit don't apply. Floats and non-ASCII keys are legal in v0. The one exception is the nesting limit (Canonical bytes and the subset), which applies to every line so that a verifier always gives a verdict: a v0 line nested more than 64 deep is `invalid`. Parallax's writer has no such limit, but its conformance fixture nests at most 3 deep, and a line deep enough to stop Python's json parser could not be verified at all.
 - **No `ledger.head`:** a v0 ledger has no chain id, so any `ledger.head` beside one is an invalid head.
 - **Blank lines are `invalid`** (`not valid JSON`). This is a deliberate difference from Parallax's own `verify`, which skips blank lines. The frozen v0 check is byte for byte on line form: every line must be exactly `json.dumps(entry, sort_keys=True)`, and an empty line is the line form of no entry. Parallax's writer never writes one, so a blank line means the file was edited.
 
-v0 checks are frozen: they use Python's `json.dumps(entry, sort_keys=True)` as the line form and `json.dumps(body, sort_keys=True)` for the hash, exactly as Parallax's `ledger.py` does, and they never change. Every verifier keeps them forever, so a Parallax `Ledger-Head:` commit trailer (the full `hash` of the last entry at accept time) can always be checked against its chain. v0 hashes depend on how Python formats floats, which is one reason v1 bans floats.
+v0 checks are frozen: they use Python's `json.dumps(entry, sort_keys=True)` as the line form and `json.dumps(body, sort_keys=True)` for the hash, exactly as Parallax's `ledger.py` does, and they never change, apart from the nesting limit, the one rule added since (0.6.1), which changes the verdict only for a v0 line nested more than 64 deep. Every verifier keeps them forever, so a Parallax `Ledger-Head:` commit trailer (the full `hash` of the last entry at accept time) can always be checked against its chain. v0 hashes depend on how Python formats floats, which is one reason v1 bans floats.
 
 The v0 conformance fixture comes from running Parallax's own `ledger.py`, extracted at a fixed commit. That commit hash is recorded in `conformance/expected.json`, beside the fixture's expected status, not in the fixture file. Adding it to the chain file would change the very bytes the fixture exists to pin.
 

@@ -340,20 +340,22 @@ def main(argv=None) -> int:
 def verify(ledger_dir: Path, with_args: bool, anchor_arg: str | None = None) -> int:
     """Read-only: creates, deletes and modifies nothing. With `anchor_arg`, the checkpoint is
     read first (a bad one is a usage error, before any output), then checked after the chain
-    and side files (docs/EXPORT-SPEC.md, section 4)."""
+    and side files (docs/EXPORT-SPEC.md, section 4). From a git ref, the checkpoint checked
+    is the furthest of the ledger's chain, chosen once the chain id is known."""
     from polarizer import anchor
 
-    cp = None
+    candidates = None
     if anchor_arg is not None:
         try:
-            cp = anchor.from_argument(anchor_arg)
+            candidates = anchor.from_argument(anchor_arg)
         except anchor.AnchorError as e:
             return _err(str(e))
+    wanted = {cp.seq for cp in candidates or ()}
     found = {}
 
     def at_checkpoint(entry: dict) -> None:
-        if entry["seq"] == cp.seq:
-            found["hash"] = entry["hash"]
+        if entry["seq"] in wanted:
+            found[entry["seq"]] = entry["hash"]
 
     try:
         data, head = read_files(ledger_dir)
@@ -365,7 +367,7 @@ def verify(ledger_dir: Path, with_args: bool, anchor_arg: str | None = None) -> 
     if not data:
         print(f"no ledger at {ledger_dir}")
         return 2
-    result = verify_bytes(data, head, at_checkpoint if cp is not None else None)
+    result = verify_bytes(data, head, at_checkpoint if candidates is not None else None)
     for line in result.output_lines():
         print(line)
     code = result.exit_code
@@ -380,11 +382,12 @@ def verify(ledger_dir: Path, with_args: bool, anchor_arg: str | None = None) -> 
             print(line)
         if report.tampered:
             code = 8
-    if cp is None:
+    if candidates is None:
         return code
     if result.status != "intact" or result.version != 1:
         print("anchor: not checked; the ledger is not intact")
         return code
+    cp = anchor.choose(candidates, result.state.chain_id)
     print(anchor.first_line(cp))
     try:
         key = anchor.read_key(ledger_dir)
@@ -392,7 +395,7 @@ def verify(ledger_dir: Path, with_args: bool, anchor_arg: str | None = None) -> 
         outcome = anchor.key_outcome(problem)
     else:
         state = result.state
-        outcome = anchor.check(cp, key, state.chain_id, result.seq, found.get("hash"))
+        outcome = anchor.check(cp, key, state.chain_id, result.seq, found.get(cp.seq))
     print(outcome.line)
     return code or outcome.exit_code
 

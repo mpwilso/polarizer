@@ -26,7 +26,16 @@ LONG_QUOTE = 60  # characters of a long string quoted
 SHOWN = 10  # flag lines printed per definition
 FAMILIES = ("hidden instructions", "shadowing", "exfiltration", "characters", "length")
 
-_S = r"[^.!?\n]"  # a character that stays inside one sentence
+# A sentence ends at a newline, or at ".", "!" or "?" (with any closing quotes or brackets)
+# followed by whitespace or the end of the text, except the period of an abbreviation such
+# as "e.g." (docs/SCAN-SPEC.md, section 3). A period inside a file name, host or version
+# ("package.json", "v1.2") ends nothing. Every rule that keeps a match inside one sentence,
+# and shadow-other-tool's sentence, use this one definition.
+ABBREVIATIONS = ("e.g", "i.e", "cf", "vs", "viz", "approx", "incl", "esp")
+_END = (
+    r"[.!?]" + "".join(rf"(?<!\b{re.escape(a)}\.)" for a in ABBREVIATIONS) + r"[\"')\]]*(?=\s|$)|\n"
+)
+_S = rf"(?:(?!(?:{_END})).)"  # a character that stays inside one sentence
 
 
 def _chars(*ranges) -> frozenset:
@@ -45,15 +54,37 @@ class Rule:
     patterns: tuple[str, ...] = ()
     chars: frozenset = frozenset()
     special: str | None = None  # "names", "confusable" or "length"
+    # A character rule only: one character of the set directly after a character outside
+    # ASCII that is not in the set is how ordinary text uses it (an emoji's presentation
+    # selector), and is not flagged.
+    one_after_non_ascii: bool = False
 
 
 DIRECTIVE = (
     r"\b(?:must|always|never|instead|before|after|whenever|do not|don't|should|only|replace|"
     r"override|redirect|rather than)\b"
 )
+# Top-level domains exfil-send takes as a host after one label or more ("evil.tk").
 TLDS = (
     "com|net|org|io|dev|app|ai|co|info|biz|xyz|ru|cn|site|online|top|example|test|invalid|me|"
-    "us|uk|de"
+    "us|uk|de|edu|gov|mil|eu|fr|nl|be|ch|se|no|fi|dk|es|pt|it|ua|by|kz|tr|gr|ro|hu|cz|sk|bg|"
+    "jp|kr|kp|tw|hk|sg|vn|th|au|nz|ca|mx|br|ar|cl|ir|pk|ng|za|ke|tk|ly|gg|ga|gq|ws|su|pw|tv|"
+    "fm|gl|li|lt|lv|nu|vc|cx|to|club|click|cloud|shop|tech|fun|icu|vip|pro|mobi|win|bid|"
+    "website|digital|xxx|onion"
+)
+# Top-level domains that are also common file extensions ("run.sh", "README.md"): taken as a
+# host only after two labels or more ("drop.evil.sh"), so a file name is not a place.
+FILE_TLDS = "sh|md|py|pl|pm|rs|so|ps|in|am|cc|ml|cf"
+_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+# Where exfil-send says something goes: a URL, an e-mail address, an IPv4 or bracketed IPv6
+# literal, or a host name.
+TARGET = (
+    r"(?:https?://[^\s\"'<>]+"
+    r"|(?:mailto:)?[\w.+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}\b"
+    rf"|(?:{_OCTET}\.){{3}}{_OCTET}(?!\.?\d)"
+    r"|\[[0-9a-f.]*:[0-9a-f:.]*\]"
+    r"|(?:[a-z0-9-]+\.)+(?:" + TLDS + r")\b"
+    r"|(?:[a-z0-9-]+\.){2,}(?:" + FILE_TLDS + r")\b)"
 )
 
 RULES = (
@@ -99,7 +130,7 @@ RULES = (
         "hidden instructions",
         "a definition that names a place where secrets are kept",
         (
-            r"(?:^|(?<=[\s/\"'`(~]))\.(?:ssh|aws|gnupg|kube|docker|azure|netrc|npmrc|pypirc|"
+            r"(?:^|(?<=[\s/\\\"'`(~]))\.(?:ssh|aws|gnupg|kube|docker|azure|netrc|npmrc|pypirc|"
             r"git-credentials|bash_history|zsh_history|env)\b",
             r"\bid_(?:rsa|dsa|ecdsa|ed25519)\b",
             r"\bauthorized_keys\b",
@@ -146,8 +177,7 @@ RULES = (
         "a definition that tells the model to send something to a named place",
         (
             r"\b(?:send|post|upload|forward|transmit|submit|report|leak|deliver|e-?mail|mail|copy|"
-            r"exfiltrate)\w*\b" + _S + r"{0,80}?\b(?:to|at|via|into)\s+"
-            r"(?:https?://[^\s\"'<>]+|(?:[a-z0-9-]+\.)+(?:" + TLDS + r")\b)",
+            r"exfiltrate)\w*\b" + _S + r"{0,80}?\b(?:to|at|via|into)\s+" + TARGET,
         ),
     ),
     Rule(
@@ -203,6 +233,13 @@ RULES = (
         chars=_chars((0xE0000, 0xE007F)),
     ),
     Rule(
+        "variation-selectors",
+        "characters",
+        "a variation selector, which shows nothing and can carry a hidden message",
+        chars=_chars((0xFE00, 0xFE0F), (0xE0100, 0xE01EF)),
+        one_after_non_ascii=True,
+    ),
+    Rule(
         "control-characters",
         "characters",
         "a control character, which a terminal or page may act on instead of showing",
@@ -224,8 +261,16 @@ RULES = (
 
 _COMPILED = {rule.id: [re.compile(p, re.IGNORECASE) for p in rule.patterns] for rule in RULES}
 _DIRECTIVE = re.compile(DIRECTIVE, re.IGNORECASE)
-_SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n")
+_SENTENCE_END = re.compile(_END, re.IGNORECASE)
 _WORD = re.compile(r"[^\W\d_]+")
+# Folding (docs/SCAN-SPEC.md, section 2): pattern rules and shadow-other-tool read the text
+# with the characters of these rules removed, since they show nothing, each other character
+# through NFKC (fullwidth and mathematical letters become ASCII ones), and these look-alikes
+# of the apostrophe as "'". Character rules, confusable-letters and long-text read the text
+# as it is.
+FOLD_AWAY = ("zero-width", "bidi-control", "tag-characters", "variation-selectors")
+_AWAY = frozenset().union(*(rule.chars for rule in RULES if rule.id in FOLD_AWAY))
+APOSTROPHES = _chars(0x2018, 0x2019, 0x201B, 0x02BC, 0x2032, 0x00B4, 0xFF07)
 OTHER_SCRIPTS = {"CYRILLIC", "GREEK", "ARMENIAN", "CHEROKEE", "FULLWIDTH"}
 # Cyrillic and Greek letters that look like Latin ones (docs/SCAN-SPEC.md, section 3).
 LOOKALIKES = _chars(
@@ -286,6 +331,41 @@ def quote(text: str, limit: int = SPAN_LIMIT) -> str:
     return "".join(out)
 
 
+def fold(text: str) -> tuple[str, list[int] | None]:
+    """The text pattern rules read (FOLD_AWAY's characters removed, the rest through NFKC,
+    apostrophes made ASCII), and for each of its characters the index in `text` of the
+    character it came from; None when the text is ASCII and folds to itself."""
+    if text.isascii():
+        return text, None
+    out: list[str] = []
+    where: list[int] = []
+    for i, ch in enumerate(text):
+        if ch in _AWAY:
+            continue
+        piece = "'" if ch in APOSTROPHES else unicodedata.normalize("NFKC", ch)
+        out.append(piece)
+        where.extend([i] * len(piece))
+    return "".join(out), where
+
+
+def _unfold(found, where: list[int] | None, size: int):
+    """A match on the folded text, as bounds in the original text."""
+    if found is None or where is None:
+        return found
+    start, end, why = found
+    begin = where[start] if start < len(where) else size
+    stop = where[end - 1] + 1 if end > start else begin
+    return begin, stop, why
+
+
+def _styled(ch: str) -> bool:
+    """A fullwidth or mathematical letter: one that NFKC folds to an ASCII letter."""
+    if ch.isascii() or not unicodedata.name(ch, "").startswith(("FULLWIDTH LATIN", "MATH")):
+        return False
+    folded = unicodedata.normalize("NFKC", ch)
+    return folded.isascii() and folded.isalpha()
+
+
 def _sentence(text: str, start: int, end: int) -> tuple[int, int]:
     """The bounds of the sentence holding text[start:end]."""
     begin = 0
@@ -312,43 +392,52 @@ def _names_pattern(names) -> re.Pattern | None:
     return re.compile(r"(?<![\w.-])(?:" + alternatives + r")(?![\w-])", re.IGNORECASE)
 
 
-def _match(rule: Rule, text: str, names: re.Pattern | None):
-    """(start, end, why) of the rule's first match in text, or None."""
+def _match(rule: Rule, text: str, names: re.Pattern | None, folded: tuple):
+    """(start, end, why) of the rule's first match in text, or None. `folded` is fold(text):
+    pattern rules and shadow-other-tool match the folded text, and their bounds are mapped
+    back to the original."""
     if rule.special == "length":
         if len(text) > LONG_TEXT:
             return 0, LONG_QUOTE, f"{rule.why}; {len(text)} characters"
-        return None
-    if rule.special == "names":
-        if names is None:
-            return None
-        for found in names.finditer(text):
-            begin, end = _sentence(text, found.start(), found.end())
-            if _DIRECTIVE.search(text, begin, end):
-                return begin, end, rule.why
         return None
     if rule.special == "confusable":
         letters = [ch for ch in text if ch.isalpha()]
         latin = sum(1 for ch in letters if _script(ch) == "LATIN")
         mostly_latin = letters and latin * 2 >= len(letters)
         for word in _WORD.finditer(text):
-            scripts = {_script(ch) for ch in word.group(0)}
-            mixed = "LATIN" in scripts and scripts & OTHER_SCRIPTS
             letters_of = word.group(0)
+            scripts = {_script(ch) for ch in letters_of}
+            mixed = "LATIN" in scripts and scripts & OTHER_SCRIPTS
             disguised = mostly_latin and len(letters_of) >= 2 and set(letters_of) <= LOOKALIKES
-            if mixed or disguised:
+            styled = len(letters_of) >= 2 and any(_styled(ch) for ch in letters_of)
+            if mixed or disguised or styled:
                 return max(0, word.start() - CONTEXT), word.end() + CONTEXT, rule.why
         return None
     if rule.chars:
         for i, ch in enumerate(text):
-            if ch in rule.chars:
-                return max(0, i - CONTEXT), i + 1 + CONTEXT, rule.why
+            if ch not in rule.chars:
+                continue
+            before = text[i - 1] if i else ""
+            if rule.one_after_non_ascii and before and not before.isascii():
+                if before not in rule.chars:
+                    continue
+            return max(0, i - CONTEXT), i + 1 + CONTEXT, rule.why
+        return None
+    seen, where = folded
+    if rule.special == "names":
+        if names is None:
+            return None
+        for found in names.finditer(seen):
+            begin, end = _sentence(seen, found.start(), found.end())
+            if _DIRECTIVE.search(seen, begin, end):
+                return _unfold((begin, end, rule.why), where, len(text))
         return None
     best = None
     for pattern in _COMPILED[rule.id]:
-        found = pattern.search(text)
+        found = pattern.search(seen)
         if found and (best is None or found.start() < best[0]):
             best = (found.start(), found.end(), rule.why)
-    return best
+    return _unfold(best, where, len(text))
 
 
 def scan(copy: dict, names=()) -> list[Flag]:
@@ -358,8 +447,9 @@ def scan(copy: dict, names=()) -> list[Flag]:
     flags = []
     for field, text in strings(copy):
         shown_field = printable(field)[:FIELD_LIMIT]
+        folded = fold(text)
         for rule in RULES:
-            found = _match(rule, text, pattern)
+            found = _match(rule, text, pattern, folded)
             if found is None:
                 continue
             start, end, why = found

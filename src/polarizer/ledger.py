@@ -10,7 +10,16 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from polarizer.canon import MAX_INT, MAX_LINE, ZERO_HASH, canonical, entry_hash, subset_problem
+from polarizer.canon import (
+    MAX_DEPTH,
+    MAX_INT,
+    MAX_LINE,
+    ZERO_HASH,
+    canonical,
+    entry_hash,
+    nesting,
+    subset_problem,
+)
 from polarizer.lock import LedgerLock
 
 LEDGER = "ledger.jsonl"
@@ -106,6 +115,8 @@ class ChainState:
     def check_line(self, raw: bytes) -> Problem | None:
         """Check the next complete line (without its newline). On success, adopt it."""
         n = self.lines + 1
+        if nesting(raw) > MAX_DEPTH:  # before parsing, which recursion could not survive
+            return Problem("invalid", "structure", f"nested more than {MAX_DEPTH} deep", None)
         try:
             entry = json.loads(raw.decode("utf-8"))
         except UnicodeDecodeError:

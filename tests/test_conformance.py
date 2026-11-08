@@ -78,3 +78,54 @@ def test_blank_line_in_v0_is_invalid_in_both_verifiers(tmp_path):
     result = ledger.verify_bytes(data, None)
     assert (result.status, result.line, result.seq) == ("invalid", 3, None)
     assert result.message == "invalid: line 3: not valid JSON"
+
+
+DEEP = {"status": "invalid", "line": 2, "seq": None, "check": "structure"}
+
+
+def deep_line(depth: int, v0: bool = False) -> bytes:
+    """An entry whose arrays and objects nest `depth` deep: the entry, its data, then
+    arrays. Its hash is not checked, since the line is refused before it is parsed."""
+    arrays = depth - 2
+    keys = b'"actor":"a","id":"x","kind":"k","prev":"0","reason":"r","ts":"t"' if v0 else (
+        b'"kind":"x.deep","prev":"0","seq":1,"ts":"t","v":1'
+    )  # fmt: skip
+    return b'{"data":{"x":' + b"[" * arrays + b"]" * arrays + b'},"hash":"0",' + keys + b"}\n"
+
+
+@pytest.mark.parametrize("depth", [65, 1100, 8000])
+def test_deep_nesting_gets_a_verdict_v1(tmp_path, depth):
+    """A v1 line nested past 64 is invalid in both verifiers, however deep, rather than a
+    RecursionError (the review of Nov 8, 2026, finding 9; docs/LEDGER-SPEC.md, Canonical
+    bytes and the subset)."""
+    from conftest import CONFORMANCE
+
+    data = (CONFORMANCE / "valid" / "minimal.jsonl").read_bytes() + deep_line(depth)
+    path = tmp_path / "deep.jsonl"
+    path.write_bytes(data)
+    assert reference_verify.verify(path) == DEEP
+    result = ledger.verify_bytes(data, None)
+    assert (result.status, result.line, result.seq, result.check) == tuple(DEEP.values())
+    assert result.message == "invalid: line 2 (seq ?): nested more than 64 deep"
+
+
+@pytest.mark.parametrize("depth", [65, 100000])
+def test_deep_nesting_gets_a_verdict_v0(tmp_path, depth):
+    """v0 lines have no length limit, so they can nest deeper than json can parse: both
+    verifiers refuse one past 64 before parsing it."""
+    from conftest import CONFORMANCE
+
+    first = (CONFORMANCE / "valid" / "v0-parallax.jsonl").read_bytes().split(b"\n")[0]
+    data = first + b"\n" + deep_line(depth, v0=True)
+    path = tmp_path / "deep.jsonl"
+    path.write_bytes(data)
+    assert reference_verify.verify(path) == DEEP
+    result = ledger.verify_bytes(data, None)
+    assert (result.status, result.line, result.seq, result.check) == tuple(DEEP.values())
+
+
+def test_brackets_inside_strings_do_not_nest():
+    from polarizer import canon
+
+    line = b'{"a":"' + b"[" * 100 + b'","b":[{"c":"]]]\\"[["}]}'
+    assert canon.nesting(line) == 3

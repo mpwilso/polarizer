@@ -3,8 +3,9 @@
 A checkpoint names one position of one chain, (chain id, size, head hash), signed with
 HMAC-SHA256 under the key in <ledger_dir>/checkpoint.key and written as a commit trailer,
 `Polarizer-Checkpoint: <chain>:<size>:<head>:<sig>`. `polarizer checkpoint` prints one and never
-runs git; `polarizer verify --anchor` reads one, from the argument or from the newest commit
-that carries one, checks its signature, and says whether the ledger still extends it.
+runs git; `polarizer verify --anchor` reads one from the argument, or takes the furthest
+anchored position among the trailers of the commits from a git ref, checks its signature, and
+says whether the ledger still extends it.
 
 Reading a key opens it read-only. Only create_key writes, exclusively, with mode 0600.
 """
@@ -34,6 +35,7 @@ _KEY = re.compile(rb"[0-9a-f]{64}\n")
 _LINE = re.compile(rf"^{TRAILER}:[ \t]*(\S+)[ \t\r]*$", re.M)
 EXPECTED = f"expected {TRAILER}: <chain>:<size>:<head>:<sig>"
 _BINARY = getattr(os, "O_BINARY", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 class AnchorError(Exception):
@@ -98,24 +100,38 @@ def looks_like_value(text: str) -> bool:
     return text.startswith(f"{TRAILER}:") or bool(re.fullmatch(r"[0-9a-f]{32}:.*", text))
 
 
-def from_argument(text: str, cwd: Path | None = None) -> Checkpoint:
-    """--anchor's checkpoint: the trailer or value given, or the newest commit's from a git
-    ref. Raises AnchorError."""
+def from_argument(text: str, cwd: Path | None = None) -> list[Checkpoint]:
+    """--anchor's candidates: the one trailer or value given, or every well-formed trailer in
+    the commits from a git ref, newest first. choose() picks the one to check. Raises
+    AnchorError."""
     if looks_like_value(text):
         found = parse_argument(text)
         if found is None:
             raise AnchorError(f"polarizer: --anchor: not a checkpoint; {EXPECTED}")
-        return found
+        return [found]
     return from_git(text, cwd)
 
 
-def from_git(ref: str, cwd: Path | None = None) -> Checkpoint:
-    """The checkpoint in the newest of the MAX_COMMITS commits from `ref` whose message has a
-    well-formed trailer line; within one message, the last such line. Raises AnchorError."""
+def choose(candidates: list[Checkpoint], chain_id: str) -> Checkpoint:
+    """The furthest anchored position (docs/EXPORT-SPEC.md, section 4): of the candidates of
+    the ledger's own chain, the one with the largest size, or of all of them when none is of
+    that chain; the newest on a tie. Candidates are newest first."""
+    own = [cp for cp in candidates if cp.chain_id == chain_id] or candidates
+    return max(own, key=lambda cp: cp.size)  # max keeps the first of equal sizes
+
+
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def from_git(ref: str, cwd: Path | None = None) -> list[Checkpoint]:
+    """Every well-formed trailer line in the MAX_COMMITS commits from `ref`, newest first (and
+    within one message, the last line first), each with its commit. Raises AnchorError."""
     shown = printable(ref)
     if not ref or ref.startswith("-") or any(ord(c) < 0x20 or ord(c) == 0x7F for c in ref):
         raise AnchorError(f"polarizer: --anchor {shown}: not a git ref Polarizer will pass to git")
-    argv = [GIT, "log", f"--max-count={MAX_COMMITS}", "--format=%H%x00%B%x00", ref, "--"]
+    # log.showSignature=true would print a signature check before each commit's hash.
+    argv = [GIT, "-c", "log.showSignature=false", "log", f"--max-count={MAX_COMMITS}"]
+    argv += ["--format=%H%x00%B%x00", ref, "--"]
     try:
         done = subprocess.run(argv, cwd=cwd, capture_output=True, timeout=GIT_TIMEOUT)
     except OSError as e:
@@ -132,14 +148,18 @@ def from_git(ref: str, cwd: Path | None = None) -> Checkpoint:
         raise AnchorError(f"polarizer: --anchor {shown}: git log failed: {why}")
     fields = done.stdout.decode("utf-8", "replace").split("\0")
     commits = 0
+    found = []
     for i in range(0, len(fields) - 1, 2):
         commit, message = fields[i].strip(), fields[i + 1]
+        if not _COMMIT.fullmatch(commit):
+            why = f"not a commit hash: {safe(commit)[:80]}"
+            raise AnchorError(f"polarizer: --anchor {shown}: git log failed: {why}")
         commits += 1
-        found = None
-        for match in _LINE.finditer(message):
-            found = parse_value(match.group(1)) or found
-        if found is not None:
-            return Checkpoint(found.chain_id, found.size, found.head, found.sig, commit)
+        values = [parse_value(match.group(1)) for match in _LINE.finditer(message)]
+        for cp in reversed([v for v in values if v is not None]):
+            found.append(Checkpoint(cp.chain_id, cp.size, cp.head, cp.sig, commit))
+    if found:
+        return found
     noun = "commit" if commits == 1 else "commits"
     raise AnchorError(
         f"polarizer: --anchor {shown}: no {TRAILER} trailer in the {commits} {noun} from {shown}"
@@ -154,18 +174,25 @@ def key_path(ledger_dir: Path) -> Path:
 
 
 def read_key(ledger_dir: Path, check_mode: bool = False) -> bytes:
-    """The key's 32 bytes. Opens the file read-only. With `check_mode` (checkpoint), a key
-    its group or others can read or write is refused on POSIX. Raises KeyProblem."""
+    """The key's 32 bytes. Opens the file read-only, without blocking, so a FIFO in its place
+    is refused rather than waited on; anything but a regular file, or a file that can't be
+    read, is not a key. With `check_mode` (checkpoint), a key its group or others can read
+    or write is refused on POSIX. Raises KeyProblem."""
     path = key_path(ledger_dir)
     try:
-        fd = os.open(path, os.O_RDONLY | _BINARY)
+        fd = os.open(path, os.O_RDONLY | _BINARY | _NONBLOCK)
     except FileNotFoundError:
         raise KeyProblem("missing", path) from None
     except OSError:
         raise KeyProblem("bad", path) from None
     try:
-        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise KeyProblem("bad", path)
+        mode = stat.S_IMODE(info.st_mode)
         raw = os.read(fd, 128)
+    except OSError:
+        raise KeyProblem("bad", path) from None
     finally:
         os.close(fd)
     if not _KEY.fullmatch(raw):

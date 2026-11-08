@@ -258,19 +258,20 @@ polarizer verify (--config <absolute path> | --ledger-dir <absolute path>) [--ar
 **The argument** is read in this order:
 1. a line starting `Polarizer-Checkpoint:`, whose value follows after any spaces;
 2. a bare value `<chain>:<size>:<head>:<sig>`;
-3. otherwise a git ref, in the current directory's repository. It must not start with `-`, and must hold no control character. Polarizer runs `git log --max-count=10000 --format=%H%x00%B%x00 <ref> --` and takes the newest commit whose message has a line `Polarizer-Checkpoint: <value>`; within one message, the last such line with a well-formed value. That is the last anchored position reachable from the ref.
+3. otherwise a git ref, in the current directory's repository. It must not start with `-`, and must hold no control character. Polarizer runs `git -c log.showSignature=false log --max-count=10000 --format=%H%x00%B%x00 <ref> --` (the `-c` keeps a `log.showSignature` setting from printing a signature check before each hash) and reads every line `Polarizer-Checkpoint: <value>` with a well-formed value in those commits. Each commit field must be 40 or 64 lowercase hex characters, or git's output is refused. Of those checkpoints it checks **the furthest anchored position**: once the chain is verified, the one with the largest size among those of the ledger's own chain id, or among all of them when none is of that chain (which then reports another chain); the newest commit's on a tie, and within one message the last line's. So a newer checkpoint at a smaller size does not hide a rewind past an older, larger one.
 
-A value that is not well formed, a ref git can't read, git missing, or no trailer in those commits is a usage error, one line on stderr, exit 2:
+A value that is not well formed, a ref git can't read, git missing, git output that isn't a commit hash, or no trailer in those commits is a usage error, one line on stderr, exit 2:
 
 ```
 polarizer: --anchor: not a checkpoint; expected Polarizer-Checkpoint: <chain>:<size>:<head>:<sig>
 polarizer: --anchor <ref>: not a git ref Polarizer will pass to git
 polarizer: --anchor <ref>: git is not available: <the operating system's message>
 polarizer: --anchor <ref>: git log failed: <git's first line, through safe()>
+polarizer: --anchor <ref>: git log failed: not a commit hash: <the field, through safe(), cut to 80>
 polarizer: --anchor <ref>: no Polarizer-Checkpoint trailer in the <n> commits from <ref>
 ```
 
-**The check** runs after the chain's lines (and the `--args` lines), only when the chain is `intact`. It reads `checkpoint.key` read-only; `verify` still writes nothing. Its first line is always:
+**The check** runs after the chain's lines (and the `--args` lines), only when the chain is `intact`. It reads `checkpoint.key` read-only and without blocking; `verify` still writes nothing. Anything in the key's place that is not a regular file (a directory, a FIFO), or that can't be read, is a bad key, not a wait or a crash. Its first line is always:
 
     anchor: checkpoint of chain <chain> at seq <size-1>, head <head>
 
@@ -292,7 +293,7 @@ A rewound ledger whose `ledger.head` was rewound with it, or deleted, verifies `
 
 ### Conformance
 
-`conformance/reference_anchor.py` is a second, standard-library-only anchor check (hashlib, hmac, json, re, sys), as `reference_verify.py` is for the chain. `tools/make_fixtures.py` writes the anchor fixtures under `conformance/anchors/`, signing with the reference's `sign`, never Polarizer's, and their expected results in `conformance/expected.json` under `anchors`. Both checks agree on every case: extends, at the head, rewound, rewritten, another chain, a flipped signature and another key. The anchor ledgers are intact chains, listed under `fixtures` too, so both verifiers check them as well.
+`conformance/reference_anchor.py` is a second, standard-library-only anchor check (hashlib, hmac, json, re, sys), as `reference_verify.py` is for the chain. `tools/make_fixtures.py` writes the anchor fixtures under `conformance/anchors/`, signing with the reference's `sign`, never Polarizer's, and their expected results in `conformance/expected.json` under `anchors`. Both checks agree on every case: extends, at the head, rewound, rewritten, another chain, a flipped signature and another key; and, for several trailers newest first as a git ref gives them, the furthest position (sizes 5, 13, 5), a rewind behind a newer and smaller checkpoint, another chain's larger checkpoint passed over, and only another chain's checkpoints. `reference_anchor.py` takes the trailers newest first and picks the furthest position itself. The anchor ledgers are intact chains, listed under `fixtures` too, so both verifiers check them as well.
 
 ## 5. Exit codes
 
@@ -304,7 +305,7 @@ A rewound ledger whose `ledger.head` was rewound with it, or deleted, verifies `
 |---|---|---|
 | `tests/test_telemetry.py` | With an in-memory exporter: a forwarded call's span has every attribute of section 2 with the ledger's own seq and hash; a held then allowed call, a held then denied call, a deny-tier refusal and an unknown name each get theirs; no span holds an argument value, a result, a reason or an upstream error message; the SDK's middleware is replaced and the client's `traceparent` still parents the span and reaches the upstream; the switch's every combination of config and environment; the console exporter writes to stderr only; the OTLP exporter posts to a local stub; a missing extra gives the warning and serve runs. | Default |
 | `tests/test_export.py` | The golden files `export_ocsf_<fixture>.jsonl` for four conformance fixtures, byte for byte; the mapping table here equals the code's; the fixtures use every key of every exported kind; each mapped value lands where the table says and no unexported value appears anywhere; every attribute name is one of OCSF 1.9.0's for the class and its objects; each refusal line and exit code; `export` writes nothing. | Default |
-| `tests/test_anchor.py` | `checkpoint`'s trailer, its key's creation, mode and refusals; `verify --anchor` with a trailer, a bare value and a git ref (a temporary repository whose commits carry trailers), each result line and exit code, golden files `verify_anchor_<case>.txt`; both anchor checks agree on every fixture; `verify --anchor` writes nothing. | Default |
+| `tests/test_anchor.py` | `checkpoint`'s trailer, its key's creation, mode and refusals; `verify --anchor` with a trailer, a bare value and a git ref (a temporary repository whose commits carry trailers), each result line and exit code, golden files `verify_anchor_<case>.txt`; both anchor checks agree on every fixture; `verify --anchor` writes nothing. (0.6.1) From a git ref, the furthest position is checked (sizes 5, 13, 5), a newer smaller checkpoint doesn't hide a rewind, another chain's checkpoint is passed over; signed commits under `log.showSignature=true` (POSIX, with ssh-keygen) and a commit field that isn't a hash; a directory as the key, and a FIFO (POSIX, in a process with a time limit). | Default |
 
 ## 7. Deviations
 
@@ -327,8 +328,15 @@ Each is a guess this spec made where the brief left a choice, recorded for the o
 15. **`src_endpoint` is a constant** `{"svc_name": "mcp"}`, since the class requires it and a stdio client has no address.
 16. **`time` is 0 when `ts` doesn't parse,** since the class requires it and the ledger does not check `ts`; `metadata.original_time` keeps the text.
 17. **HMAC with a key under the ledger directory,** not a public-key signature, per the brief: no new crypto library, and the commit, not the signature, is what an attacker on the machine can't rewrite.
-18. **`verify --anchor <ref>` walks back** from the ref to the newest commit carrying a trailer, at most 10,000 commits, so `--anchor HEAD` reports the last anchored position even when the latest commit has none.
+18. **`verify --anchor <ref>` walks back** from the ref over at most 10,000 commits, so `--anchor HEAD` reports an anchored position even when the latest commit has none. (Changed for 0.6.1, below: it no longer stops at the newest commit carrying a trailer.)
 19. **Two new exit codes,** 9 and 10, so a script can tell a ledger that moved from a checkpoint it can't trust.
 20. **The anchor is not checked on a ledger that isn't intact,** as `--args` isn't, because the chain's own status already says more.
 21. **`checkpoint` signs the ledger's last entry,** not `ledger.head`'s, which lags behind entries that aren't security state.
 22. **The checkpoint key is created by `checkpoint`,** never by `serve`, so a ledger that is never anchored has no key.
+
+The review fixes of Nov 8, 2026 (UTC), for 0.6.1:
+
+23. **The furthest anchored position, per chain,** not the newest trailer. The review showed that commits anchoring sizes 5, 50 and 5 checked the last 5, so a ledger rewound to 5 and anchored again passed. The largest size wins because a chain only grows: every earlier checkpoint of an intact chain is a prefix of the furthest one. It is the largest of the ledger's own chain, so one repository can anchor several ledgers; only when none is of that chain is the largest of all checked, to report another chain. A forged trailer with a larger size and a bad signature is checked and reported (exit 10) rather than skipped, since skipping it would hide an attempt.
+24. **The chosen checkpoint is printed after the chain's lines,** as before, but chosen only then, since it depends on the chain id. A malformed argument is still a usage error before any output.
+25. **`log.showSignature` is turned off for the one `git log`,** with `-c` rather than `--no-show-signature`, which older git lacks, and each commit field is checked as a hash, so other settings that add output are refused rather than misread.
+26. **The key is opened with `O_NONBLOCK` and must be a regular file,** and any read error is a bad key: a directory gave a traceback on Linux, and a FIFO made `verify` wait forever.

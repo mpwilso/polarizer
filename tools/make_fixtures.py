@@ -428,6 +428,23 @@ def replace_line(data, index, raw):
     return b"\n".join(lines) + b"\n"
 
 
+NEST_LIMIT = 64  # docs/LEDGER-SPEC.md, Canonical bytes and the subset: the entry is level 1
+
+
+def nested(levels):
+    """An array `levels` deep: [[...[]...]]."""
+    value = []
+    for _ in range(levels - 1):
+        value = [value]
+    return value
+
+
+def nest_too_deep(entries, index):
+    """data.deep, an array that takes the line one level past the limit (the entry is level 1
+    and its data level 2), rehashed and re-linked, so the depth is the line's only fault."""
+    return change_data(entries, index, {"deep": nested(NEST_LIMIT - 1)})
+
+
 def garbage_line(data, index):
     return replace_line(data, index, b'{"v":1,"seq":')
 
@@ -612,6 +629,7 @@ def fixtures(v0_data):
     t = taint_chain()
     sc = scan_chain()
     m = build([])
+    deep = build([("note.nested", {"deep": nested(NEST_LIMIT - 2)})])  # exactly the limit
     v0_lines = len(lines_of(v0_data))
     rebuilt = s[10]  # ledger.head_rebuilt, a security entry behind the last one
     torn = tear_last_line(text(s))
@@ -620,6 +638,7 @@ def fixtures(v0_data):
         "valid/minimal": (text(m), head_of(m[0]), expect("intact", 1, 0)),
         "valid/session": (text(s), head_of(rebuilt), expect("intact", n, n - 1)),
         "valid/unicode": (text(u), head_of(u[0]), expect("intact", 3, 2)),
+        "valid/nested_at_limit": (text(deep), None, expect("intact", 2, 1)),
         "valid/head_at_last": (text(s), head_of(s[-1]), expect("intact", n, n - 1)),
         "valid/no_head": (text(s), None, expect("intact", n, n - 1)),
         "valid/pins": (text(p), head_of(p[10]), expect("intact", len(p), len(p) - 1)),
@@ -712,6 +731,12 @@ def fixtures(v0_data):
         ),
         "broken/bad_chain_id": (bad_chain_id(s), None, expect("invalid", 1, 0, "structure")),
         "broken/oversize_line": (oversize_line(s, 3), None, expect("invalid", 4, 3, "structure")),
+        # Nesting is checked on the raw line, before it is parsed, so no seq is read.
+        "broken/nested_too_deep": (
+            nest_too_deep(s, 6),
+            None,
+            expect("invalid", 7, None, "structure"),
+        ),
         "broken/garbage_line": (
             garbage_line(text(s), 4),
             None,
@@ -861,23 +886,38 @@ def anchor_ledgers(s):
     return {"rewound": s[:6], "rewritten": rewritten, "other_chain": other}
 
 
-def trailer(entries, seq, key=ANCHOR_KEY, flip=False):
+def trailer(entries, seq, key=ANCHOR_KEY, flip=False, chain=CHAIN):
     size, head = seq + 1, entries[seq]["hash"]
-    sig = reference_anchor.sign(key, CHAIN, size, head)
+    sig = reference_anchor.sign(key, chain, size, head)
     if flip:
         sig = sig[:-1] + ("0" if sig[-1] != "0" else "1")
-    return f"Polarizer-Checkpoint: {CHAIN}:{size}:{head}:{sig}"
+    return f"Polarizer-Checkpoint: {chain}:{size}:{head}:{sig}"
 
 
 def anchors():
-    """name -> the ledger fixture, the trailer, and the result both anchor checks must give."""
+    """name -> the ledger fixture, the trailer (or the trailers, newest first, as a git ref's
+    commits give them), and the result both anchor checks must give."""
     s = session_chain()
+    other = anchor_ledgers(s)["other_chain"]
     at8 = trailer(s, 8)
 
     def case(ledger, trailer_line, result, seq=8):
         return {"ledger": ledger, "trailer": trailer_line, "result": result, "seq": seq}
 
+    def several(ledger, trailers, result, seq):
+        return {"ledger": ledger, "trailers": trailers, "result": result, "seq": seq}
+
+    at4, at12 = trailer(s, 4), trailer(s, len(s) - 1)
+    other4, other12 = trailer(other, 4, chain=OTHER_CHAIN), trailer(other, 12, chain=OTHER_CHAIN)
     return {
+        # The furthest anchored position is checked, not the newest (sizes 5, 13, 5).
+        "furthest": several("valid/session", [at4, at12, at4], "extends", 12),
+        # A newer, smaller checkpoint does not hide a rewind past an older, larger one.
+        "furthest_rewound": several("anchors/rewound", [at4, at8], "rewound", 8),
+        # Another chain's larger checkpoint is passed over for the ledger's own chain's.
+        "furthest_own_chain": several("valid/session", [other12, at8], "extends", 8),
+        # With none of the ledger's chain, the largest of all is checked.
+        "furthest_no_own_chain": several("valid/session", [other4, other12], "other chain", 12),
         "extends": case("valid/session", at8, "extends"),
         "at_head": case("valid/session", trailer(s, len(s) - 1), "extends", len(s) - 1),
         "rewound": case("anchors/rewound", at8, "rewound"),

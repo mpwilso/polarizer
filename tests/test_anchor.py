@@ -56,13 +56,20 @@ def hash_at(path, seq):
     return result, found.get("hash")
 
 
+def trailers_of(case: dict) -> list[str]:
+    """A case's trailers, newest first: one, or several as a git ref's commits give them."""
+    return case.get("trailers") or [case["trailer"]]
+
+
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_both_anchor_checks_agree(case):
     want = CASES[case]
     path, _ = fixture_paths(want["ledger"])
-    got_ref = reference_anchor.check(path, KEY, want["trailer"])
-    cp = anchor.parse_argument(want["trailer"])
-    assert cp is not None
+    got_ref = reference_anchor.check(path, KEY, *trailers_of(want))
+    candidates = [anchor.parse_argument(t) for t in trailers_of(want)]
+    assert None not in candidates
+    chain_id = ledger.verify_bytes(path.read_bytes(), None).state.chain_id
+    cp = anchor.choose(candidates, chain_id)
     result, at = hash_at(path, cp.seq)
     key = bytes.fromhex(KEY.read_text(encoding="ascii").strip())
     outcome = anchor.check(cp, key, result.state.chain_id, result.seq, at)
@@ -238,16 +245,152 @@ def test_anchor_from_a_git_ref(tmp_path, capsys, monkeypatch):
             "No trailer here",
         ],
     )
-    anchored = git(repo, "rev-parse", "HEAD~1")
+    # The older commit anchors seq 12, the newer seq 8: the furthest position is checked.
+    anchored = git(repo, "rev-parse", "HEAD~2")
     monkeypatch.chdir(repo)
     code, out, err = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD")
     assert (code, err) == (0, "")
     lines = out.splitlines()
     assert lines[-2].endswith(f", from commit {anchored}")
     assert lines[-2].startswith("anchor: checkpoint of chain ")
-    assert lines[-1] == "anchor: intact: the ledger extends the checkpoint by 4 entries"
+    assert lines[-1] == "anchor: intact: the ledger extends the checkpoint by 0 entries"
     code, out, _ = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD~2")
     assert code == 0 and out.splitlines()[-1].endswith("by 0 entries")
+
+
+def checkpoint_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith("anchor: ")]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_git_ref_takes_the_furthest_position(tmp_path, capsys, monkeypatch):
+    """Commits anchoring sizes 5, 13 and 5, newest last: the check is at seq 12, not at the
+    newest commit's seq 4 (the review of Nov 8, 2026, finding 6)."""
+    directory = with_key("valid/session", tmp_path / "ledger")
+    at4, at12, _ = CASES["furthest"]["trailers"]
+    repo = make_repo(tmp_path, [f"One\n\n{at4}", f"Two\n\n{at12}", f"Three\n\n{at4}"])
+    anchored = git(repo, "rev-parse", "HEAD~1")
+    monkeypatch.chdir(repo)
+    code, out, err = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD")
+    assert (code, err) == (0, "")
+    first, last = checkpoint_lines(out)
+    assert " at seq 12, " in first and first.endswith(f", from commit {anchored}")
+    assert last == "anchor: intact: the ledger extends the checkpoint by 0 entries"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_newer_smaller_checkpoint_does_not_hide_a_rewind(tmp_path, capsys, monkeypatch):
+    """A ledger cut back to 6 entries, then anchored again at size 5, is still rewound against
+    the older anchor at size 9."""
+    directory = with_key("anchors/rewound", tmp_path / "ledger")
+    at4, at8 = CASES["furthest_rewound"]["trailers"]
+    repo = make_repo(tmp_path, [f"Anchor\n\n{at8}", f"Anchor again\n\n{at4}"])
+    monkeypatch.chdir(repo)
+    code, out, err = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD")
+    assert (code, err) == (9, "")
+    assert checkpoint_lines(out)[-1] == (
+        "anchor: rewound: the ledger ends at seq 5, before the anchored seq 8"
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_another_chains_checkpoint_is_passed_over(tmp_path, capsys, monkeypatch):
+    directory = with_key("valid/session", tmp_path / "ledger")
+    other12, at8 = CASES["furthest_own_chain"]["trailers"]
+    repo = make_repo(tmp_path, [f"Mine\n\n{at8}", f"Another ledger\n\n{other12}"])
+    monkeypatch.chdir(repo)
+    code, out, _ = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD")
+    assert code == 0
+    assert checkpoint_lines(out)[-1].endswith("extends the checkpoint by 4 entries")
+
+
+@pytest.mark.skipif(sys.platform == "win32" or shutil.which("git") is None, reason="POSIX git")
+@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="needs ssh-keygen to sign")
+def test_signed_commits_with_show_signature(tmp_path, capsys, monkeypatch):
+    """log.showSignature=true prints a signature check before each signed commit's hash; the
+    commit named is still the 40 hex characters (finding 7)."""
+    directory = with_key("valid/session", tmp_path / "ledger")
+    repo = make_repo(tmp_path, [])
+    key = tmp_path / "signing"
+    made = subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        capture_output=True, timeout=60,
+    )  # fmt: skip
+    if made.returncode != 0:
+        pytest.skip("ssh-keygen could not make a key")
+    git(repo, "config", "log.showSignature", "true")
+    signed = subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "-c", "gpg.format=ssh", "-c", f"user.signingkey={key}.pub", "commit", "-q", "-S",
+         "--allow-empty", "-m", f"Signed\n\n{CASES['extends']['trailer']}"],
+        cwd=repo, capture_output=True, timeout=60,
+    )  # fmt: skip
+    if signed.returncode != 0:
+        pytest.skip("this git cannot sign with ssh")
+    commit = git(repo, "rev-parse", "HEAD")
+    monkeypatch.chdir(repo)
+    code, out, err = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", "HEAD")
+    assert (code, err) == (0, "")
+    assert checkpoint_lines(out)[0].endswith(f", from commit {commit}")
+
+
+def test_git_output_that_is_not_a_hash_is_refused(monkeypatch):
+    """git is run with log.showSignature off, and a commit field that is not a hash is git
+    output Polarizer can't read: a usage error, not a commit line."""
+    seen = []
+    value = CASES["extends"]["trailer"]
+
+    def fake_run(argv, **kwargs):
+        seen.append(argv)
+        out = f"No signature\n{'a' * 40}\0Msg\n\n{value}\n\0\n".encode()
+        return subprocess.CompletedProcess(argv, 0, out, b"")
+
+    monkeypatch.setattr(anchor.subprocess, "run", fake_run)
+    with pytest.raises(anchor.AnchorError) as raised:
+        anchor.from_git("HEAD")
+    assert str(raised.value) == (
+        "polarizer: --anchor HEAD: git log failed: not a commit hash: No signature " + "a" * 40
+    )
+    assert seen[0][:4] == [anchor.GIT, "-c", "log.showSignature=false", "log"]
+
+
+def test_key_that_is_a_directory(tmp_path, capsys):
+    """A directory in the key's place is not a key, for verify (exit 10) and checkpoint
+    (exit 2), rather than a traceback (finding 8)."""
+    directory = install_fixture("valid/session", tmp_path / "ledger")
+    key_path = directory / anchor.KEY_FILE
+    key_path.mkdir()
+    trailer = CASES["extends"]["trailer"]
+    code, out, err = run(capsys, "verify", "--ledger-dir", str(directory), "--anchor", trailer)
+    assert (code, err) == (10, "")
+    assert checkpoint_lines(out)[-1] == (
+        f"anchor: {key_path} is not a checkpoint key; cannot check the signature"
+    )
+    code, out, err = run(capsys, "checkpoint", "--ledger-dir", str(directory))
+    assert (code, out) == (2, "")
+    assert err == (
+        f"polarizer: {key_path} is not a checkpoint key (64 lowercase hex characters and a "
+        "newline)\n"
+    )
+
+
+@POSIX
+def test_key_that_is_a_fifo(tmp_path):
+    """A FIFO in the key's place is refused at once, not waited on: run as a process with a
+    time limit, so a hang fails the test instead of stopping the suite."""
+    directory = install_fixture("valid/session", tmp_path / "ledger")
+    key_path = directory / anchor.KEY_FILE
+    os.mkfifo(key_path)
+    trailer = CASES["extends"]["trailer"]
+    for argv, code in (
+        (["verify", "--ledger-dir", str(directory), "--anchor", trailer], 10),
+        (["checkpoint", "--ledger-dir", str(directory)], 2),
+    ):
+        done = subprocess.run(
+            [sys.executable, "-m", "polarizer", *argv], capture_output=True, text=True, timeout=30
+        )
+        assert done.returncode == code, done.stderr
+        assert f"{key_path} is not a checkpoint key" in done.stdout + done.stderr
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
