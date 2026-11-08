@@ -1,6 +1,6 @@
 [project]
 name = "polarizer"
-version = "0.5.0"
+version = "0.6.0"
 description = "A local MCP proxy that pins tool definitions, holds risky calls for a person, and keeps a verifiable ledger."
 readme = "README.md"
 license = "MIT"
