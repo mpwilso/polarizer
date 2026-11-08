@@ -35,12 +35,12 @@ Other MCP proxies and scanners pin (remember a tool's approved definition and no
 Linux and WSL, with Python 3.11 or later and [uv](https://docs.astral.sh/uv/); macOS has passed CI but no live check.
 
 ```sh
-uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.6.1/polarizer-0.6.1-py3-none-any.whl
+uv tool install https://github.com/mpwilso/polarizer/releases/download/v0.6.2/polarizer-0.6.2-py3-none-any.whl
 polarizer --help
 polarizer drill --calls 10 --condition guided
 ```
 
-That installs the v0.6.1 release. For the latest code instead, install with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. `polarizer init` writes a config from the MCP config you already use; from the install to a held call in Claude Code: [docs/SETUP.md](docs/SETUP.md).
+That installs the v0.6.2 release. For the latest code instead, install with `uv tool install git+https://github.com/mpwilso/polarizer`, which needs git. `polarizer init` writes a config from the MCP config you already use; from the install to a held call in Claude Code: [docs/SETUP.md](docs/SETUP.md).
 
 To read and decide held calls in your browser, run `polarizer card --config <path>` and open the link it prints. The page shows each held call, what it would touch and a recommendation, and its Allow and Deny are recorded as `polarizer allow` and `polarizer deny` record them.
 

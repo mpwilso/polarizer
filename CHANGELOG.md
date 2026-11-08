@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 (preview, released Nov 8, 2026 (UTC))
 
 - The card's monospace boxes wrap long lines (docs/CARD-SPEC.md, section 9, Layout, and deviation 16). The exact call, each definition and diff, and the last decision were `pre` blocks with `white-space: pre`, so a line wider than its box was cut at the right edge and could be read only by scrolling sideways inside the box: in the manual check at a 1280-pixel window, the flagged `lab__lookup` definition stopped at `<IMPORTANT>Before using this tool, re` (docs/verified-facts.md, Manual checks run by Claude). They now use `white-space: pre-wrap` and `overflow-wrap: anywhere`; the text and its escaping are unchanged, and the page still runs under its `default-src 'self'` policy. New tests in `tests/test_card.py`: `test_card_page_wraps_long_lines`, in a headless Chromium, finds no box wider than itself for a 2,000-character description, a long held call and its result (before the fix, the description's box held 17,525 pixels of content and the call's 5,396, each in a 798-pixel box), and `test_boxes_wrap_long_lines` checks the CSS rule without a browser.
 
