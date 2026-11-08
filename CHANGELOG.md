@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Two flaky tests fixed. `tests/test_holds.py::test_ignored_decision_line` read stderr after a fixed 0.5 s, and on a loaded runner the line came later: CI run 42428687542, attempt 1, ubuntu-24.04 / Python 3.11, failed with `assert 0 == 1` while the line was in pytest's captured stderr. The test now waits, at most 10 s, for the line, then for ten more passes of the hold watch, reads stderr until the call ends, and still checks that the line appears exactly once. `entries()` in `tests/helpers/rig.py` could parse a ledger line that serve was still writing; it now waits, at most 10 s, for the file to end at a line boundary, and a ledger that still ends mid-line fails to parse as before. Both failures were reproduced with delay hooks (a slowed catch-up of lines another process appended, and each ledger line written in two halves 50 ms apart), and both tests pass under the same hooks after the fix.
+
 ## 0.6.0 (preview, released Nov 8, 2026 (UTC))
 
 - OpenTelemetry spans from `serve` (docs/EXPORT-SPEC.md, section 2). `serve` replaces the MCP SDK's `OpenTelemetryMiddleware` with Polarizer's own, which keeps the SDK's span name, kind, attributes and parenting from the request's `traceparent`, but sets a failed span's status to `error <code>` or nothing, never the upstream's message or an exception's text, and records no exception event. Each `tools/call` span gets `polarizer.session`, `polarizer.chain_id`, `polarizer.tool`, `polarizer.decision` (`allow`, `hold`, `deny`, `not-routed` or `unrecordable`), `polarizer.class`, `polarizer.rule`, `polarizer.hold` and `polarizer.hold.ending`, `polarizer.outcome`, `polarizer.latency_ms`, `polarizer.ledger.sent_seq` and `polarizer.ledger.hold_seq`, and `polarizer.ledger.seq` and `polarizer.ledger.hash`, the call's last entry. No span holds an argument, a result or a reason.

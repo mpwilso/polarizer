@@ -209,10 +209,19 @@ def test_ignored_decision_line(tmp_path, capsys):
 
     async def main():
         async with rig.proxied(ld, specs, policy=pol, **FAST) as (client, gw):
+            passes = []  # one per pass of the hold watch, each a chance to print the line again
+            wake = gw._wake_holds
+
+            def counted():
+                wake()
+                passes.append(None)
+
+            gw._wake_holds = counted
             async with anyio.create_task_group() as tasks:
                 calls = Calls(client, tasks)
                 calls.start("a")
                 [hold] = await rig.holds_created(ld, 1)
+                line = f"polarizer: ignored a decision for hold {hold} with another args_commit\n"
                 capsys.readouterr()
                 other = LedgerWriter.open(ld)
                 other.append(
@@ -221,14 +230,25 @@ def test_ignored_decision_line(tmp_path, capsys):
                      "actor": "person", "reason": None},
                 ).result()  # fmt: skip
                 other.close()
-                await anyio.sleep(0.5)
-                err = capsys.readouterr().err
+                err = ""
+
+                def told() -> bool:
+                    nonlocal err
+                    err += capsys.readouterr().err
+                    return line in err
+
+                # The line comes once the watch adopts the decision, which a loaded runner can
+                # delay past any fixed wait (CI run 42428687542): wait for it, then for ten
+                # more passes of the watch, and keep reading stderr until the call ends.
+                await rig.until(told, 10)
+                seen = len(passes)
+                await rig.until(lambda: len(passes) >= seen + 10, 10)
                 await anyio.to_thread.run_sync(rig.decide_hold, ld, hold, "deny")
                 await calls.result("a")
-            return hold, err
+            err += capsys.readouterr().err
+            return line, err
 
-    hold, err = anyio.run(main)
-    line = f"polarizer: ignored a decision for hold {hold} with another args_commit\n"
+    line, err = anyio.run(main)
     assert err.count(line) == 1
 
 

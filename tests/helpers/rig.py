@@ -255,8 +255,17 @@ def wait_for(condition, seconds: float = 30, step: float = 0.01) -> None:
         time.sleep(step)
 
 
-def entries(ledger_dir: Path) -> list[dict]:
-    raw = (Path(ledger_dir) / "ledger.jsonl").read_bytes()
+def entries(ledger_dir: Path, seconds: float = 10) -> list[dict]:
+    """Every entry in the ledger. A writer in another process or thread (serve, a gateway's
+    writer) may be partway through its last line, so wait, at most `seconds`, for the file to
+    end at a line boundary: a half-written line is never parsed. A ledger that still ends
+    mid-line after that fails to parse, as before."""
+    path = Path(ledger_dir) / "ledger.jsonl"
+    deadline = time.monotonic() + seconds
+    raw = path.read_bytes()
+    while raw and not raw.endswith(b"\n") and time.monotonic() < deadline:
+        time.sleep(0.005)
+        raw = path.read_bytes()
     return [json.loads(line) for line in raw.splitlines()]
 
 
